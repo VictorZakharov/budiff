@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 
@@ -17,6 +18,9 @@ public sealed partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            // Closing the main window ends the process even if a secondary window
+            // (e.g. the floating diff) is somehow still around.
+            desktop.ShutdownMode = ShutdownMode.OnMainWindowClose;
             var args = desktop.Args ?? Array.Empty<string>();
             var gitRoot = args.Any(a => a.Equals("--gitroot", StringComparison.OrdinalIgnoreCase)
                                         || a.Equals("--repo", StringComparison.OrdinalIgnoreCase)

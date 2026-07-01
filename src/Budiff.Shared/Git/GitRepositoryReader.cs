@@ -83,6 +83,33 @@ public static class GitRepositoryReader
         }, Array.Empty<GitReferenceOption>());
     }
 
+    // Branches only (plus HEAD) - the diff base picker. Head is always the working
+    // tree or HEAD, so no commit or working-tree entries here.
+    public static IReadOnlyList<GitReferenceOption> GetBranchOptions(string repositoryRoot)
+    {
+        return WithRepo(repositoryRoot, repo =>
+        {
+            var options = new List<GitReferenceOption> { new("HEAD", "HEAD") };
+
+            var currentBranch = repo.Head?.FriendlyName;
+            foreach (var branch in repo.Branches
+                         .Where(b => !b.FriendlyName.EndsWith("/HEAD", StringComparison.Ordinal))
+                         .OrderBy(b => b.IsRemote)
+                         .ThenBy(b => b.FriendlyName, StringComparer.OrdinalIgnoreCase))
+            {
+                var label = !branch.IsRemote && branch.FriendlyName == currentBranch
+                    ? branch.FriendlyName + " (current)"
+                    : branch.FriendlyName;
+                if (options.All(o => !string.Equals(o.Id, branch.FriendlyName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    options.Add(new GitReferenceOption(branch.FriendlyName, label));
+                }
+            }
+
+            return (IReadOnlyList<GitReferenceOption>)options;
+        }, Array.Empty<GitReferenceOption>());
+    }
+
     public static ChangeSet ListChanges(GitRepositoryScope scope, DiffTarget target)
     {
         return WithRepo(scope.RepositoryRoot, repo =>

@@ -25,6 +25,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private string _startPath;
     private bool _gitRoot;
     private GitRepositoryScope? _scope;
+    private ChangedFile? _openDiffFile;
 
     public MainWindowViewModel(string startPath, bool gitRoot)
     {
@@ -40,8 +41,6 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public CodeAnalysisPanelViewModel Analysis { get; }
 
     public ObservableCollection<GitReferenceOption> BaseRefs { get; } = new();
-
-    public ObservableCollection<GitReferenceOption> HeadRefs { get; } = new();
 
     public DiffViewModel Diff { get; } = new();
 
@@ -72,8 +71,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     private GitReferenceOption? _selectedBaseRef;
 
+    // OFF = compare against HEAD only, i.e. "as if my uncommitted changes were
+    // not made yet". ON (default) = compare against what's on disk.
     [ObservableProperty]
-    private GitReferenceOption? _selectedHeadRef;
+    private bool _includeWorkingTree = true;
 
     [ObservableProperty]
     private ChangedFileVm? _selectedFile;
@@ -108,6 +109,22 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         IsDiffOpen = false;
         IsTreeCollapsed = false;
+        _openDiffFile = null;
+    }
+
+    // Re-runs the open diff against the current base / working-tree choice.
+    private void ReloadOpenDiff()
+    {
+        if (_scope is null || _openDiffFile is null || !IsDiffOpen)
+        {
+            return;
+        }
+
+        var scope = _scope;
+        var file = _openDiffFile;
+        var target = CurrentTarget();
+        Diff.Subtitle = target.Display;
+        Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(scope, file, target));
     }
 
     [RelayCommand]
@@ -119,19 +136,21 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     public string FileCountText => FileCount == 1 ? "1 file" : $"{FileCount} files";
 
+    // Base and the working-tree toggle affect the drill-in diff only; the
+    // bird's-eye is governed by the period filter.
     partial void OnSelectedBaseRefChanged(GitReferenceOption? value)
     {
         if (!_suppressRefresh)
         {
-            _ = RefreshAsync();
+            ReloadOpenDiff();
         }
     }
 
-    partial void OnSelectedHeadRefChanged(GitReferenceOption? value)
+    partial void OnIncludeWorkingTreeChanged(bool value)
     {
         if (!_suppressRefresh)
         {
-            _ = RefreshAsync();
+            ReloadOpenDiff();
         }
     }
 
@@ -148,14 +167,23 @@ public sealed partial class MainWindowViewModel : ObservableObject
         {
             _scope = GitRepositoryReader.Open(startPath, gitRoot);
         }
-        catch (Exception ex)
+        catch
         {
+            // Not a git repository: fall back to the plain folder analysis. The
+            // analysis panel already handles GitAvailable=false (no churn columns).
+            _scope = null;
             Files.Clear();
             FileCount = 0;
-            RepoTitle = "Not a git repository";
-            ScopeTitle = startPath;
-            StatusText = ex.Message;
-            Diff.SetPlaceholder(ex.Message);
+            BaseRefs.Clear();
+            var folderName = Path.GetFileName(Path.TrimEndingDirectorySeparator(startPath));
+            RepoTitle = string.IsNullOrEmpty(folderName) ? startPath : folderName;
+            WindowTitle = "budiff - " + RepoTitle;
+            ScopeTitle = "folder - not a git repository";
+            IsGitRootScope = true;
+            CloseDiff();
+            StatusText = "Folder analysis only (no git repository).";
+            Diff.SetPlaceholder("Not a git repository - diffs unavailable.");
+            await Analysis.LoadAsync(startPath);
             return;
         }
 
@@ -207,20 +235,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
         try
         {
             BaseRefs.Clear();
-            HeadRefs.Clear();
-            var refs = GitRepositoryReader.GetReferenceOptions(repositoryRoot);
-            foreach (var item in refs.Where(r => !r.IsWorkingTree))
+            foreach (var item in GitRepositoryReader.GetBranchOptions(repositoryRoot))
             {
                 BaseRefs.Add(item);
             }
 
-            foreach (var item in refs)
-            {
-                HeadRefs.Add(item);
-            }
-
             SelectedBaseRef = BaseRefs.FirstOrDefault(r => r.Id == "HEAD") ?? BaseRefs.FirstOrDefault();
-            SelectedHeadRef = HeadRefs.FirstOrDefault(r => r.IsWorkingTree) ?? HeadRefs.FirstOrDefault();
         }
         finally
         {
@@ -231,10 +251,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private DiffTarget CurrentTarget()
     {
         var baseRef = SelectedBaseRef?.Id ?? "HEAD";
-        var head = SelectedHeadRef;
-        return head is null || head.IsWorkingTree
+        return IncludeWorkingTree
             ? new DiffTarget(baseRef, null, HeadIsWorkingTree: true)
-            : new DiffTarget(baseRef, head.Id, HeadIsWorkingTree: false);
+            : new DiffTarget(baseRef, "HEAD", HeadIsWorkingTree: false);
     }
 
     private void LoadSelectedDiff(ChangedFileVm? value)
@@ -249,6 +268,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         Diff.Subtitle = target.Display;
         Diff.Extension = Path.GetExtension(value.Path);
         var file = value.Model;
+        _openDiffFile = file;
         IsDiffOpen = true;
         Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(_scope, file, target));
     }
@@ -266,6 +286,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         Diff.Title = repoPath;
         Diff.Subtitle = target.Display;
         Diff.Extension = Path.GetExtension(relativePath);
+        _openDiffFile = file;
         IsDiffOpen = true;
         Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(_scope, file, target));
         return Task.CompletedTask;

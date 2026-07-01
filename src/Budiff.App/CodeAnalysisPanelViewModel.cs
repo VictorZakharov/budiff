@@ -18,7 +18,7 @@ namespace Budiff.App;
 
 public sealed record GroupingOption(string Label, AnalysisGrouping Value);
 
-public sealed record PeriodOption(string Label, int? Days);
+public sealed record PeriodOption(string Label, int? Days, bool IsCustom = false);
 
 public sealed partial class ExtensionFilterItem : ObservableObject
 {
@@ -46,6 +46,14 @@ public sealed partial class CodeAnalysisRow : ObservableObject
 {
     [ObservableProperty]
     private bool _isExpanded;
+
+    // In-place search state: rows are hidden/highlighted without rebuilding the
+    // tree, so the TreeView keeps its containers and search stays instant.
+    [ObservableProperty]
+    private bool _isSearchVisible = true;
+
+    [ObservableProperty]
+    private IReadOnlyList<NameRun>? _nameRuns;
 
     public required string Name { get; init; }
 
@@ -77,8 +85,6 @@ public sealed partial class CodeAnalysisRow : ObservableObject
 
     public double BarFraction { get; init; }
 
-    public IBrush? NameBackground { get; init; }
-
     public ObservableCollection<CodeAnalysisRow> Children { get; } = new();
 
     public IEnumerable<CodeAnalysisRow> SelfAndDescendants()
@@ -96,7 +102,6 @@ public sealed partial class CodeAnalysisRow : ObservableObject
 
 public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 {
-    private static readonly IBrush HighlightBg = new ImmutableSolidColorBrush(Color.Parse("#88FFD166"));
     private readonly Func<string, string, Task> _openFile;
     private readonly HashSet<string> _expanded = new(StringComparer.OrdinalIgnoreCase);
     private string _root = string.Empty;
@@ -108,6 +113,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     private bool _lastWasSearching;
     private string _query = string.Empty;
     private PeriodOption _appliedPeriod = null!;
+    private int? _appliedDays;
     private double _msPerCommit;
     private int _appliedCommitCount;
 
@@ -192,6 +198,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         new PeriodOption("Last week", 7),
         new PeriodOption("Last month", 30),
         new PeriodOption("Last 3 months", 90),
+        new PeriodOption("Custom...", null, IsCustom: true),
     };
 
     private PeriodOption DefaultPeriod => Periods.First(p => p.Days == 30);
@@ -216,7 +223,30 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
     public string AuthorsGlyph => Glyph(AnalysisSortKey.Authors);
 
-    private int? SinceDays => SelectedPeriod.Days;
+    [ObservableProperty]
+    private bool _isCustomPeriod;
+
+    [ObservableProperty]
+    private string _customDaysText = "14";
+
+    private int? SinceDays
+    {
+        get
+        {
+            if (!SelectedPeriod.IsCustom)
+            {
+                return SelectedPeriod.Days;
+            }
+
+            // 0 = all time; invalid input falls back to the last applied window.
+            if (int.TryParse(CustomDaysText, out var days) && days >= 0)
+            {
+                return days == 0 ? null : days;
+            }
+
+            return _appliedDays;
+        }
+    }
 
     private bool Historical => SinceDays.HasValue;
 
@@ -241,6 +271,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         var snapshot = await Task.Run(() => CodeAnalysisRepositoryReader.Load(root, days));
         RecordTiming(sw.ElapsedMilliseconds, snapshot.History?.CommitCount ?? 0);
         _appliedPeriod = SelectedPeriod;
+        _appliedDays = days;
         LoadFrom(snapshot.Scan, snapshot.History);
         IsScanning = false;
     }
@@ -364,8 +395,6 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             return;
         }
 
-        _query = SearchText.Trim();
-        _searching = _query.Length > 0;
         CaptureExpansion();
 
         var included = Extensions.Where(x => x.Included).Select(x => x.Extension).ToHashSet(StringComparer.Ordinal);
@@ -373,6 +402,8 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         var pickedAuthors = Authors.Where(a => a.Included).Select(a => a.Author).ToHashSet(StringComparer.OrdinalIgnoreCase);
         ISet<string>? authorFilter = Authors.Count > 0 && pickedAuthors.Count < Authors.Count ? pickedAuthors : null;
 
+        // The tree is always built UNFILTERED by search; the search pass below hides
+        // rows in place so keystrokes never rebuild the tree (instant search).
         var root = AnalysisTreeBuilder.Build(
             _scan,
             _history,
@@ -380,13 +411,13 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             SortKey,
             SortAscending,
             extensionFilter,
-            _query,
+            search: null,
             allTime: !Historical,
             includedAuthors: authorFilter);
 
         Roots = new ObservableCollection<CodeAnalysisRow>(root.Children.Select(BuildRow));
         SetSummary(root);
-        _lastWasSearching = _searching;
+        ApplySearch();
     }
 
     private void CaptureExpansion()
@@ -409,10 +440,86 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         }
     }
 
+    // In-place search: walks the existing rows setting visibility, the substring
+    // highlight, and match-path expansion via observable properties - the TreeView
+    // keeps its containers, so this is instant even on large trees.
+    private void ApplySearch()
+    {
+        var query = SearchText.Trim();
+        var searching = query.Length > 0;
+        if (searching && !_lastWasSearching)
+        {
+            CaptureExpansion();
+        }
+
+        _query = query;
+        _searching = searching;
+
+        foreach (var row in Roots)
+        {
+            ApplySearchToRow(row, ancestorMatched: false);
+        }
+
+        if (!searching && _lastWasSearching)
+        {
+            foreach (var row in Roots.SelectMany(r => r.SelfAndDescendants()))
+            {
+                if (!row.IsFile)
+                {
+                    row.IsExpanded = _expanded.Contains(row.RelativePath);
+                }
+            }
+        }
+
+        _lastWasSearching = searching;
+    }
+
+    // Returns true when the row or any descendant matches the query.
+    private bool ApplySearchToRow(CodeAnalysisRow row, bool ancestorMatched)
+    {
+        var index = _searching ? row.Name.IndexOf(_query, StringComparison.OrdinalIgnoreCase) : -1;
+        var matched = index >= 0;
+        var descendantMatch = false;
+        foreach (var child in row.Children)
+        {
+            descendantMatch |= ApplySearchToRow(child, ancestorMatched || matched);
+        }
+
+        row.NameRuns = BuildNameRuns(row.Name, index, _query.Length);
+        row.IsSearchVisible = !_searching || matched || descendantMatch || ancestorMatched;
+        if (_searching && !row.IsFile)
+        {
+            row.IsExpanded = descendantMatch;
+        }
+
+        return matched || descendantMatch;
+    }
+
+    private static IReadOnlyList<NameRun> BuildNameRuns(string name, int index, int length)
+    {
+        if (index < 0 || length <= 0 || index + length > name.Length)
+        {
+            return new[] { new NameRun(name, false) };
+        }
+
+        var runs = new List<NameRun>(3);
+        if (index > 0)
+        {
+            runs.Add(new NameRun(name[..index], false));
+        }
+
+        runs.Add(new NameRun(name.Substring(index, length), true));
+        if (index + length < name.Length)
+        {
+            runs.Add(new NameRun(name[(index + length)..], false));
+        }
+
+        return runs;
+    }
+
     private CodeAnalysisRow BuildRow(AnalysisNode node)
     {
         var showGit = _history is not null;
-        var match = _searching && node.Name.Contains(_query, StringComparison.OrdinalIgnoreCase);
         var row = new CodeAnalysisRow
         {
             Name = node.Name,
@@ -430,8 +537,8 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             CommitsText = showGit && node.CommitCount > 0 ? N(node.CommitCount) : string.Empty,
             AuthorsText = showGit && node.AuthorCount > 0 ? N(node.AuthorCount) : string.Empty,
             BarFraction = node.BarFraction,
-            IsExpanded = _searching ? !node.IsFile : _expanded.Contains(node.RelativePath),
-            NameBackground = match ? HighlightBg : null,
+            IsExpanded = _expanded.Contains(node.RelativePath),
+            NameRuns = new[] { new NameRun(node.Name, false) },
         };
 
         foreach (var child in node.Children)
@@ -520,11 +627,35 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
     partial void OnSortAscendingChanged(bool value) => NotifySortGlyphs();
 
-    partial void OnSearchTextChanged(string value) => Rebuild();
+    partial void OnSearchTextChanged(string value)
+    {
+        if (_ready && !_suspendRebuild)
+        {
+            ApplySearch();
+        }
+    }
 
     partial void OnSelectedGroupingChanged(GroupingOption value) => Rebuild();
 
-    partial void OnSelectedPeriodChanged(PeriodOption value) => _ = ReloadHistoryAsync();
+    partial void OnSelectedPeriodChanged(PeriodOption value)
+    {
+        IsCustomPeriod = value.IsCustom;
+        _ = ReloadHistoryAsync();
+    }
+
+    partial void OnCustomDaysTextChanged(string value)
+    {
+        if (!IsCustomPeriod || _suspendRebuild)
+        {
+            return;
+        }
+
+        // Reload only for a valid, actually-changed window.
+        if (int.TryParse(value, out var days) && days >= 0 && (days == 0 ? null : (int?)days) != _appliedDays)
+        {
+            _ = ReloadHistoryAsync();
+        }
+    }
 
     private async Task ReloadHistoryAsync()
     {
@@ -558,6 +689,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         _history = await Task.Run(() => GitHistory.Load(_root, days));
         RecordTiming(sw.ElapsedMilliseconds, _history?.CommitCount ?? 0);
         _appliedPeriod = SelectedPeriod;
+        _appliedDays = days;
         IsScanning = false;
         Rebuild();
     }
