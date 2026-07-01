@@ -1,0 +1,14 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <SolidColorBrush x:Key="BudiffAddedLineBackgroundBrush" Color="#3331C36B" />
+    <SolidColorBrush x:Key="BudiffRemovedLineBackgroundBrush" Color="#33E05252" />
+    <SolidColorBrush x:Key="BudiffFunnelAddedBrush" Color="#5531C36B" />
+    <SolidColorBrush x:Key="BudiffFunnelRemovedBrush" Color="#55E05252" />
+    <SolidColorBrush x:Key="BudiffFunnelModifiedBrush" Color="#55E2C08D" />
+    <SolidColorBrush x:Key="BudiffEditorBackgroundBrush" Color="#1E1F22" />
+    <SolidColorBrush x:Key="BudiffToolbarBrush" Color="#3C3F41" />
+    <SolidColorBrush x:Key="BudiffBorderBrush" Color="#1E1F22" />
+    <SolidColorBrush x:Key="BudiffTextBrush" Color="#DFE1E5" />
+    <SolidColorBrush x:Key="BudiffMutedTextBrush" Color="#9DA0A8" />
+    <SolidColorBrush x:Key="BudiffDefaultSyntaxBrush" Color="#D4D4D4" />
+</ResourceDictionary>

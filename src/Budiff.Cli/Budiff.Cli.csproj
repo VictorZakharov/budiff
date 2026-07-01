@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>budiff</AssemblyName>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>budiff</ToolCommandName>
+    <PackageId>budiff</PackageId>
+    <Description>ls for diffs: a folder-scoped terminal diff viewer.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="LibGit2Sharp" Version="0.31.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Budiff.Core\Budiff.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Budiff.Shared\Git\*.cs" LinkBase="Shared\Git" />
+  </ItemGroup>
+</Project>
