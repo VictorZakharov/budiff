@@ -21,4 +21,21 @@
   <ItemGroup>
     <Compile Include="..\Budiff.Shared\Git\*.cs" LinkBase="Shared\Git" />
   </ItemGroup>
+
+  <!-- Ship the GUI inside the tool package so `budiff -i` works from any folder:
+       publish Budiff.App and pack the publish output under tools/<tfm>/any/gui/,
+       where AppLauncher probes for it. -->
+  <Target Name="PublishGuiForPack" BeforeTargets="_GetPackageFiles">
+    <PropertyGroup>
+      <GuiPublishDir>$(MSBuildProjectDirectory)\obj\gui-publish\</GuiPublishDir>
+    </PropertyGroup>
+    <MSBuild Projects="..\Budiff.App\Budiff.App.csproj"
+             Targets="Publish"
+             Properties="Configuration=$(Configuration);PublishDir=$(GuiPublishDir)" />
+    <ItemGroup>
+      <None Include="$(GuiPublishDir)**\*"
+            Pack="true"
+            PackagePath="tools/$(TargetFramework)/any/gui/%(RecursiveDir)" />
+    </ItemGroup>
+  </Target>
 </Project>

@@ -888,24 +888,42 @@ internal static class AppLauncher
             return 0;
         }
 
+        // The GUI ships inside the tool package under gui/ (see Budiff.Cli.csproj);
+        // a bare exe next to the CLI covers hand-assembled layouts.
         var baseDir = AppContext.BaseDirectory;
-        foreach (var exe in new[] { "Budiff.App.exe", "Budiff.App" })
+        foreach (var name in new[] { "Budiff.App.exe", "Budiff.App" })
         {
-            var path = Path.Combine(baseDir, exe);
-            if (File.Exists(path) && TryStart(path, start, options.GitRoot))
+            foreach (var path in new[] { Path.Combine(baseDir, "gui", name), Path.Combine(baseDir, name) })
             {
-                return 0;
+                if (File.Exists(path) && TryStart(path, start, options.GitRoot))
+                {
+                    return 0;
+                }
             }
         }
 
-        var devProject = FindDevAppProject(Directory.GetCurrentDirectory());
-        if (devProject is not null)
+        // No apphost for this OS in the package (it is produced on the packing
+        // machine) - run the assembly through the dotnet host instead.
+        var bundledDll = Path.Combine(baseDir, "gui", "Budiff.App.dll");
+        if (File.Exists(bundledDll) && TryStartDll(bundledDll, start, options.GitRoot))
         {
-            // UseShellExecute so the long-lived `dotnet run` gets its own console
-            // instead of tying up the caller's terminal until the GUI closes.
-            var args = $"run --project \"{devProject}\" -- \"{start}\"" + (options.GitRoot ? " --gitroot" : string.Empty);
-            Process.Start(new ProcessStartInfo("dotnet", args) { UseShellExecute = true });
             return 0;
+        }
+
+        // Dev fallback: inside the budiff repo, launch the exe a normal build
+        // already produced. Never build here - `dotnet run` was slow and opened
+        // an extra console window.
+        var appDir = FindDevAppDirectory(Directory.GetCurrentDirectory());
+        if (appDir is not null)
+        {
+            var built = FindNewestBuiltApp(appDir);
+            if (built is not null && TryStart(built, start, options.GitRoot))
+            {
+                return 0;
+            }
+
+            Console.Error.WriteLine($"Budiff.App at {appDir} is not built. Run: dotnet build");
+            return 1;
         }
 
         Console.Error.WriteLine("Could not find Budiff.App. Set BUDIFF_APP_PATH to the GUI executable.");
@@ -928,13 +946,27 @@ internal static class AppLauncher
         }
     }
 
-    private static string? FindDevAppProject(string start)
+    private static bool TryStartDll(string assemblyPath, string startPath, bool gitRoot)
+    {
+        try
+        {
+            var args = $"\"{assemblyPath}\" \"{startPath}\"" + (gitRoot ? " --gitroot" : string.Empty);
+            Process.Start(new ProcessStartInfo("dotnet", args) { UseShellExecute = true });
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string? FindDevAppDirectory(string start)
     {
         var dir = new DirectoryInfo(start);
         while (dir is not null)
         {
-            var candidate = Path.Combine(dir.FullName, "src", "Budiff.App", "Budiff.App.csproj");
-            if (File.Exists(candidate))
+            var candidate = Path.Combine(dir.FullName, "src", "Budiff.App");
+            if (File.Exists(Path.Combine(candidate, "Budiff.App.csproj")))
             {
                 return candidate;
             }
@@ -943,5 +975,19 @@ internal static class AppLauncher
         }
 
         return null;
+    }
+
+    internal static string? FindNewestBuiltApp(string appDirectory)
+    {
+        var bin = Path.Combine(appDirectory, "bin");
+        if (!Directory.Exists(bin))
+        {
+            return null;
+        }
+
+        return Directory.EnumerateFiles(bin, "Budiff.App*", SearchOption.AllDirectories)
+            .Where(p => Path.GetFileName(p) is "Budiff.App.exe" or "Budiff.App")
+            .OrderByDescending(File.GetLastWriteTimeUtc)
+            .FirstOrDefault();
     }
 }
