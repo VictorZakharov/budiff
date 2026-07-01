@@ -55,6 +55,53 @@ public sealed partial class CodeAnalysisRow : ObservableObject
     [ObservableProperty]
     private IReadOnlyList<NameRun>? _nameRuns;
 
+    private int _highlightIndex = int.MinValue;
+    private int _highlightLength;
+
+    // Search pass scratch: does this row or any descendant match the query.
+    public bool HasDescendantMatch { get; set; }
+
+    // Rebuilding NameRuns notifies every realized row's inline presenter, so
+    // skip it when the highlight span did not actually change.
+    public void SetNameHighlight(int index, int length)
+    {
+        if (index < 0)
+        {
+            length = 0;
+        }
+
+        if (_highlightIndex == index && _highlightLength == length)
+        {
+            return;
+        }
+
+        _highlightIndex = index;
+        _highlightLength = length;
+        NameRuns = BuildNameRuns(Name, index, length);
+    }
+
+    private static IReadOnlyList<NameRun> BuildNameRuns(string name, int index, int length)
+    {
+        if (index < 0 || length <= 0 || index + length > name.Length)
+        {
+            return new[] { new NameRun(name, false) };
+        }
+
+        var runs = new List<NameRun>(3);
+        if (index > 0)
+        {
+            runs.Add(new NameRun(name[..index], false));
+        }
+
+        runs.Add(new NameRun(name.Substring(index, length), true));
+        if (index + length < name.Length)
+        {
+            runs.Add(new NameRun(name[(index + length)..], false));
+        }
+
+        return runs;
+    }
+
     public required string Name { get; init; }
 
     public required string RelativePath { get; init; }
@@ -440,6 +487,12 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         }
     }
 
+    // A broad query (the first 1-2 typed characters match almost every name) used
+    // to expand every branch at once, forcing the non-virtualized TreeView to
+    // realize containers for the whole tree in one layout pass - the typing lag.
+    // Only auto-expand once the match set is narrow enough to be worth scanning.
+    internal const int SearchExpandThreshold = 64;
+
     // In-place search: walks the existing rows setting visibility, the substring
     // highlight, and match-path expansion via observable properties - the TreeView
     // keeps its containers, so this is instant even on large trees.
@@ -455,12 +508,24 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         _query = query;
         _searching = searching;
 
+        var matches = 0;
         foreach (var row in Roots)
         {
-            ApplySearchToRow(row, ancestorMatched: false);
+            ApplySearchToRow(row, ancestorMatched: false, ref matches);
         }
 
-        if (!searching && _lastWasSearching)
+        if (searching)
+        {
+            var expand = matches <= SearchExpandThreshold;
+            foreach (var row in Roots.SelectMany(r => r.SelfAndDescendants()))
+            {
+                if (!row.IsFile)
+                {
+                    row.IsExpanded = expand ? row.HasDescendantMatch : _expanded.Contains(row.RelativePath);
+                }
+            }
+        }
+        else if (_lastWasSearching)
         {
             foreach (var row in Roots.SelectMany(r => r.SelfAndDescendants()))
             {
@@ -475,46 +540,26 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     }
 
     // Returns true when the row or any descendant matches the query.
-    private bool ApplySearchToRow(CodeAnalysisRow row, bool ancestorMatched)
+    private bool ApplySearchToRow(CodeAnalysisRow row, bool ancestorMatched, ref int matches)
     {
         var index = _searching ? row.Name.IndexOf(_query, StringComparison.OrdinalIgnoreCase) : -1;
         var matched = index >= 0;
+        if (matched)
+        {
+            matches++;
+        }
+
         var descendantMatch = false;
         foreach (var child in row.Children)
         {
-            descendantMatch |= ApplySearchToRow(child, ancestorMatched || matched);
+            descendantMatch |= ApplySearchToRow(child, ancestorMatched || matched, ref matches);
         }
 
-        row.NameRuns = BuildNameRuns(row.Name, index, _query.Length);
+        row.SetNameHighlight(index, _query.Length);
         row.IsSearchVisible = !_searching || matched || descendantMatch || ancestorMatched;
-        if (_searching && !row.IsFile)
-        {
-            row.IsExpanded = descendantMatch;
-        }
+        row.HasDescendantMatch = descendantMatch;
 
         return matched || descendantMatch;
-    }
-
-    private static IReadOnlyList<NameRun> BuildNameRuns(string name, int index, int length)
-    {
-        if (index < 0 || length <= 0 || index + length > name.Length)
-        {
-            return new[] { new NameRun(name, false) };
-        }
-
-        var runs = new List<NameRun>(3);
-        if (index > 0)
-        {
-            runs.Add(new NameRun(name[..index], false));
-        }
-
-        runs.Add(new NameRun(name.Substring(index, length), true));
-        if (index + length < name.Length)
-        {
-            runs.Add(new NameRun(name[(index + length)..], false));
-        }
-
-        return runs;
     }
 
     private CodeAnalysisRow BuildRow(AnalysisNode node)
