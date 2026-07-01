@@ -13,7 +13,10 @@ namespace Budiff.Git;
 public static class GitHistory
 {
     private const char Sep = (char)0x1f;
-    private const string EmptyTreeSha = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+    // git's well-known empty tree: the window base when the whole history sits
+    // inside the analysis window (diffing against it shows everything as added).
+    public const string EmptyTreeSha = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
     public static bool IsRepository(string root)
         => GitCli.TryRun(root, out var output, "rev-parse", "--is-inside-work-tree")
@@ -163,18 +166,27 @@ public static class GitHistory
         return NormalizePath(path[(arrow + 4)..]);
     }
 
-    private static void ApplyWindowNetDiff(string root, int days, HistoryResult result, CancellationToken ct)
+    // The commit the windowed churn diffs from: the last commit OLDER than the
+    // window, or the empty tree when the whole history is inside the window.
+    // The GUI's period-aligned drill-in uses the same boundary so the diff pane
+    // shows exactly what the Added/Removed columns counted.
+    public static string FindWindowBaseCommit(string root, int days)
     {
-        var baseRef = EmptyTreeSha;
         if (GitCli.TryRun(root, out var shaOutput, "rev-list", "-1", "--before=" + days + " days ago", "HEAD", "--", "."))
         {
             var sha = shaOutput.Trim();
             if (sha.Length > 0)
             {
-                baseRef = sha;
+                return sha;
             }
         }
 
+        return EmptyTreeSha;
+    }
+
+    private static void ApplyWindowNetDiff(string root, int days, HistoryResult result, CancellationToken ct)
+    {
+        var baseRef = FindWindowBaseCommit(root, days);
         if (!GitCli.TryRun(root, out var diff, ct, "-c", "core.quotePath=false", "diff", "--relative", "--numstat", "--no-renames", baseRef, "HEAD", "--", "."))
         {
             return;

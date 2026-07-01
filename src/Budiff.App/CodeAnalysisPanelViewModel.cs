@@ -297,6 +297,17 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
     private bool Historical => SinceDays.HasValue;
 
+    // The window the visible analysis was actually computed with (null = all
+    // time). The drill-in diff aligns its default base to this.
+    public int? AppliedSinceDays => _appliedDays;
+
+    // The currently SELECTED window (may not be applied yet).
+    public int? SelectedSinceDays => SinceDays;
+
+    // Raised after a (re)load applied a new history window - lets the shell
+    // re-run an open period-aligned diff.
+    public event Action? HistoryApplied;
+
     public async Task LoadAsync(string root)
     {
         _root = root;
@@ -321,6 +332,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         _appliedDays = days;
         LoadFrom(snapshot.Scan, snapshot.History);
         IsScanning = false;
+        HistoryApplied?.Invoke();
     }
 
     public void LoadFrom(ScanResult scan, HistoryResult? history)
@@ -737,6 +749,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         _appliedDays = days;
         IsScanning = false;
         Rebuild();
+        HistoryApplied?.Invoke();
     }
 
     private void RecordTiming(long elapsedMs, int commits)

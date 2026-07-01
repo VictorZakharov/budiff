@@ -27,13 +27,28 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private GitRepositoryScope? _scope;
     private ChangedFile? _openDiffFile;
 
+    // Sentinel base option: resolves to the same boundary commit the windowed
+    // churn diffs from, so the drill-in shows what the Added/Removed columns
+    // counted. Default while an analysis window is active.
+    internal const string PeriodStartId = "(period-start)";
+
     public MainWindowViewModel(string startPath, bool gitRoot)
     {
         _startPath = startPath;
         _gitRoot = gitRoot;
         Diff.SyntaxHighlighter = new TextMateSyntaxHighlighter();
         Analysis = new CodeAnalysisPanelViewModel(OpenAnalysisFileAsync);
+        Analysis.HistoryApplied += OnHistoryApplied;
         _ = LoadAsync(startPath, gitRoot);
+    }
+
+    // Period changed: a period-aligned diff must follow the new window.
+    private void OnHistoryApplied()
+    {
+        if (SelectedBaseRef?.Id == PeriodStartId)
+        {
+            ReloadOpenDiff();
+        }
     }
 
     public ObservableCollection<ChangedFileVm> Files { get; } = new();
@@ -123,7 +138,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         var scope = _scope;
         var file = _openDiffFile;
         var target = CurrentTarget();
-        Diff.Subtitle = target.Display;
+        Diff.Subtitle = DescribeTarget(target);
         Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(scope, file, target));
     }
 
@@ -216,7 +231,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        StatusText = target.Display;
+        StatusText = DescribeTarget(target);
         Diff.SetPlaceholder("Select a file in the bird's-eye to open its diff.");
     }
 
@@ -235,12 +250,16 @@ public sealed partial class MainWindowViewModel : ObservableObject
         try
         {
             BaseRefs.Clear();
+            BaseRefs.Add(new GitReferenceOption(PeriodStartId, "Period start"));
             foreach (var item in GitRepositoryReader.GetBranchOptions(repositoryRoot))
             {
                 BaseRefs.Add(item);
             }
 
-            SelectedBaseRef = BaseRefs.FirstOrDefault(r => r.Id == "HEAD") ?? BaseRefs.FirstOrDefault();
+            // All time is a snapshot, not a window - HEAD is the honest default there.
+            SelectedBaseRef = Analysis.SelectedSinceDays is > 0
+                ? BaseRefs[0]
+                : BaseRefs.FirstOrDefault(r => r.Id == "HEAD") ?? BaseRefs.FirstOrDefault();
         }
         finally
         {
@@ -251,9 +270,36 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private DiffTarget CurrentTarget()
     {
         var baseRef = SelectedBaseRef?.Id ?? "HEAD";
+        if (baseRef == PeriodStartId)
+        {
+            baseRef = ResolvePeriodStart();
+        }
+
         return IncludeWorkingTree
             ? new DiffTarget(baseRef, null, HeadIsWorkingTree: true)
             : new DiffTarget(baseRef, "HEAD", HeadIsWorkingTree: false);
+    }
+
+    private string ResolvePeriodStart()
+    {
+        var days = Analysis.AppliedSinceDays;
+        return _scope is null || days is not > 0
+            ? "HEAD"
+            : GitHistory.FindWindowBaseCommit(_scope.ScopeRoot, days.Value);
+    }
+
+    // "Period start" resolves to a raw sha; describe it instead of printing it.
+    private string DescribeTarget(DiffTarget target)
+    {
+        if (SelectedBaseRef?.Id != PeriodStartId || target.BaseRef == "HEAD")
+        {
+            return target.Display;
+        }
+
+        var baseLabel = target.BaseRef == GitHistory.EmptyTreeSha
+            ? "start of history"
+            : "period start (" + target.BaseRef[..7] + ")";
+        return target.HeadIsWorkingTree ? baseLabel + " vs working tree" : baseLabel + " vs HEAD";
     }
 
     private void LoadSelectedDiff(ChangedFileVm? value)
@@ -265,7 +311,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         var target = CurrentTarget();
         Diff.Title = value.Path;
-        Diff.Subtitle = target.Display;
+        Diff.Subtitle = DescribeTarget(target);
         Diff.Extension = Path.GetExtension(value.Path);
         var file = value.Model;
         _openDiffFile = file;
@@ -284,7 +330,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         var target = CurrentTarget();
         var file = new ChangedFile(repoPath, null, fullPath, Budiff.GitFileState.Modified, new DiffChurn(0, 0), 0, 0, IsBinary: false);
         Diff.Title = repoPath;
-        Diff.Subtitle = target.Display;
+        Diff.Subtitle = DescribeTarget(target);
         Diff.Extension = Path.GetExtension(relativePath);
         _openDiffFile = file;
         IsDiffOpen = true;
