@@ -45,10 +45,12 @@ budiff src/App.cs      # print a side-by-side diff for one changed file
 budiff --base main --head feature/foo --gitroot
 budiff --json          # emit the listing as structured JSON
 budiff src/App.cs --json
+git diff | budiff      # render a unified diff from stdin as side-by-side output
+budiff --stdin         # explicit stdin pager mode
 budiff -i              # open the GUI
 ```
 
-The GUI provides the same changed-file listing, a base/head picker for branch or commit comparisons, and a syntax-highlighted side-by-side diff pane.
+The stdin mode is a pure unified-diff transform; it does not need repository access. The GUI provides the same changed-file listing, a base/head picker for branch or commit comparisons, and a syntax-highlighted side-by-side diff pane.
 
 ## Performance
 
