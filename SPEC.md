@@ -46,9 +46,10 @@ Tagline: *"ls, but for your diffs."*
 - **Drill-in side-by-side diff**: syntax-highlighted, intra-line highlighted, with the Rider-style centre "funnel" connectors, collapse-unchanged, and gap expansion.
 - A **commit / branch picker** so you can diff points other than working-tree-vs-HEAD.
 - Both surfaces in **terminal** (CLI) and **desktop GUI** (`-i` / `Budiff.App`).
+- **MCP server** (`budiff mcp`) over stdio for AI agents, exposing `list_changes`, `get_file_diff`, and `repo_overview` from the same structured git + Core engine.
 - Binary / very-large files: a short placeholder instead of a garbage text diff.
 
-Out of v1 (later, see section 9): the MCP server and deeper agent-specific repo summaries.
+Out of v1 (later, see section 9): deeper agent-specific repo summaries beyond the MCP tools above.
 
 ## 5. Porting source from coderide (Burin)
 
@@ -100,7 +101,7 @@ Reference checkout: `../coderide` (see section 0). Port these files into the bud
 - `budiff --gitroot` -> widen analysis scope to the whole repository (flag name TBD).
 - `budiff -i` -> launch `Budiff.App` on the target.
 - Keep **Avalonia out** of the CLI (reference `Budiff.Core` + a small ANSI renderer) so it stays tiny and Native-AOT-friendly.
-- **Architectural rule:** render the terminal output from a **structured change-model**, never by concatenating ANSI strings ad hoc. Keeping the data model separate from the renderer is what makes `--json` and an MCP server (section 9) cheap to add later.
+- **Architectural rule:** render the terminal output from a **structured change-model**, never by concatenating ANSI strings ad hoc. Keeping the data model separate from the renderer is what made `--json` and the MCP server (section 9) cheap to add.
 
 ## 7. `Budiff.App` (standalone GUI)
 
@@ -118,13 +119,13 @@ Reuse Burin's diff-window look and feel (see `DiffWindow` / `DiffView` under `..
 - `MIT` LICENSE; this `SPEC.md`; a README with a GUI screenshot once available; `.editorconfig`.
 - **ASCII-only code comments** (no em-dashes, curly quotes, ellipses, or arrow glyphs; write `-`, `...`, `->`). Fancy Unicode is fine in on-screen UI strings.
 
-## 9. Future: AI agents as first-class users
+## 9. AI agents as first-class users
 
-budiff should be consumable by AI coding agents, not only humans (agents constantly need "what changed here?" and today parse verbose raw `git diff`). Design v1 so these are cheap to add later:
+budiff is consumable by AI coding agents, not only humans (agents constantly need "what changed here?" and today parse verbose raw `git diff`).
 - **`--json` output** - the listing + diffs as structured JSON (per-file status, `+/-` churn, authors, hunks with intra-line kinds). The single most useful affordance; enabled by the section-6 structured-change-model rule.
 - **Two-tier = token-efficient by design** - the ls-then-drill model is how a context-limited agent should consume changes: cheap overview first, then only the file diffs it needs.
-- **MCP server** (`Budiff.Mcp` / `budiff mcp`) exposing `list_changes(scope)` / `get_file_diff(path, base, head)` / `repo_overview(period)`. Reuses the same Core + git engine; no CLI-text parsing.
-- **Verbosity knobs** (collapse-unchanged, large-file placeholders, `--summary`) so an agent can cap output to its context budget.
+- **MCP server** (`budiff mcp`) exposes `list_changes(scope)` / `get_file_diff(path, base, head)` / `repo_overview(period)` over stdio. It reuses the same Core + git engine; no CLI-text parsing.
+- **Future verbosity knobs** (collapse-unchanged, large-file placeholders, `--summary`) can further cap output to an agent's context budget.
 
 ## 10. Build order
 

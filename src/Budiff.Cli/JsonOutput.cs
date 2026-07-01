@@ -15,15 +15,21 @@ internal static class JsonRenderer
     });
 
     public static void RenderList(ChangeSet changeSet, TextWriter output)
-    {
-        var dto = JsonChangeListDto.From(changeSet);
-        output.WriteLine(JsonSerializer.Serialize(dto, JsonContext.JsonChangeListDto));
-    }
+        => output.WriteLine(SerializeList(changeSet));
 
     public static void RenderDiff(ChangeSet changeSet, ChangedFile file, DiffResult diff, TextWriter output)
+        => output.WriteLine(SerializeDiff(changeSet, file, diff));
+
+    public static string SerializeList(ChangeSet changeSet)
+    {
+        var dto = JsonChangeListDto.From(changeSet);
+        return JsonSerializer.Serialize(dto, JsonContext.JsonChangeListDto);
+    }
+
+    public static string SerializeDiff(ChangeSet changeSet, ChangedFile file, DiffResult diff)
     {
         var dto = JsonFileDiffDto.From(changeSet, file, diff);
-        output.WriteLine(JsonSerializer.Serialize(dto, JsonContext.JsonFileDiffDto));
+        return JsonSerializer.Serialize(dto, JsonContext.JsonFileDiffDto);
     }
 }
 
