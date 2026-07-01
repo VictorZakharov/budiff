@@ -6,6 +6,36 @@
 
 budiff is a folder-scoped, read-only diff viewer. The CLI lists changed files under the current folder by default, including `+/-` churn and author/commit counts, then prints a side-by-side diff when you drill into a file. `--gitroot` widens scope to the whole repository. `-i` opens the desktop GUI on the same target.
 
+## Install
+
+Once published to NuGet:
+
+```sh
+dotnet tool install -g budiff
+```
+
+Release tags also attach self-contained, single-file CLI builds for users without the .NET SDK:
+
+| Platform | Asset |
+| --- | --- |
+| Windows x64 | `budiff-win-x64.zip` |
+| Linux x64 | `budiff-linux-x64.tar.gz` |
+| macOS arm64 | `budiff-osx-arm64.tar.gz` |
+
+One-line install scripts:
+
+```powershell
+irm https://raw.githubusercontent.com/VictorZakharov/budiff/main/scripts/install.ps1 | iex
+```
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/VictorZakharov/budiff/main/scripts/install.sh | sh
+```
+
+Set `BUDIFF_VERSION=v0.1.0` / `BUDIFF_INSTALL_DIR=...` for the shell script, or pass `-Version v0.1.0 -InstallDir ...` to the PowerShell script. Winget and Homebrew manifests are not published yet; the release assets and install scripts are the stable inputs for those manifests.
+
+Native AOT is not enabled for the CLI yet. The CLI depends on LibGit2Sharp and native libgit2, which is not trim/AOT-friendly enough for a reliable first release. The release path is self-contained single-file publishing; AOT can be revisited if the git reader moves behind trim annotations or a git-CLI backend.
+
 ## Usage
 
 ```sh
