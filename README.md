@@ -4,9 +4,13 @@
 
 ![budiff CLI bird's-eye](docs/cli-birdseye.svg)
 
-![budiff GUI screenshot](docs/gui-screenshot.png)
+budiff is a folder-scoped, read-only diff viewer. The CLI opens with a Code Analysis bird's-eye: folders or projects, line/code/blank/comment counts, file counts, period churn, commits, and authors. Drill into a file to print a side-by-side diff. `--gitroot` widens scope to the whole repository. `-i` opens the desktop GUI on the same target:
 
-budiff is a folder-scoped, read-only diff viewer. The CLI opens with a Code Analysis bird's-eye: folders or projects, line/code/blank/comment counts, file counts, period churn, commits, and authors. Drill into a file to print a side-by-side diff. `--gitroot` widens scope to the whole repository. `-i` opens the desktop GUI on the same target.
+![budiff GUI bird's-eye](docs/gui-screenshot.png)
+
+Drilling into a file docks a syntax-highlighted side-by-side diff next to a compact bird's-eye - resizable, collapsible, and able to float into its own window:
+
+![budiff GUI diff drill-in](docs/gui-diff.png)
 
 ## Install
 
@@ -53,7 +57,7 @@ budiff mcp             # run the stdio MCP server for AI agents
 budiff -i              # open the GUI
 ```
 
-The stdin mode is a pure unified-diff transform; it does not need repository access. `budiff mcp` exposes `list_changes`, `get_file_diff`, and `repo_overview` over stdio for MCP-capable AI coding agents. The GUI provides the same bird's-eye, filters, grouping and period controls, a base/head picker for branch or commit comparisons, and a syntax-highlighted side-by-side diff pane.
+The stdin mode is a pure unified-diff transform; it does not need repository access. `budiff mcp` exposes `list_changes`, `get_file_diff`, and `repo_overview` over stdio for MCP-capable AI coding agents. The GUI provides the same bird's-eye, filters, grouping and period controls, and a base/head picker for branch or commit comparisons. The diff pane stays hidden until you drill into a file; it then docks on the right (the bird's-eye compacts to its core columns), the split is resizable, the tree can collapse away entirely, and the diff can pop out into its own window - handy on a second monitor.
 
 Example MCP server config:
 

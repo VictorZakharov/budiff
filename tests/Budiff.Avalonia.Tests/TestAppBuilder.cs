@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Headless;
 using Avalonia.Markup.Xaml.Styling;
 using Avalonia.Themes.Fluent;
+using Material.Icons.Avalonia;
 
 [assembly: Avalonia.Headless.AvaloniaTestApplication(typeof(Budiff.Avalonia.Tests.TestAppBuilder))]
 
@@ -20,7 +21,9 @@ public sealed class TestApp : Application
 {
     public override void Initialize()
     {
+        RequestedThemeVariant = global::Avalonia.Styling.ThemeVariant.Dark;
         Styles.Add(new FluentTheme());
+        Styles.Add(new MaterialIconStyles(null));
         Resources.MergedDictionaries.Add(new ResourceInclude(new Uri("avares://Budiff.Avalonia.Tests"))
         {
             Source = new Uri("avares://Budiff.Avalonia/Themes/BudiffTheme.axaml"),

@@ -1,14 +1,14 @@
 # budiff - v1 specification
 
-This is the canonical scope for budiff v1. It is meant to be self-contained: an implementing agent should not need any other document. It consolidates the design decisions made in the Burin tracker (issues #92 and #93 of the `coderide` repo).
+This is the canonical scope for budiff v1. It is meant to be self-contained: an implementing agent should not need any other document. It consolidates the design decisions made in the Burin tracker (issues #92 and #93 of the `coderide` repository, private at the time of writing).
 
 ## 0. Reference implementation (read the real source)
 
-budiff is **extracted from the Burin IDE**, which lives in the **`coderide`** repository, checked out locally as a **sibling folder**:
+budiff is **extracted from the Burin IDE**, which lives in the **`coderide`** repository. On the original development machine it is checked out as a **sibling folder**:
 
-- `../coderide`  (absolute: `g:\Git\coderide`)
+- `../coderide` (optional - only present on that machine)
 
-Section 5 maps the exact Burin source files to budiff projects. The mapping tells you *where things go*; **open the actual files under `../coderide` and read them for the *how*** (algorithms, threading, the highlighting pipeline, the funnel geometry, the git calls). Port and adapt that code - do not take a dependency on Burin/coderide.
+Section 5 maps the exact Burin source files to budiff projects. The mapping tells you *where things go*; when the checkout exists, **open the actual files under `../coderide` and read them for the *how*** (algorithms, threading, the highlighting pipeline, the funnel geometry, the git calls). Port and adapt that code - do not take a dependency on Burin/coderide. When it does not exist, the budiff source itself is the reference: v1 has already ported everything section 5 maps.
 
 ## 1. Vision
 

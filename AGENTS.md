@@ -8,11 +8,11 @@ budiff is "`ls` for diffs": a folder-scoped, read-only, syntax-highlighted side-
 
 ## Local reference: read the real source
 
-budiff is **extracted from the Burin IDE**, which is checked out locally as a **sibling folder**:
+budiff is **extracted from the Burin IDE** (a private repository at the time of writing). On the original development machine it is checked out as a **sibling folder**:
 
-- **`../coderide`**  (absolute: `g:\Git\coderide`)
+- **`../coderide`** (optional - only present on that machine)
 
-This is your most valuable resource. `SPEC.md` section 5 lists exactly which files map to which budiff project and what glue to drop - but **open the actual files under `../coderide` and read them** for the real algorithms, threading, the highlighting pipeline, the funnel geometry, and the git calls. Port and adapt that code; do **not** add a dependency on Burin/coderide.
+When that checkout exists, it is a valuable resource: `SPEC.md` section 5 lists exactly which files map to which budiff project and what glue to drop, and the real algorithms, threading, the highlighting pipeline, the funnel geometry, and the git calls live in those files. When it does not exist, the budiff source itself is the reference - v1 has already ported everything the spec maps. Either way, do **not** add a dependency on Burin/coderide.
 
 ## Build & test
 
@@ -32,6 +32,6 @@ This is your most valuable resource. `SPEC.md` section 5 lists exactly which fil
 
 The full stack builds and tests green: `Budiff.Core` + `Budiff.Avalonia` (+ `.TextMate`) + `Budiff.Cli` + `Budiff.App`, with a sample app, a headless UI-snapshot test of the diff control, and CI (`SPEC.md` section 8). The GUI renders a themed, syntax-highlighted side-by-side diff out of the box.
 
-## Out of scope for v1
+## Shipped since v1
 
-The Code-Analysis power view, git-pager (stdin) mode, `--json`, and the MCP server are **post-v1** (`SPEC.md` section 9). Design so they are cheap to add, but do not build them now.
+The Code-Analysis power view (the bird's-eye), the git-pager (stdin) mode, `--json`, and the MCP server have all landed. `SPEC.md` reflects the current scope; treat the issue tracker as the source of truth for remaining work.

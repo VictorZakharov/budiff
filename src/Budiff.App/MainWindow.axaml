@@ -42,6 +42,12 @@
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Foreground" Value="{DynamicResource BudiffMutedTextBrush}" />
         </Style>
+        <Style Selector="Button.diffTool">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="5,3" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
     </Window.Styles>
 
     <Grid RowDefinitions="Auto,*" Background="{DynamicResource BudiffEditorBackgroundBrush}">
@@ -112,8 +118,10 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Row="1" ColumnDefinitions="*,5,500">
-            <DockPanel Grid.Column="0" Background="#252629">
+        <!-- Diff hidden by default: columns 1 (splitter) and 2 (diff) start at 0 and are
+             sized from code-behind when a diff opens (see MainWindow.ApplyDiffLayout). -->
+        <Grid Grid.Row="1" x:Name="BodyGrid" ColumnDefinitions="*,0,0">
+            <DockPanel Grid.Column="0" x:Name="BirdsEyePanel" Background="#252629">
                 <Border DockPanel.Dock="Top"
                         IsVisible="{Binding ShowScopeOffer}"
                         Padding="10,8"
@@ -194,6 +202,7 @@
 
                 <Border DockPanel.Dock="Right"
                         Width="220"
+                        IsVisible="{Binding ShowWideColumns}"
                         Background="#222326"
                         BorderBrush="{DynamicResource BudiffBorderBrush}"
                         BorderThickness="1,0,0,0">
@@ -258,7 +267,10 @@
                             BorderBrush="{DynamicResource BudiffBorderBrush}"
                             BorderThickness="0,0,0,1"
                             Padding="6,6,18,6">
-                        <Grid ColumnDefinitions="*,72,72,64,76,54,78,78,64,60,90">
+                        <!-- Blank / Comment / Files / Size sit in Auto columns whose fixed-width
+                             content hides in diff mode, collapsing the column to zero. Header and
+                             row cells use matching total widths so the columns stay aligned. -->
+                        <Grid ColumnDefinitions="*,72,72,Auto,Auto,Auto,78,78,64,60,Auto">
                             <Button Grid.Column="0" Classes="colHeader" HorizontalContentAlignment="Left"
                                     Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Name}">
                                 <StackPanel Orientation="Horizontal" Spacing="3">
@@ -275,17 +287,17 @@
                                     <TextBlock Text="Code" /><TextBlock Text="{Binding Analysis.CodeGlyph}" FontSize="9" />
                                 </StackPanel>
                             </Button>
-                            <Button Grid.Column="3" Classes="colHeader" Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Blank}">
+                            <Button Grid.Column="3" Classes="colHeader" Width="64" IsVisible="{Binding ShowWideColumns}" Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Blank}">
                                 <StackPanel Orientation="Horizontal" Spacing="3" HorizontalAlignment="Right">
                                     <TextBlock Text="Blank" /><TextBlock Text="{Binding Analysis.BlankGlyph}" FontSize="9" />
                                 </StackPanel>
                             </Button>
-                            <Button Grid.Column="4" Classes="colHeader" Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Comment}">
+                            <Button Grid.Column="4" Classes="colHeader" Width="76" IsVisible="{Binding ShowWideColumns}" Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Comment}">
                                 <StackPanel Orientation="Horizontal" Spacing="3" HorizontalAlignment="Right">
                                     <TextBlock Text="Comment" /><TextBlock Text="{Binding Analysis.CommentGlyph}" FontSize="9" />
                                 </StackPanel>
                             </Button>
-                            <Button Grid.Column="5" Classes="colHeader" Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Files}">
+                            <Button Grid.Column="5" Classes="colHeader" Width="54" IsVisible="{Binding ShowWideColumns}" Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Files}">
                                 <StackPanel Orientation="Horizontal" Spacing="3" HorizontalAlignment="Right">
                                     <TextBlock Text="Files" /><TextBlock Text="{Binding Analysis.FilesGlyph}" FontSize="9" />
                                 </StackPanel>
@@ -310,7 +322,7 @@
                                     <TextBlock Text="Authors" /><TextBlock Text="{Binding Analysis.AuthorsGlyph}" FontSize="9" />
                                 </StackPanel>
                             </Button>
-                            <TextBlock Grid.Column="10" Text="Size" FontSize="11" FontWeight="SemiBold"
+                            <TextBlock Grid.Column="10" Text="Size" FontSize="11" FontWeight="SemiBold" Width="78" IsVisible="{Binding ShowWideColumns}"
                                        Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" Margin="12,0,0,0" />
                         </Grid>
                     </Border>
@@ -323,7 +335,7 @@
                               Padding="6,0,18,0">
                         <TreeView.ItemTemplate>
                             <TreeDataTemplate ItemsSource="{Binding Children}">
-                                <Grid Height="24" Background="Transparent" ColumnDefinitions="*,72,72,64,76,54,78,78,64,60,90">
+                                <Grid Height="24" Background="Transparent" ColumnDefinitions="*,72,72,Auto,Auto,Auto,78,78,64,60,Auto">
                                     <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                                         <materialIcons:MaterialIcon Kind="{Binding Icon}" Width="15" Height="15"
                                                                     Foreground="{DynamicResource BudiffMutedTextBrush}" />
@@ -334,14 +346,18 @@
                                     </StackPanel>
                                     <TextBlock Grid.Column="1" Classes="num" Text="{Binding LinesText}" Foreground="{DynamicResource BudiffTextBrush}" />
                                     <TextBlock Grid.Column="2" Classes="num" Text="{Binding CodeText}" Foreground="{DynamicResource BudiffTextBrush}" />
-                                    <TextBlock Grid.Column="3" Classes="num" Text="{Binding BlankText}" Foreground="#6E747E" />
-                                    <TextBlock Grid.Column="4" Classes="num" Text="{Binding CommentText}" Foreground="#5E8C5E" />
-                                    <TextBlock Grid.Column="5" Classes="num" Text="{Binding FilesText}" Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                                    <TextBlock Grid.Column="3" Classes="num" Width="48" TextAlignment="Right" Text="{Binding BlankText}" Foreground="#6E747E"
+                                               IsVisible="{Binding $parent[Window].DataContext.ShowWideColumns}" />
+                                    <TextBlock Grid.Column="4" Classes="num" Width="60" TextAlignment="Right" Text="{Binding CommentText}" Foreground="#5E8C5E"
+                                               IsVisible="{Binding $parent[Window].DataContext.ShowWideColumns}" />
+                                    <TextBlock Grid.Column="5" Classes="num" Width="38" TextAlignment="Right" Text="{Binding FilesText}" Foreground="{DynamicResource BudiffMutedTextBrush}"
+                                               IsVisible="{Binding $parent[Window].DataContext.ShowWideColumns}" />
                                     <TextBlock Grid.Column="6" Classes="num" Text="{Binding AddedText}" Foreground="#6BB36B" />
                                     <TextBlock Grid.Column="7" Classes="num" Text="{Binding RemovedText}" Foreground="#D16969" />
                                     <TextBlock Grid.Column="8" Classes="num" Text="{Binding CommitsText}" Foreground="{DynamicResource BudiffMutedTextBrush}" />
                                     <TextBlock Grid.Column="9" Classes="num" Text="{Binding AuthorsText}" Foreground="{DynamicResource BudiffMutedTextBrush}" />
-                                    <ProgressBar Grid.Column="10" Classes="size" Minimum="0" Maximum="1"
+                                    <ProgressBar Grid.Column="10" Classes="size" Minimum="0" Maximum="1" Width="70"
+                                                 IsVisible="{Binding $parent[Window].DataContext.ShowWideColumns}"
                                                  Value="{Binding BarFraction}" VerticalAlignment="Center" Margin="12,0,8,0" />
                                 </Grid>
                             </TreeDataTemplate>
@@ -351,11 +367,41 @@
             </DockPanel>
 
             <GridSplitter Grid.Column="1"
+                          x:Name="BodySplitter"
+                          IsVisible="False"
                           ResizeDirection="Columns"
                           Background="{DynamicResource BudiffBorderBrush}"
                           HorizontalAlignment="Stretch" />
 
-            <budiff:DiffView Grid.Column="2" DataContext="{Binding Diff}" />
+            <DockPanel Grid.Column="2" x:Name="DiffHost" IsVisible="False">
+                <Border DockPanel.Dock="Top"
+                        Background="{DynamicResource BudiffToolbarBrush}"
+                        BorderBrush="{DynamicResource BudiffBorderBrush}"
+                        BorderThickness="0,0,0,1"
+                        Padding="4,2">
+                    <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="2" MinHeight="26">
+                        <Button Classes="diffTool"
+                                Command="{Binding ToggleTreeCommand}"
+                                ToolTip.Tip="{Binding TreeToggleTip}">
+                            <materialIcons:MaterialIcon Kind="{Binding TreeToggleIcon}" Width="16" Height="16"
+                                                        Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                        </Button>
+                        <Button Grid.Column="2" Classes="diffTool"
+                                Click="OnFloatDiff"
+                                ToolTip.Tip="Open diff in its own window">
+                            <materialIcons:MaterialIcon Kind="OpenInNew" Width="16" Height="16"
+                                                        Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                        </Button>
+                        <Button Grid.Column="3" Classes="diffTool"
+                                Command="{Binding CloseDiffCommand}"
+                                ToolTip.Tip="Close diff">
+                            <materialIcons:MaterialIcon Kind="Close" Width="16" Height="16"
+                                                        Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                        </Button>
+                    </Grid>
+                </Border>
+                <budiff:DiffView DataContext="{Binding Diff}" />
+            </DockPanel>
         </Grid>
     </Grid>
 </Window>

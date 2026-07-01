@@ -25,4 +25,8 @@
   <ItemGroup>
     <Compile Include="..\Budiff.Shared\Git\*.cs" LinkBase="Shared\Git" />
   </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Budiff.Avalonia.Tests" />
+  </ItemGroup>
 </Project>
