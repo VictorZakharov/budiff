@@ -34,6 +34,11 @@ internal static class BudiffCli
             return RenderStdinDiff(input.ReadToEnd(), output, errorOutput, options.Json);
         }
 
+        if (options.Mcp)
+        {
+            return new McpServer(input, output, errorOutput, Environment.CurrentDirectory).Run();
+        }
+
         if (options.OpenGui)
         {
             return AppLauncher.Launch(options);
@@ -95,7 +100,7 @@ internal static class BudiffCli
 
     private static bool ShouldReadStdin(CliOptions options, TextReader input, bool inputRedirected)
     {
-        if (options.FilePath is not null || options.OpenGui)
+        if (options.FilePath is not null || options.OpenGui || options.Mcp)
         {
             return false;
         }
@@ -142,6 +147,7 @@ internal static class BudiffCli
 internal sealed record CliOptions(
     bool GitRoot,
     bool OpenGui,
+    bool Mcp,
     bool Stdin,
     bool ShowHelp,
     string BaseRef,
@@ -154,6 +160,7 @@ internal sealed record CliOptions(
     {
         var gitRoot = false;
         var openGui = false;
+        var mcp = false;
         var stdin = false;
         var showHelp = false;
         var baseRef = "HEAD";
@@ -178,6 +185,17 @@ internal sealed record CliOptions(
                     break;
                 case "-i":
                     openGui = true;
+                    break;
+                case "mcp":
+                    if (filePath is null)
+                    {
+                        mcp = true;
+                    }
+                    else
+                    {
+                        error = "`mcp` must be the first positional argument.";
+                    }
+
                     break;
                 case "--stdin":
                     stdin = true;
@@ -235,12 +253,32 @@ internal sealed record CliOptions(
             error = "--stdin cannot be combined with -i.";
         }
 
+        if (mcp && openGui)
+        {
+            error = "mcp cannot be combined with -i.";
+        }
+
+        if (mcp && json)
+        {
+            error = "mcp cannot be combined with --json.";
+        }
+
+        if (mcp && stdin)
+        {
+            error = "mcp cannot be combined with --stdin.";
+        }
+
+        if (mcp && filePath is not null)
+        {
+            error = "mcp cannot be combined with a file path.";
+        }
+
         if (stdin && filePath is not null)
         {
             error = "--stdin cannot be combined with a file path.";
         }
 
-        return new CliOptions(gitRoot, openGui, stdin, showHelp, baseRef, headRef, filePath, json, error);
+        return new CliOptions(gitRoot, openGui, mcp, stdin, showHelp, baseRef, headRef, filePath, json, error);
     }
 }
 
@@ -254,6 +292,7 @@ internal static class AnsiRenderer
         output.WriteLine();
         output.WriteLine("Usage:");
         output.WriteLine("  budiff [options] [file]");
+        output.WriteLine("  budiff mcp");
         output.WriteLine();
         output.WriteLine("Options:");
         output.WriteLine("  -i              Open the desktop GUI for the same target");
@@ -263,6 +302,9 @@ internal static class AnsiRenderer
         output.WriteLine("  --stdin         Read a unified diff from stdin and render it side-by-side");
         output.WriteLine("  --json          Write structured JSON instead of ANSI text");
         output.WriteLine("  -h, --help      Show help");
+        output.WriteLine();
+        output.WriteLine("MCP:");
+        output.WriteLine("  budiff mcp      Run a stdio MCP server for AI coding agents");
     }
 
     public static void RenderList(ChangeSet changeSet, TextWriter output)

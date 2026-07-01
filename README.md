@@ -49,10 +49,24 @@ budiff --json          # emit the listing as structured JSON
 budiff src/App.cs --json
 git diff | budiff      # render a unified diff from stdin as side-by-side output
 budiff --stdin         # explicit stdin pager mode
+budiff mcp             # run the stdio MCP server for AI agents
 budiff -i              # open the GUI
 ```
 
-The stdin mode is a pure unified-diff transform; it does not need repository access. The GUI provides the same bird's-eye, filters, grouping and period controls, a base/head picker for branch or commit comparisons, and a syntax-highlighted side-by-side diff pane.
+The stdin mode is a pure unified-diff transform; it does not need repository access. `budiff mcp` exposes `list_changes`, `get_file_diff`, and `repo_overview` over stdio for MCP-capable AI coding agents. The GUI provides the same bird's-eye, filters, grouping and period controls, a base/head picker for branch or commit comparisons, and a syntax-highlighted side-by-side diff pane.
+
+Example MCP server config:
+
+```json
+{
+  "mcpServers": {
+    "budiff": {
+      "command": "budiff",
+      "args": ["mcp"]
+    }
+  }
+}
+```
 
 ## Performance
 
