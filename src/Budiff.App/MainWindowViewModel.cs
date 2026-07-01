@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Budiff;
 using Budiff.Avalonia;
 using Budiff.Avalonia.TextMate;
 using Budiff.Git;
@@ -29,10 +30,13 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _startPath = startPath;
         _gitRoot = gitRoot;
         Diff.SyntaxHighlighter = new TextMateSyntaxHighlighter();
+        Analysis = new CodeAnalysisPanelViewModel(OpenAnalysisFileAsync);
         _ = LoadAsync(startPath, gitRoot);
     }
 
     public ObservableCollection<ChangedFileVm> Files { get; } = new();
+
+    public CodeAnalysisPanelViewModel Analysis { get; }
 
     public ObservableCollection<GitReferenceOption> BaseRefs { get; } = new();
 
@@ -136,11 +140,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
 
         var target = CurrentTarget();
-        StatusText = "Loading changes...";
-        ChangeSet changes;
+        StatusText = "Loading bird's-eye...";
         try
         {
-            changes = await Task.Run(() => GitRepositoryReader.ListChanges(_scope, target));
+            await Analysis.LoadAsync(_scope.ScopeRoot);
         }
         catch (Exception ex)
         {
@@ -148,20 +151,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        Files.Clear();
-        foreach (var file in changes.Files)
-        {
-            Files.Add(new ChangedFileVm(file, _addedBrush, _removedBrush, _modifiedBrush, _mutedBrush));
-        }
-
-        FileCount = Files.Count;
-        EmptyText = FileCount == 0 ? "No changes in scope." : string.Empty;
         StatusText = target.Display;
-        SelectedFile = Files.FirstOrDefault();
-        if (SelectedFile is null)
-        {
-            Diff.SetPlaceholder("No changed file selected.");
-        }
+        Diff.SetPlaceholder("Select a file in the bird's-eye to open its diff.");
     }
 
     [RelayCommand]
@@ -222,6 +213,29 @@ public sealed partial class MainWindowViewModel : ObservableObject
         Diff.Extension = Path.GetExtension(value.Path);
         var file = value.Model;
         Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(_scope, file, target));
+    }
+
+    private Task OpenAnalysisFileAsync(string fullPath, string relativePath)
+    {
+        if (_scope is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        var repoPath = ToRepoPath(_scope.RepositoryRoot, fullPath);
+        var target = CurrentTarget();
+        var file = new ChangedFile(repoPath, null, fullPath, Budiff.GitFileState.Modified, new DiffChurn(0, 0), 0, 0, IsBinary: false);
+        Diff.Title = repoPath;
+        Diff.Subtitle = target.Display;
+        Diff.Extension = Path.GetExtension(relativePath);
+        Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(_scope, file, target));
+        return Task.CompletedTask;
+    }
+
+    private static string ToRepoPath(string repositoryRoot, string fullPath)
+    {
+        var rel = Path.GetRelativePath(repositoryRoot, fullPath);
+        return rel == "." ? string.Empty : rel.Replace('\\', '/');
     }
 
     private static IBrush Brush(string hex) => new ImmutableSolidColorBrush(Color.Parse(hex));

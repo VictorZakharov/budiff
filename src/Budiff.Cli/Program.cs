@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using Budiff;
+using Budiff.CodeAnalysis;
 using Budiff.Git;
 
 return BudiffCli.Run(args);
@@ -50,22 +51,24 @@ internal static class BudiffCli
         }
 
         var target = new DiffTarget(options.BaseRef, options.HeadRef, options.HeadRef is null);
-        var changeSet = GitRepositoryReader.ListChanges(scope, target);
 
         if (options.FilePath is null)
         {
             if (options.Json)
             {
-                JsonRenderer.RenderList(changeSet, output);
+                var jsonChangeSet = GitRepositoryReader.ListChanges(scope, target);
+                JsonRenderer.RenderList(jsonChangeSet, output);
             }
             else
             {
-                AnsiRenderer.RenderList(changeSet, output);
+                var snapshot = CodeAnalysisRepositoryReader.Load(scope.ScopeRoot, sinceDays: 30);
+                AnsiRenderer.RenderAnalysis(snapshot, output, scope, sinceDays: 30);
             }
 
             return 0;
         }
 
+        var changeSet = GitRepositoryReader.ListChanges(scope, target);
         var repoPath = ToRepoPath(scope.RepositoryRoot, options.FilePath);
         var file = changeSet.Files.FirstOrDefault(f =>
             f.Path.Equals(repoPath, StringComparison.OrdinalIgnoreCase)
@@ -300,6 +303,59 @@ internal static class AnsiRenderer
         output.WriteLine(Dim("Run `budiff <file>` to print the side-by-side diff."));
     }
 
+    public static void RenderAnalysis(CodeAnalysisSnapshot snapshot, TextWriter output, GitRepositoryScope scope, int? sinceDays)
+    {
+        var historical = sinceDays.HasValue;
+        var periodText = sinceDays is { } days ? "last " + days + " days" : "all time";
+        var root = AnalysisTreeBuilder.Build(
+            snapshot.Scan,
+            snapshot.History,
+            AnalysisGrouping.Folders,
+            AnalysisSortKey.Lines,
+            ascending: false,
+            allTime: !historical);
+
+        output.WriteLine($"{Bold("budiff")} bird's-eye");
+        output.WriteLine($"repo: {scope.RepositoryRoot}");
+        output.WriteLine($"scope: {(scope.ScopePrefix.Length == 0 ? "." : scope.ScopePrefix)}");
+        output.WriteLine($"period: {periodText}");
+        output.WriteLine($"{root.FileCount:N0} files - {root.Lines.Total:N0} lines ({root.Lines.Code:N0} code / {root.Lines.Blank:N0} blank / {root.Lines.Comment:N0} comment)"
+            + (snapshot.History is null ? string.Empty : $" - +{root.Added:N0} / -{root.Removed:N0} - {root.CommitCount:N0} commits, {root.AuthorCount:N0} authors"));
+        if (snapshot.Scan.Truncated)
+        {
+            output.WriteLine("file list capped");
+        }
+
+        output.WriteLine();
+        output.WriteLine($"{"name",-42} {"lines",8} {"code",8} {"blank",7} {"comment",8} {"files",6} {"added",8} {"removed",8} {"commits",8} {"authors",8}");
+        foreach (var row in Flatten(root.Children, depth: 0).Take(200))
+        {
+            var name = row.Depth == 0 ? row.Node.Name : new string(' ', Math.Min(20, row.Depth * 2)) + row.Node.Name;
+            output.Write(TruncatePlain(name, 42).PadRight(42));
+            output.Write(" ");
+            output.Write((row.Node.IsBinary ? "binary" : row.Node.Lines.Total.ToString("N0")).PadLeft(8));
+            output.Write(" ");
+            output.Write((row.Node.IsBinary ? string.Empty : row.Node.Lines.Code.ToString("N0")).PadLeft(8));
+            output.Write(" ");
+            output.Write((row.Node.IsBinary ? string.Empty : row.Node.Lines.Blank.ToString("N0")).PadLeft(7));
+            output.Write(" ");
+            output.Write((row.Node.IsBinary ? string.Empty : row.Node.Lines.Comment.ToString("N0")).PadLeft(8));
+            output.Write(" ");
+            output.Write((row.Node.IsFile ? string.Empty : row.Node.FileCount.ToString("N0")).PadLeft(6));
+            output.Write(" ");
+            output.Write((snapshot.History is not null && row.Node.Added > 0 ? "+" + row.Node.Added.ToString("N0") : string.Empty).PadLeft(8));
+            output.Write(" ");
+            output.Write((snapshot.History is not null && row.Node.Removed > 0 ? "-" + row.Node.Removed.ToString("N0") : string.Empty).PadLeft(8));
+            output.Write(" ");
+            output.Write((snapshot.History is not null && row.Node.CommitCount > 0 ? row.Node.CommitCount.ToString("N0") : string.Empty).PadLeft(8));
+            output.Write(" ");
+            output.WriteLine((snapshot.History is not null && row.Node.AuthorCount > 0 ? row.Node.AuthorCount.ToString("N0") : string.Empty).PadLeft(8));
+        }
+
+        output.WriteLine();
+        output.WriteLine(Dim("Run `budiff <file>` to print the side-by-side diff."));
+    }
+
     public static void RenderDiff(ChangedFile file, DiffResult diff, TextWriter output)
     {
         output.WriteLine($"{Bold(file.Path)}  {Dim(file.StateText)}  {Green("+" + file.Churn.Added)} {Red("-" + file.Churn.Removed)}");
@@ -437,6 +493,28 @@ internal static class AnsiRenderer
         }
 
         return width <= 1 ? text[..width] : text[..(width - 1)] + ">";
+    }
+
+    private static string TruncatePlain(string text, int width)
+    {
+        if (text.Length <= width)
+        {
+            return text;
+        }
+
+        return width <= 1 ? text[..width] : text[..(width - 1)] + ">";
+    }
+
+    private static IEnumerable<(AnalysisNode Node, int Depth)> Flatten(IEnumerable<AnalysisNode> nodes, int depth)
+    {
+        foreach (var node in nodes)
+        {
+            yield return (node, depth);
+            foreach (var child in Flatten(node.Children, depth + 1))
+            {
+                yield return child;
+            }
+        }
     }
 
     private static string PadAnsi(string text, int width)

@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="520" viewBox="0 0 1180 520" role="img" aria-label="budiff CLI bird's-eye output">
+  <rect width="1180" height="520" rx="8" fill="#1e1f22"/>
+  <rect width="1180" height="38" rx="8" fill="#2b2d31"/>
+  <circle cx="22" cy="19" r="6" fill="#ff5f57"/>
+  <circle cx="42" cy="19" r="6" fill="#febc2e"/>
+  <circle cx="62" cy="19" r="6" fill="#28c840"/>
+  <text x="90" y="24" fill="#9da0a8" font-family="Cascadia Code,Consolas,monospace" font-size="14">budiff</text>
+  <g font-family="Cascadia Code,Consolas,monospace" font-size="18">
+    <text x="28" y="72" fill="#dfe1e5">budiff bird&apos;s-eye</text>
+    <text x="28" y="104" fill="#9da0a8">repo: G:\Git\budiff</text>
+    <text x="28" y="132" fill="#9da0a8">scope: .</text>
+    <text x="28" y="160" fill="#9da0a8">period: last 30 days</text>
+    <text x="28" y="198" fill="#dfe1e5">24 files - 8,412 lines (6,950 code / 782 blank / 680 comment) - +418 / -74 - 9 commits, 3 authors</text>
+
+    <text x="28" y="246" fill="#61afef">name</text>
+    <text x="514" y="246" fill="#61afef">lines</text>
+    <text x="604" y="246" fill="#61afef">code</text>
+    <text x="686" y="246" fill="#61afef">blank</text>
+    <text x="772" y="246" fill="#61afef">comment</text>
+    <text x="870" y="246" fill="#61afef">files</text>
+    <text x="942" y="246" fill="#61afef">added</text>
+    <text x="1022" y="246" fill="#61afef">removed</text>
+    <text x="1120" y="246" fill="#61afef" text-anchor="end">authors</text>
+
+    <text x="28" y="286" fill="#dfe1e5">src</text>
+    <text x="514" y="286" fill="#dfe1e5">5,842</text>
+    <text x="604" y="286" fill="#dfe1e5">4,860</text>
+    <text x="686" y="286" fill="#9da0a8">512</text>
+    <text x="772" y="286" fill="#5e8c5e">470</text>
+    <text x="870" y="286" fill="#9da0a8">14</text>
+    <text x="942" y="286" fill="#7ee787">+312</text>
+    <text x="1022" y="286" fill="#ff7b72">-52</text>
+    <text x="1120" y="286" fill="#9da0a8" text-anchor="end">3</text>
+
+    <text x="28" y="322" fill="#dfe1e5">  Budiff.Cli</text>
+    <text x="514" y="322" fill="#dfe1e5">1,920</text>
+    <text x="604" y="322" fill="#dfe1e5">1,610</text>
+    <text x="686" y="322" fill="#9da0a8">168</text>
+    <text x="772" y="322" fill="#5e8c5e">142</text>
+    <text x="870" y="322" fill="#9da0a8">4</text>
+    <text x="942" y="322" fill="#7ee787">+140</text>
+    <text x="1022" y="322" fill="#ff7b72">-18</text>
+    <text x="1120" y="322" fill="#9da0a8" text-anchor="end">2</text>
+
+    <text x="28" y="358" fill="#dfe1e5">    Program.cs</text>
+    <text x="514" y="358" fill="#dfe1e5">760</text>
+    <text x="604" y="358" fill="#dfe1e5">650</text>
+    <text x="686" y="358" fill="#9da0a8">54</text>
+    <text x="772" y="358" fill="#5e8c5e">56</text>
+    <text x="942" y="358" fill="#7ee787">+42</text>
+    <text x="1022" y="358" fill="#ff7b72">-8</text>
+    <text x="1120" y="358" fill="#9da0a8" text-anchor="end">2</text>
+
+    <text x="28" y="394" fill="#dfe1e5">  Budiff.Core</text>
+    <text x="514" y="394" fill="#dfe1e5">1,504</text>
+    <text x="604" y="394" fill="#dfe1e5">1,226</text>
+    <text x="686" y="394" fill="#9da0a8">130</text>
+    <text x="772" y="394" fill="#5e8c5e">148</text>
+    <text x="870" y="394" fill="#9da0a8">5</text>
+    <text x="942" y="394" fill="#7ee787">+96</text>
+    <text x="1022" y="394" fill="#ff7b72">-12</text>
+    <text x="1120" y="394" fill="#9da0a8" text-anchor="end">2</text>
+
+    <text x="28" y="430" fill="#dfe1e5">tests</text>
+    <text x="514" y="430" fill="#dfe1e5">1,644</text>
+    <text x="604" y="430" fill="#dfe1e5">1,320</text>
+    <text x="686" y="430" fill="#9da0a8">170</text>
+    <text x="772" y="430" fill="#5e8c5e">154</text>
+    <text x="870" y="430" fill="#9da0a8">7</text>
+    <text x="942" y="430" fill="#7ee787">+82</text>
+    <text x="1022" y="430" fill="#ff7b72">-16</text>
+    <text x="1120" y="430" fill="#9da0a8" text-anchor="end">2</text>
+
+    <text x="28" y="480" fill="#9da0a8">Run `budiff &lt;file&gt;` to print the side-by-side diff.</text>
+  </g>
+</svg>

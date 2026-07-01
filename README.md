@@ -2,9 +2,11 @@
 
 **`ls`, but for your diffs.** Run it in a folder and instantly see what changed.
 
+![budiff CLI bird's-eye](docs/cli-birdseye.svg)
+
 ![budiff GUI screenshot](docs/gui-screenshot.png)
 
-budiff is a folder-scoped, read-only diff viewer. The CLI lists changed files under the current folder by default, including `+/-` churn and author/commit counts, then prints a side-by-side diff when you drill into a file. `--gitroot` widens scope to the whole repository. `-i` opens the desktop GUI on the same target.
+budiff is a folder-scoped, read-only diff viewer. The CLI opens with a Code Analysis bird's-eye: folders or projects, line/code/blank/comment counts, file counts, period churn, commits, and authors. Drill into a file to print a side-by-side diff. `--gitroot` widens scope to the whole repository. `-i` opens the desktop GUI on the same target.
 
 ## Install
 
@@ -39,8 +41,8 @@ Native AOT is not enabled for the CLI yet. The CLI depends on LibGit2Sharp and n
 ## Usage
 
 ```sh
-budiff                 # list changes under the current folder
-budiff --gitroot       # list changes for the whole repository
+budiff                 # show the bird's-eye for the current folder
+budiff --gitroot       # show the bird's-eye for the whole repository
 budiff src/App.cs      # print a side-by-side diff for one changed file
 budiff --base main --head feature/foo --gitroot
 budiff --json          # emit the listing as structured JSON
@@ -50,11 +52,11 @@ budiff --stdin         # explicit stdin pager mode
 budiff -i              # open the GUI
 ```
 
-The stdin mode is a pure unified-diff transform; it does not need repository access. The GUI provides the same changed-file listing, a base/head picker for branch or commit comparisons, and a syntax-highlighted side-by-side diff pane.
+The stdin mode is a pure unified-diff transform; it does not need repository access. The GUI provides the same bird's-eye, filters, grouping and period controls, a base/head picker for branch or commit comparisons, and a syntax-highlighted side-by-side diff pane.
 
 ## Performance
 
-The changed-file listing computes `+/-` churn from the current diff, then enriches each changed path with recent author and commit counts. History enrichment is path-scoped and scans at most 1,000 recent commits by default so `budiff` stays responsive in large repositories. Set `BUDIFF_HISTORY_MAX_COMMITS=0` to skip author/commit counts, or set it to a larger number when you want a deeper history window.
+The bird's-eye scans files under the selected folder and uses git's path-scoped history for the selected period. The changed-file drill-in still bounds recent author/commit enrichment to 1,000 commits by default. Set `BUDIFF_HISTORY_MAX_COMMITS=0` to skip those drill-in counts, or set it to a larger number when you want a deeper window.
 
 ## Components
 

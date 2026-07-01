@@ -1,0 +1,157 @@
+using System;
+using System.Collections.Generic;
+
+namespace Budiff.CodeAnalysis;
+
+public enum AnalysisGrouping
+{
+    Folders,
+    Projects,
+}
+
+public enum AnalysisSortKey
+{
+    Name,
+    Lines,
+    Code,
+    Blank,
+    Comment,
+    Files,
+    Added,
+    Removed,
+    Commits,
+    Authors,
+}
+
+public enum AnalysisNodeKind
+{
+    Root,
+    Folder,
+    Project,
+    File,
+    Ungrouped,
+}
+
+public sealed class AnalysisNode
+{
+    public AnalysisNode(string name, string relativePath, AnalysisNodeKind kind)
+    {
+        Name = name;
+        RelativePath = relativePath;
+        Kind = kind;
+    }
+
+    public string Name { get; }
+
+    public string RelativePath { get; }
+
+    public AnalysisNodeKind Kind { get; }
+
+    public List<AnalysisNode> Children { get; } = new();
+
+    public bool IsFile => Kind == AnalysisNodeKind.File;
+
+    public LineCounts Lines { get; set; }
+
+    public int FileCount { get; set; }
+
+    public bool IsBinary { get; set; }
+
+    public long Added { get; set; }
+
+    public long Removed { get; set; }
+
+    public HashSet<int> CommitIds { get; } = new();
+
+    public HashSet<string> Authors { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public long Churn => Added + Removed;
+
+    public int CommitCount => CommitIds.Count;
+
+    public int AuthorCount => Authors.Count;
+
+    public double BarFraction { get; private set; }
+
+    public double SortValue(AnalysisSortKey key) => key switch
+    {
+        AnalysisSortKey.Lines => Lines.Total,
+        AnalysisSortKey.Code => Lines.Code,
+        AnalysisSortKey.Blank => Lines.Blank,
+        AnalysisSortKey.Comment => Lines.Comment,
+        AnalysisSortKey.Files => FileCount,
+        AnalysisSortKey.Added => Added,
+        AnalysisSortKey.Removed => Removed,
+        AnalysisSortKey.Commits => CommitCount,
+        AnalysisSortKey.Authors => AuthorCount,
+        _ => Lines.Total,
+    };
+
+    public void Aggregate()
+    {
+        if (IsFile)
+        {
+            return;
+        }
+
+        var lines = new LineCounts();
+        var files = 0;
+        long added = 0;
+        long removed = 0;
+        foreach (var child in Children)
+        {
+            child.Aggregate();
+            lines += child.Lines;
+            files += child.FileCount;
+            added += child.Added;
+            removed += child.Removed;
+            CommitIds.UnionWith(child.CommitIds);
+            Authors.UnionWith(child.Authors);
+        }
+
+        Lines = lines;
+        FileCount = files;
+        Added = added;
+        Removed = removed;
+    }
+
+    public void SortAndScale(AnalysisSortKey key, bool ascending)
+    {
+        if (Children.Count == 0)
+        {
+            return;
+        }
+
+        Comparison<AnalysisNode> ascendingCompare = (a, b) =>
+        {
+            if (key == AnalysisSortKey.Name)
+            {
+                return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+            }
+
+            var cmp = a.SortValue(key).CompareTo(b.SortValue(key));
+            if (cmp != 0)
+            {
+                return cmp;
+            }
+
+            cmp = a.Lines.Total.CompareTo(b.Lines.Total);
+            return cmp != 0 ? cmp : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+        };
+
+        Children.Sort(ascending ? ascendingCompare : (a, b) => ascendingCompare(b, a));
+
+        var barKey = key == AnalysisSortKey.Name ? AnalysisSortKey.Lines : key;
+        var max = 0.0;
+        foreach (var child in Children)
+        {
+            max = Math.Max(max, child.SortValue(barKey));
+        }
+
+        foreach (var child in Children)
+        {
+            child.BarFraction = max > 0 ? child.SortValue(barKey) / max : 0;
+            child.SortAndScale(key, ascending);
+        }
+    }
+}
