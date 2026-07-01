@@ -47,7 +47,8 @@ Native AOT is not enabled for the CLI yet. The CLI depends on LibGit2Sharp and n
 ```sh
 budiff                 # show the bird's-eye for the current folder
 budiff --gitroot       # show the bird's-eye for the whole repository
-budiff src/App.cs      # print a side-by-side diff for one changed file
+budiff --days 90       # widen the analysis window (default 30; 0 = all time)
+budiff src/App.cs      # print a syntax-highlighted side-by-side diff for one file
 budiff --base main --head feature/foo --gitroot
 budiff --json          # emit the listing as structured JSON
 budiff src/App.cs --json
@@ -57,7 +58,9 @@ budiff mcp             # run the stdio MCP server for AI agents
 budiff -i              # open the GUI
 ```
 
-The stdin mode is a pure unified-diff transform; it does not need repository access. `budiff mcp` exposes `list_changes`, `get_file_diff`, and `repo_overview` over stdio for MCP-capable AI coding agents. The GUI provides the same bird's-eye, filters, grouping and period controls, and a base/head picker for branch or commit comparisons. The diff pane stays hidden until you drill into a file; it then docks on the right (the bird's-eye compacts to its core columns), the split is resizable, the tree can collapse away entirely, and the diff can pop out into its own window - handy on a second monitor.
+Outside a git repository, `budiff` still works: it falls back to a plain folder analysis (lines / code / blank / comment - no churn, commits, or authors). Terminal output is colored, and file diffs are syntax-highlighted with the same DarkPlus grammars the GUI uses; set `BUDIFF_FORCE_COLOR=1` to keep color when piping (e.g. `| less -R`).
+
+The stdin mode is a pure unified-diff transform; it does not need repository access. `budiff mcp` exposes `list_changes`, `get_file_diff`, and `repo_overview` over stdio for MCP-capable AI coding agents. The GUI provides the same bird's-eye with filters, grouping, and period controls (including a custom window in days). The diff pane stays hidden until you drill into a file; it then docks on the right (the bird's-eye compacts to its core columns) with a base-branch picker and a working-tree toggle in its toolbar, the split is resizable, the tree can collapse away entirely, and the diff can pop out into its own window - handy on a second monitor.
 
 Example MCP server config:
 

@@ -61,7 +61,7 @@ public sealed class AnsiRendererTests
         AnsiRenderer.RenderAnalysis(
             new CodeAnalysisSnapshot(scan, history),
             output,
-            new GitRepositoryScope("G:\\Git\\budiff", "G:\\Git\\budiff", string.Empty, true, "main"),
+            new[] { "repo: (test)", "scope: ." },
             sinceDays: 30);
 
         var text = output.ToString();

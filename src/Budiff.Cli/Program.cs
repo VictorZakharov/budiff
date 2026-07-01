@@ -13,8 +13,10 @@ internal static class BudiffCli
     public static int Run(string[] args)
         => Run(args, Console.In, Console.Out, Console.Error, Console.IsInputRedirected);
 
-    internal static int Run(string[] args, TextReader input, TextWriter output, TextWriter errorOutput, bool inputRedirected)
+    internal static int Run(string[] args, TextReader input, TextWriter output, TextWriter errorOutput, bool inputRedirected, string? workingDirectory = null)
     {
+        AnsiConsole.TryEnableVirtualTerminal();
+        var cwd = workingDirectory ?? Environment.CurrentDirectory;
         var options = CliOptions.Parse(args);
         if (options.ShowHelp)
         {
@@ -36,7 +38,7 @@ internal static class BudiffCli
 
         if (options.Mcp)
         {
-            return new McpServer(input, output, errorOutput, Environment.CurrentDirectory).Run();
+            return new McpServer(input, output, errorOutput, cwd).Run();
         }
 
         if (options.OpenGui)
@@ -44,13 +46,29 @@ internal static class BudiffCli
             return AppLauncher.Launch(options);
         }
 
+        // --days 0 = all time; default window is 30 days.
+        int? sinceDays = options.Days == 0 ? null : (options.Days ?? 30);
+
         GitRepositoryScope scope;
         try
         {
-            scope = GitRepositoryReader.Open(Environment.CurrentDirectory, options.GitRoot);
+            scope = GitRepositoryReader.Open(cwd, options.GitRoot);
         }
         catch (Exception ex)
         {
+            // The bird's-eye is a LOC analysis at heart; git only adds churn/commits/
+            // authors. Outside a repository, fall back to the plain folder analysis.
+            if (options.FilePath is null && !options.Json)
+            {
+                var folderSnapshot = CodeAnalysisRepositoryReader.Load(cwd, sinceDays);
+                AnsiRenderer.RenderAnalysis(
+                    folderSnapshot,
+                    output,
+                    new[] { $"folder: {cwd}", "not a git repository - folder analysis only (no churn / commits / authors)" },
+                    sinceDays);
+                return 0;
+            }
+
             errorOutput.WriteLine(ex.Message);
             return 1;
         }
@@ -66,15 +84,19 @@ internal static class BudiffCli
             }
             else
             {
-                var snapshot = CodeAnalysisRepositoryReader.Load(scope.ScopeRoot, sinceDays: 30);
-                AnsiRenderer.RenderAnalysis(snapshot, output, scope, sinceDays: 30);
+                var snapshot = CodeAnalysisRepositoryReader.Load(scope.ScopeRoot, sinceDays);
+                AnsiRenderer.RenderAnalysis(
+                    snapshot,
+                    output,
+                    new[] { $"repo: {scope.RepositoryRoot}", $"scope: {(scope.ScopePrefix.Length == 0 ? "." : scope.ScopePrefix)}" },
+                    sinceDays);
             }
 
             return 0;
         }
 
         var changeSet = GitRepositoryReader.ListChanges(scope, target);
-        var repoPath = ToRepoPath(scope.RepositoryRoot, options.FilePath);
+        var repoPath = ToRepoPath(scope.RepositoryRoot, options.FilePath, cwd);
         var file = changeSet.Files.FirstOrDefault(f =>
             f.Path.Equals(repoPath, StringComparison.OrdinalIgnoreCase)
             || f.Path.EndsWith("/" + repoPath, StringComparison.OrdinalIgnoreCase));
@@ -136,9 +158,9 @@ internal static class BudiffCli
         return 0;
     }
 
-    private static string ToRepoPath(string repositoryRoot, string path)
+    private static string ToRepoPath(string repositoryRoot, string path, string cwd)
     {
-        var full = Path.GetFullPath(path, Environment.CurrentDirectory);
+        var full = Path.GetFullPath(path, cwd);
         var rel = Path.GetRelativePath(repositoryRoot, full);
         return rel == "." ? string.Empty : rel.Replace('\\', '/');
     }
@@ -154,6 +176,7 @@ internal sealed record CliOptions(
     string? HeadRef,
     string? FilePath,
     bool Json,
+    int? Days,
     string? Error)
 {
     public static CliOptions Parse(string[] args)
@@ -168,6 +191,7 @@ internal sealed record CliOptions(
         string? filePath = null;
         string? error = null;
         var json = false;
+        int? daysOption = null;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -225,6 +249,17 @@ internal sealed record CliOptions(
                     }
 
                     break;
+                case "--days":
+                    if (++i >= args.Length || !int.TryParse(args[i], out var days) || days < 0)
+                    {
+                        error = "--days requires a non-negative number (0 = all time).";
+                    }
+                    else
+                    {
+                        daysOption = days;
+                    }
+
+                    break;
                 default:
                     if (arg.StartsWith("-", StringComparison.Ordinal))
                     {
@@ -278,13 +313,44 @@ internal sealed record CliOptions(
             error = "--stdin cannot be combined with a file path.";
         }
 
-        return new CliOptions(gitRoot, openGui, mcp, stdin, showHelp, baseRef, headRef, filePath, json, error);
+        return new CliOptions(gitRoot, openGui, mcp, stdin, showHelp, baseRef, headRef, filePath, json, daysOption, error);
     }
 }
 
 internal static class AnsiRenderer
 {
-    private static bool UseColor => !Console.IsOutputRedirected;
+    private static bool UseColor => AnsiConsole.Enabled;
+
+    private static readonly string Esc = ((char)27).ToString();
+
+    private static string Reset => Esc + "[0m";
+
+    // DarkPlus default token color, readable on the row background tints.
+    private static string DefaultFg => Esc + "[38;2;212;212;212m";
+
+    // Row background tints approximating the GUI's translucent added/removed
+    // backgrounds over the editor background; "strong" marks intra-line segments.
+    private static string BgAdded => Esc + "[48;2;34;64;49m";
+
+    private static string BgRemoved => Esc + "[48;2;69;47;50m";
+
+    private static string BgAddedStrong => Esc + "[48;2;46;96;64m";
+
+    private static string BgRemovedStrong => Esc + "[48;2;104;58;62m";
+
+    private static string Rgb(string text, int r, int g, int b) => UseColor ? Esc + $"[38;2;{r};{g};{b}m" + text + Reset : text;
+
+    private static string Blue(string text) => Rgb(text, 97, 175, 239);
+
+    private static string Muted(string text) => Rgb(text, 157, 160, 168);
+
+    private static string CommentTint(string text) => Rgb(text, 94, 140, 94);
+
+    private static string BlankTint(string text) => Rgb(text, 110, 116, 126);
+
+    private static string AddTint(string text) => Rgb(text, 107, 179, 107);
+
+    private static string RemTint(string text) => Rgb(text, 209, 105, 105);
 
     public static void RenderHelp(TextWriter output)
     {
@@ -299,6 +365,7 @@ internal static class AnsiRenderer
         output.WriteLine("  -r, --gitroot   Widen scope to the repository root");
         output.WriteLine("  --base <ref>    Base ref for comparisons (default: HEAD)");
         output.WriteLine("  --head <ref>    Head ref; omit to compare against the working tree");
+        output.WriteLine("  --days <n>      Bird's-eye analysis window in days (default 30; 0 = all time)");
         output.WriteLine("  --stdin         Read a unified diff from stdin and render it side-by-side");
         output.WriteLine("  --json          Write structured JSON instead of ANSI text");
         output.WriteLine("  -h, --help      Show help");
@@ -345,7 +412,7 @@ internal static class AnsiRenderer
         output.WriteLine(Dim("Run `budiff <file>` to print the side-by-side diff."));
     }
 
-    public static void RenderAnalysis(CodeAnalysisSnapshot snapshot, TextWriter output, GitRepositoryScope scope, int? sinceDays)
+    public static void RenderAnalysis(CodeAnalysisSnapshot snapshot, TextWriter output, IReadOnlyList<string> headerLines, int? sinceDays)
     {
         var historical = sinceDays.HasValue;
         var periodText = sinceDays is { } days ? "last " + days + " days" : "all time";
@@ -358,18 +425,39 @@ internal static class AnsiRenderer
             allTime: !historical);
 
         output.WriteLine($"{Bold("budiff")} bird's-eye");
-        output.WriteLine($"repo: {scope.RepositoryRoot}");
-        output.WriteLine($"scope: {(scope.ScopePrefix.Length == 0 ? "." : scope.ScopePrefix)}");
-        output.WriteLine($"period: {periodText}");
-        output.WriteLine($"{root.FileCount:N0} files - {root.Lines.Total:N0} lines ({root.Lines.Code:N0} code / {root.Lines.Blank:N0} blank / {root.Lines.Comment:N0} comment)"
-            + (snapshot.History is null ? string.Empty : $" - +{root.Added:N0} / -{root.Removed:N0} - {root.CommitCount:N0} commits, {root.AuthorCount:N0} authors"));
+        foreach (var line in headerLines)
+        {
+            output.WriteLine(Muted(line));
+        }
+
+        output.WriteLine(Muted($"period: {periodText}"));
+
+        var summary = $"{root.FileCount:N0} files - {root.Lines.Total:N0} lines ({root.Lines.Code:N0} code / {root.Lines.Blank:N0} blank / {root.Lines.Comment:N0} comment)";
+        if (snapshot.History is not null)
+        {
+            var commitsWord = root.CommitCount == 1 ? "commit" : "commits";
+            var authorsWord = root.AuthorCount == 1 ? "author" : "authors";
+            summary += $" - {AddTint("+" + root.Added.ToString("N0"))} / {RemTint("-" + root.Removed.ToString("N0"))} - {root.CommitCount:N0} {commitsWord}, {root.AuthorCount:N0} {authorsWord}";
+        }
+
+        output.WriteLine(summary);
         if (snapshot.Scan.Truncated)
         {
-            output.WriteLine("file list capped");
+            output.WriteLine(Muted("file list capped"));
         }
 
         output.WriteLine();
-        output.WriteLine($"{"name",-42} {"lines",8} {"code",8} {"blank",7} {"comment",8} {"files",6} {"added",8} {"removed",8} {"commits",8} {"authors",8}");
+        output.WriteLine(string.Join(" ",
+            Blue("name".PadRight(42)),
+            Blue("lines".PadLeft(8)),
+            Blue("code".PadLeft(8)),
+            Blue("blank".PadLeft(7)),
+            Blue("comment".PadLeft(8)),
+            Blue("files".PadLeft(6)),
+            Blue("added".PadLeft(8)),
+            Blue("removed".PadLeft(8)),
+            Blue("commits".PadLeft(8)),
+            Blue("authors".PadLeft(8))));
         foreach (var row in Flatten(root.Children, depth: 0).Take(200))
         {
             var name = row.Depth == 0 ? row.Node.Name : new string(' ', Math.Min(20, row.Depth * 2)) + row.Node.Name;
@@ -379,19 +467,19 @@ internal static class AnsiRenderer
             output.Write(" ");
             output.Write((row.Node.IsBinary ? string.Empty : row.Node.Lines.Code.ToString("N0")).PadLeft(8));
             output.Write(" ");
-            output.Write((row.Node.IsBinary ? string.Empty : row.Node.Lines.Blank.ToString("N0")).PadLeft(7));
+            output.Write(BlankTint((row.Node.IsBinary ? string.Empty : row.Node.Lines.Blank.ToString("N0")).PadLeft(7)));
             output.Write(" ");
-            output.Write((row.Node.IsBinary ? string.Empty : row.Node.Lines.Comment.ToString("N0")).PadLeft(8));
+            output.Write(CommentTint((row.Node.IsBinary ? string.Empty : row.Node.Lines.Comment.ToString("N0")).PadLeft(8)));
             output.Write(" ");
-            output.Write((row.Node.IsFile ? string.Empty : row.Node.FileCount.ToString("N0")).PadLeft(6));
+            output.Write(Muted((row.Node.IsFile ? string.Empty : row.Node.FileCount.ToString("N0")).PadLeft(6)));
             output.Write(" ");
-            output.Write((snapshot.History is not null && row.Node.Added > 0 ? "+" + row.Node.Added.ToString("N0") : string.Empty).PadLeft(8));
+            output.Write(AddTint((snapshot.History is not null && row.Node.Added > 0 ? "+" + row.Node.Added.ToString("N0") : string.Empty).PadLeft(8)));
             output.Write(" ");
-            output.Write((snapshot.History is not null && row.Node.Removed > 0 ? "-" + row.Node.Removed.ToString("N0") : string.Empty).PadLeft(8));
+            output.Write(RemTint((snapshot.History is not null && row.Node.Removed > 0 ? "-" + row.Node.Removed.ToString("N0") : string.Empty).PadLeft(8)));
             output.Write(" ");
-            output.Write((snapshot.History is not null && row.Node.CommitCount > 0 ? row.Node.CommitCount.ToString("N0") : string.Empty).PadLeft(8));
+            output.Write(Muted((snapshot.History is not null && row.Node.CommitCount > 0 ? row.Node.CommitCount.ToString("N0") : string.Empty).PadLeft(8)));
             output.Write(" ");
-            output.WriteLine((snapshot.History is not null && row.Node.AuthorCount > 0 ? row.Node.AuthorCount.ToString("N0") : string.Empty).PadLeft(8));
+            output.WriteLine(Muted((snapshot.History is not null && row.Node.AuthorCount > 0 ? row.Node.AuthorCount.ToString("N0") : string.Empty).PadLeft(8)));
         }
 
         output.WriteLine();
@@ -409,6 +497,29 @@ internal static class AnsiRenderer
             return;
         }
 
+        // Pre-tokenize every row per side so the grammar state threads correctly
+        // through rows the collapse below hides.
+        var session = UseColor ? TerminalSyntax.CreateSession(Path.GetExtension(file.Path), rows.Count) : null;
+        List<SyntaxChunk>?[]? oldRuns = null;
+        List<SyntaxChunk>?[]? newRuns = null;
+        if (session is not null)
+        {
+            oldRuns = new List<SyntaxChunk>?[rows.Count];
+            newRuns = new List<SyntaxChunk>?[rows.Count];
+            for (var i = 0; i < rows.Count; i++)
+            {
+                if (rows[i].OldText is { } oldText)
+                {
+                    oldRuns[i] = session.Highlight(oldText, oldSide: true);
+                }
+
+                if (rows[i].NewText is { } newText)
+                {
+                    newRuns[i] = session.Highlight(newText, oldSide: false);
+                }
+            }
+        }
+
         var width = Math.Max(96, Console.IsOutputRedirected ? 120 : Console.BufferWidth);
         var pane = Math.Max(32, (width - 7) / 2);
         foreach (var item in CollapseRows(rows))
@@ -421,13 +532,175 @@ internal static class AnsiRenderer
 
             var row = item.Row!;
             var inline = row.Kind == DiffKind.Modified ? InlineDiff.Compute(row.OldText, row.NewText) : null;
-            var oldSide = FormatSide(row.OldNo, row.OldText, pane, row.Kind, oldSide: true, inline?.Old);
-            var newSide = FormatSide(row.NewNo, row.NewText, pane, row.Kind, oldSide: false, inline?.New);
+            string oldSide;
+            string newSide;
+            if (session is not null)
+            {
+                oldSide = ComposeSide(row.OldNo, row.OldText, oldRuns![item.Index], inline?.Old, pane, row.Kind, oldSide: true);
+                newSide = ComposeSide(row.NewNo, row.NewText, newRuns![item.Index], inline?.New, pane, row.Kind, oldSide: false);
+            }
+            else
+            {
+                oldSide = FormatSide(row.OldNo, row.OldText, pane, row.Kind, oldSide: true, inline?.Old);
+                newSide = FormatSide(row.NewNo, row.NewText, pane, row.Kind, oldSide: false, inline?.New);
+            }
+
             output.Write(oldSide);
             output.Write(Dim(" | "));
             output.WriteLine(newSide);
         }
     }
+
+    // Renders one diff pane with syntax-colored foregrounds, a background tint for
+    // changed lines, and a stronger tint on intra-line changed segments.
+    private static string ComposeSide(
+        int? lineNo,
+        string? text,
+        List<SyntaxChunk>? runs,
+        IReadOnlyList<InlineSegment>? inline,
+        int paneWidth,
+        DiffKind kind,
+        bool oldSide)
+    {
+        var no = lineNo?.ToString().PadLeft(5) ?? "     ";
+        var contentWidth = Math.Max(8, paneWidth - 7);
+        var prefix = Dim(no + " ");
+
+        if (text is null || runs is null)
+        {
+            return prefix + new string(' ', contentWidth);
+        }
+
+        var bg = kind switch
+        {
+            DiffKind.Added when !oldSide => BgAdded,
+            DiffKind.Removed when oldSide => BgRemoved,
+            DiffKind.Modified => oldSide ? BgRemoved : BgAdded,
+            _ => null,
+        };
+        var strongBg = kind == DiffKind.Modified ? (oldSide ? BgRemovedStrong : BgAddedStrong) : null;
+
+        var total = 0;
+        foreach (var chunk in runs)
+        {
+            total += ExpandTabs(chunk.Text).Length;
+        }
+
+        var budget = total <= contentWidth ? int.MaxValue : contentWidth - 1;
+        var builder = new System.Text.StringBuilder();
+        builder.Append(prefix);
+        if (bg is not null)
+        {
+            builder.Append(bg);
+        }
+
+        var visible = 0;
+        foreach (var (chunkText, fg, strong) in MergeChunks(runs, inline))
+        {
+            if (visible >= budget)
+            {
+                break;
+            }
+
+            var expanded = ExpandTabs(chunkText);
+            if (expanded.Length == 0)
+            {
+                continue;
+            }
+
+            if (visible + expanded.Length > budget)
+            {
+                expanded = expanded[..(budget - visible)];
+            }
+
+            var useStrong = strong && strongBg is not null && bg is not null;
+            if (useStrong)
+            {
+                builder.Append(strongBg);
+            }
+
+            builder.Append(fg ?? DefaultFg);
+            builder.Append(expanded);
+            if (useStrong)
+            {
+                builder.Append(bg);
+            }
+
+            visible += expanded.Length;
+        }
+
+        if (total > contentWidth)
+        {
+            builder.Append(DefaultFg).Append('>');
+            visible += 1;
+        }
+
+        if (visible < contentWidth)
+        {
+            builder.Append(new string(' ', contentWidth - visible));
+        }
+
+        builder.Append(Reset);
+        return builder.ToString();
+    }
+
+    // Splits the syntax runs at the inline-diff segment boundaries so intra-line
+    // changed spans can carry the stronger background while keeping token colors.
+    private static IEnumerable<(string Text, string? Fg, bool Strong)> MergeChunks(
+        List<SyntaxChunk> runs,
+        IReadOnlyList<InlineSegment>? inline)
+    {
+        if (inline is null || inline.Count == 0)
+        {
+            foreach (var chunk in runs)
+            {
+                yield return (chunk.Text, chunk.Fg, false);
+            }
+
+            yield break;
+        }
+
+        var runIndex = 0;
+        var runOffset = 0;
+        foreach (var segment in inline)
+        {
+            var strong = segment.Kind != InlineChangeKind.Unchanged;
+            var remaining = segment.Text.Length;
+            while (remaining > 0 && runIndex < runs.Count)
+            {
+                var run = runs[runIndex];
+                var take = Math.Min(remaining, run.Text.Length - runOffset);
+                if (take > 0)
+                {
+                    yield return (run.Text.Substring(runOffset, take), run.Fg, strong);
+                    runOffset += take;
+                    remaining -= take;
+                }
+
+                if (runOffset >= run.Text.Length)
+                {
+                    runIndex++;
+                    runOffset = 0;
+                }
+            }
+
+            if (remaining > 0)
+            {
+                // Length mismatch safety: emit the tail uncolored.
+                yield return (segment.Text[^remaining..], null, strong);
+            }
+        }
+
+        while (runIndex < runs.Count)
+        {
+            var run = runs[runIndex];
+            yield return (runOffset == 0 ? run.Text : run.Text[runOffset..], run.Fg, false);
+            runIndex++;
+            runOffset = 0;
+        }
+    }
+
+    private static string ExpandTabs(string text) => text.Replace("\t", "    ", StringComparison.Ordinal);
 
     private static string FormatSide(
         int? lineNo,
@@ -475,7 +748,7 @@ internal static class AnsiRenderer
         return text.Length == 0 ? (oldSide ? Red("-") : Green("+")) : text;
     }
 
-    private static IEnumerable<(DiffRow? Row, string? GapText)> CollapseRows(IReadOnlyList<DiffRow> rows)
+    private static IEnumerable<(DiffRow? Row, string? GapText, int Index)> CollapseRows(IReadOnlyList<DiffRow> rows)
     {
         const int context = 3;
         var i = 0;
@@ -483,7 +756,7 @@ internal static class AnsiRenderer
         {
             if (rows[i].Kind != DiffKind.Unchanged)
             {
-                yield return (rows[i], null);
+                yield return (rows[i], null, i);
                 i++;
                 continue;
             }
@@ -499,7 +772,7 @@ internal static class AnsiRenderer
             {
                 for (var k = i; k < j; k++)
                 {
-                    yield return (rows[k], null);
+                    yield return (rows[k], null, k);
                 }
             }
             else
@@ -508,18 +781,18 @@ internal static class AnsiRenderer
                 var trail = j == rows.Count ? 0 : context;
                 for (var k = i; k < i + lead; k++)
                 {
-                    yield return (rows[k], null);
+                    yield return (rows[k], null, k);
                 }
 
                 var hidden = len - lead - trail;
                 if (hidden > 0)
                 {
-                    yield return (null, $"... {hidden} unchanged line{(hidden == 1 ? string.Empty : "s")} ...");
+                    yield return (null, $"... {hidden} unchanged line{(hidden == 1 ? string.Empty : "s")} ...", -1);
                 }
 
                 for (var k = j - trail; k < j; k++)
                 {
-                    yield return (rows[k], null);
+                    yield return (rows[k], null, k);
                 }
             }
 
@@ -628,8 +901,10 @@ internal static class AppLauncher
         var devProject = FindDevAppProject(Directory.GetCurrentDirectory());
         if (devProject is not null)
         {
+            // UseShellExecute so the long-lived `dotnet run` gets its own console
+            // instead of tying up the caller's terminal until the GUI closes.
             var args = $"run --project \"{devProject}\" -- \"{start}\"" + (options.GitRoot ? " --gitroot" : string.Empty);
-            Process.Start(new ProcessStartInfo("dotnet", args) { UseShellExecute = false });
+            Process.Start(new ProcessStartInfo("dotnet", args) { UseShellExecute = true });
             return 0;
         }
 
@@ -641,8 +916,10 @@ internal static class AppLauncher
     {
         try
         {
+            // UseShellExecute detaches the GUI from this console entirely - the
+            // terminal gets its prompt back and never waits on the GUI's lifetime.
             var args = $"\"{startPath}\"" + (gitRoot ? " --gitroot" : string.Empty);
-            Process.Start(new ProcessStartInfo(executable, args) { UseShellExecute = false });
+            Process.Start(new ProcessStartInfo(executable, args) { UseShellExecute = true });
             return true;
         }
         catch
