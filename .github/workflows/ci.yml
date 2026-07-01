@@ -43,9 +43,21 @@ jobs:
         shell: pwsh
         run: dotnet pack Budiff.slnx -c Release --no-build -o artifacts/packages /p:Version=$env:PACKAGE_VERSION
 
-      - name: Publish CLI
+      - name: Publish self-contained CLI
         if: startsWith(github.ref, 'refs/tags/v')
-        run: dotnet publish src/Budiff.Cli/Budiff.Cli.csproj -c Release --no-build -o artifacts/cli
+        shell: pwsh
+        run: |
+          $version = $env:PACKAGE_VERSION
+          $rids = @("win-x64", "linux-x64", "osx-arm64")
+          foreach ($rid in $rids) {
+            $out = "artifacts/cli/$rid"
+            dotnet publish src/Budiff.Cli/Budiff.Cli.csproj -c Release -r $rid --self-contained true -o $out /p:Version=$version /p:PublishSingleFile=true /p:DebugType=embedded
+            if ($rid -eq "win-x64") {
+              Compress-Archive -Path "$out/*" -DestinationPath "artifacts/budiff-$rid.zip" -Force
+            } else {
+              tar -czf "artifacts/budiff-$rid.tar.gz" -C $out .
+            }
+          }
 
       - name: Publish GUI
         if: startsWith(github.ref, 'refs/tags/v')
@@ -56,7 +68,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: budiff-release-artifacts
-          path: artifacts/**
+          path: |
+            artifacts/packages/**
+            artifacts/budiff-*.zip
+            artifacts/budiff-*.tar.gz
 
       - name: Push NuGet packages
         if: startsWith(github.ref, 'refs/tags/v')
@@ -72,4 +87,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**
+          files: |
+            artifacts/packages/**
+            artifacts/budiff-*.zip
+            artifacts/budiff-*.tar.gz
