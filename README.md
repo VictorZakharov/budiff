@@ -2,6 +2,8 @@
 
 **`ls`, but for your diffs.** Run it in a folder and instantly see what changed.
 
+![budiff GUI screenshot](docs/gui-screenshot.png)
+
 budiff is a folder-scoped, read-only diff viewer. The CLI lists changed files under the current folder by default, including `+/-` churn and author/commit counts, then prints a side-by-side diff when you drill into a file. `--gitroot` widens scope to the whole repository. `-i` opens the desktop GUI on the same target.
 
 ## Usage
