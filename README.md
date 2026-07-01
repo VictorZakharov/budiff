@@ -11,6 +11,8 @@ budiff                 # list changes under the current folder
 budiff --gitroot       # list changes for the whole repository
 budiff src/App.cs      # print a side-by-side diff for one changed file
 budiff --base main --head feature/foo --gitroot
+budiff --json          # emit the listing as structured JSON
+budiff src/App.cs --json
 budiff -i              # open the GUI
 ```
 

@@ -46,7 +46,15 @@ internal static class BudiffCli
 
         if (options.FilePath is null)
         {
-            AnsiRenderer.RenderList(changeSet, Console.Out);
+            if (options.Json)
+            {
+                JsonRenderer.RenderList(changeSet, Console.Out);
+            }
+            else
+            {
+                AnsiRenderer.RenderList(changeSet, Console.Out);
+            }
+
             return 0;
         }
 
@@ -62,7 +70,15 @@ internal static class BudiffCli
         }
 
         var diff = GitRepositoryReader.LoadDiff(scope, file, target);
-        AnsiRenderer.RenderDiff(file, diff, Console.Out);
+        if (options.Json)
+        {
+            JsonRenderer.RenderDiff(changeSet, file, diff, Console.Out);
+        }
+        else
+        {
+            AnsiRenderer.RenderDiff(file, diff, Console.Out);
+        }
+
         return 0;
     }
 
@@ -81,6 +97,7 @@ internal sealed record CliOptions(
     string BaseRef,
     string? HeadRef,
     string? FilePath,
+    bool Json,
     string? Error)
 {
     public static CliOptions Parse(string[] args)
@@ -92,6 +109,7 @@ internal sealed record CliOptions(
         string? headRef = null;
         string? filePath = null;
         string? error = null;
+        var json = false;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -109,6 +127,9 @@ internal sealed record CliOptions(
                     break;
                 case "-i":
                     openGui = true;
+                    break;
+                case "--json":
+                    json = true;
                     break;
                 case "--base":
                     if (++i >= args.Length)
@@ -150,7 +171,12 @@ internal sealed record CliOptions(
             }
         }
 
-        return new CliOptions(gitRoot, openGui, showHelp, baseRef, headRef, filePath, error);
+        if (openGui && json)
+        {
+            error = "--json cannot be combined with -i.";
+        }
+
+        return new CliOptions(gitRoot, openGui, showHelp, baseRef, headRef, filePath, json, error);
     }
 }
 
@@ -170,6 +196,7 @@ internal static class AnsiRenderer
         output.WriteLine("  -r, --gitroot   Widen scope to the repository root");
         output.WriteLine("  --base <ref>    Base ref for comparisons (default: HEAD)");
         output.WriteLine("  --head <ref>    Head ref; omit to compare against the working tree");
+        output.WriteLine("  --json          Write structured JSON instead of ANSI text");
         output.WriteLine("  -h, --help      Show help");
     }
 

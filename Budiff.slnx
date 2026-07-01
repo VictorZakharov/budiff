@@ -8,6 +8,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Budiff.Avalonia.Tests/Budiff.Avalonia.Tests.csproj" />
+    <Project Path="tests/Budiff.Cli.Tests/Budiff.Cli.Tests.csproj" />
     <Project Path="tests/Budiff.Core.Tests/Budiff.Core.Tests.csproj" />
   </Folder>
 </Solution>
