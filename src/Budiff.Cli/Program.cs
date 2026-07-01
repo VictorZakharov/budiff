@@ -10,19 +10,27 @@ return BudiffCli.Run(args);
 internal static class BudiffCli
 {
     public static int Run(string[] args)
+        => Run(args, Console.In, Console.Out, Console.Error, Console.IsInputRedirected);
+
+    internal static int Run(string[] args, TextReader input, TextWriter output, TextWriter errorOutput, bool inputRedirected)
     {
         var options = CliOptions.Parse(args);
         if (options.ShowHelp)
         {
-            AnsiRenderer.RenderHelp(Console.Out);
+            AnsiRenderer.RenderHelp(output);
             return 0;
         }
 
         if (options.Error is { } error)
         {
-            Console.Error.WriteLine(error);
-            AnsiRenderer.RenderHelp(Console.Error);
+            errorOutput.WriteLine(error);
+            AnsiRenderer.RenderHelp(errorOutput);
             return 2;
+        }
+
+        if (ShouldReadStdin(options, input, inputRedirected))
+        {
+            return RenderStdinDiff(input.ReadToEnd(), output, errorOutput, options.Json);
         }
 
         if (options.OpenGui)
@@ -37,7 +45,7 @@ internal static class BudiffCli
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine(ex.Message);
+            errorOutput.WriteLine(ex.Message);
             return 1;
         }
 
@@ -48,11 +56,11 @@ internal static class BudiffCli
         {
             if (options.Json)
             {
-                JsonRenderer.RenderList(changeSet, Console.Out);
+                JsonRenderer.RenderList(changeSet, output);
             }
             else
             {
-                AnsiRenderer.RenderList(changeSet, Console.Out);
+                AnsiRenderer.RenderList(changeSet, output);
             }
 
             return 0;
@@ -65,18 +73,56 @@ internal static class BudiffCli
 
         if (file is null)
         {
-            Console.Error.WriteLine($"No changed file matched '{options.FilePath}'.");
+            errorOutput.WriteLine($"No changed file matched '{options.FilePath}'.");
             return 1;
         }
 
         var diff = GitRepositoryReader.LoadDiff(scope, file, target);
         if (options.Json)
         {
-            JsonRenderer.RenderDiff(changeSet, file, diff, Console.Out);
+            JsonRenderer.RenderDiff(changeSet, file, diff, output);
         }
         else
         {
-            AnsiRenderer.RenderDiff(file, diff, Console.Out);
+            AnsiRenderer.RenderDiff(file, diff, output);
+        }
+
+        return 0;
+    }
+
+    private static bool ShouldReadStdin(CliOptions options, TextReader input, bool inputRedirected)
+    {
+        if (options.FilePath is not null || options.OpenGui)
+        {
+            return false;
+        }
+
+        return options.Stdin || (inputRedirected && input.Peek() >= 0);
+    }
+
+    private static int RenderStdinDiff(string text, TextWriter output, TextWriter errorOutput, bool json)
+    {
+        if (json)
+        {
+            errorOutput.WriteLine("--json is not supported for stdin diffs.");
+            return 2;
+        }
+
+        var files = UnifiedDiffParser.Parse(text);
+        if (files.Count == 0)
+        {
+            errorOutput.WriteLine("No unified diff found on stdin.");
+            return 1;
+        }
+
+        for (var i = 0; i < files.Count; i++)
+        {
+            if (i > 0)
+            {
+                output.WriteLine();
+            }
+
+            AnsiRenderer.RenderDiff(files[i].File, files[i].Diff, output);
         }
 
         return 0;
@@ -93,6 +139,7 @@ internal static class BudiffCli
 internal sealed record CliOptions(
     bool GitRoot,
     bool OpenGui,
+    bool Stdin,
     bool ShowHelp,
     string BaseRef,
     string? HeadRef,
@@ -104,6 +151,7 @@ internal sealed record CliOptions(
     {
         var gitRoot = false;
         var openGui = false;
+        var stdin = false;
         var showHelp = false;
         var baseRef = "HEAD";
         string? headRef = null;
@@ -127,6 +175,9 @@ internal sealed record CliOptions(
                     break;
                 case "-i":
                     openGui = true;
+                    break;
+                case "--stdin":
+                    stdin = true;
                     break;
                 case "--json":
                     json = true;
@@ -176,7 +227,17 @@ internal sealed record CliOptions(
             error = "--json cannot be combined with -i.";
         }
 
-        return new CliOptions(gitRoot, openGui, showHelp, baseRef, headRef, filePath, json, error);
+        if (openGui && stdin)
+        {
+            error = "--stdin cannot be combined with -i.";
+        }
+
+        if (stdin && filePath is not null)
+        {
+            error = "--stdin cannot be combined with a file path.";
+        }
+
+        return new CliOptions(gitRoot, openGui, stdin, showHelp, baseRef, headRef, filePath, json, error);
     }
 }
 
@@ -196,6 +257,7 @@ internal static class AnsiRenderer
         output.WriteLine("  -r, --gitroot   Widen scope to the repository root");
         output.WriteLine("  --base <ref>    Base ref for comparisons (default: HEAD)");
         output.WriteLine("  --head <ref>    Head ref; omit to compare against the working tree");
+        output.WriteLine("  --stdin         Read a unified diff from stdin and render it side-by-side");
         output.WriteLine("  --json          Write structured JSON instead of ANSI text");
         output.WriteLine("  -h, --help      Show help");
     }
