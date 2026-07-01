@@ -11,6 +11,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
+using Material.Icons;
 
 namespace Budiff.App;
 
@@ -77,6 +78,41 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     private ChangedFileVm? _selectedFile;
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowDiffPane))]
+    [NotifyPropertyChangedFor(nameof(ShowWideColumns))]
+    private bool _isDiffOpen;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowDiffPane))]
+    [NotifyPropertyChangedFor(nameof(ShowWideColumns))]
+    private bool _isDiffFloating;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(TreeToggleIcon))]
+    [NotifyPropertyChangedFor(nameof(TreeToggleTip))]
+    private bool _isTreeCollapsed;
+
+    // The docked diff pane: open and not torn off into its own window.
+    public bool ShowDiffPane => IsDiffOpen && !IsDiffFloating;
+
+    // Full bird's-eye (all columns + filter panes) whenever the docked diff is away.
+    public bool ShowWideColumns => !ShowDiffPane;
+
+    public MaterialIconKind TreeToggleIcon => IsTreeCollapsed ? MaterialIconKind.ChevronDoubleRight : MaterialIconKind.ChevronDoubleLeft;
+
+    public string TreeToggleTip => IsTreeCollapsed ? "Show bird's-eye" : "Hide bird's-eye";
+
+    [RelayCommand]
+    private void CloseDiff()
+    {
+        IsDiffOpen = false;
+        IsTreeCollapsed = false;
+    }
+
+    [RelayCommand]
+    private void ToggleTree() => IsTreeCollapsed = !IsTreeCollapsed;
+
     public bool ShowScopeOffer => !IsGitRootScope;
 
     public bool HasNoFiles => FileCount == 0;
@@ -140,6 +176,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
 
         var target = CurrentTarget();
+        CloseDiff();
         StatusText = "Loading bird's-eye...";
         try
         {
@@ -212,6 +249,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         Diff.Subtitle = target.Display;
         Diff.Extension = Path.GetExtension(value.Path);
         var file = value.Model;
+        IsDiffOpen = true;
         Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(_scope, file, target));
     }
 
@@ -228,6 +266,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         Diff.Title = repoPath;
         Diff.Subtitle = target.Display;
         Diff.Extension = Path.GetExtension(relativePath);
+        IsDiffOpen = true;
         Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(_scope, file, target));
         return Task.CompletedTask;
     }
