@@ -21,6 +21,10 @@ public sealed class DiffViewSnapshotTests
             "public class Sample\n{\n    public int Count => 1;\n}\n",
             "public class Sample\n{\n    public int Count => 2;\n    public string Name => \"budiff\";\n}\n"));
 
+        Assert.Equal(6, model.Rows.Count);
+        Assert.Contains(model.Rows, row => row.Kind == DiffKind.Modified);
+        Assert.Contains(model.Rows, row => row.Kind == DiffKind.Added);
+
         var window = new Window
         {
             Width = 920,
