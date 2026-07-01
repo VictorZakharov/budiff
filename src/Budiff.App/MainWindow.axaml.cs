@@ -26,6 +26,7 @@ public sealed partial class MainWindow : Window
         _viewModel = new MainWindowViewModel(startPath, gitRoot);
         DataContext = _viewModel;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        _viewModel.Analysis.PropertyChanged += OnAnalysisPropertyChanged;
         ApplyDiffLayout();
     }
 
@@ -40,6 +41,35 @@ public sealed partial class MainWindow : Window
         {
             ApplyDiffLayout();
         }
+    }
+
+    private void OnAnalysisPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(CodeAnalysisPanelViewModel.Extensions)
+            or nameof(CodeAnalysisPanelViewModel.Authors))
+        {
+            ApplyFilterSplit();
+        }
+    }
+
+    // Sizes the EXTENSIONS/AUTHORS split proportionally to the data so neither pane
+    // scrolls while the other wastes space. RowDefinitions cannot be x:Name'd, so the
+    // named FilterGrid is indexed. The GridSplitter still allows manual adjustment;
+    // a reload re-applies the data-proportional split.
+    private void ApplyFilterSplit()
+    {
+        var extensions = _viewModel.Analysis.Extensions.Count;
+        var authors = _viewModel.Analysis.Authors.Count;
+        if (extensions == 0 && authors == 0)
+        {
+            return;
+        }
+
+        // +1 per pane for its header row; clamp so neither pane collapses entirely.
+        var share = (extensions + 1.0) / (extensions + authors + 2.0);
+        share = Math.Clamp(share, 0.2, 0.85);
+        FilterGrid.RowDefinitions[0].Height = new GridLength(share, GridUnitType.Star);
+        FilterGrid.RowDefinitions[2].Height = new GridLength(1 - share, GridUnitType.Star);
     }
 
     // Sizes the body columns for the current diff state. ColumnDefinitions cannot be

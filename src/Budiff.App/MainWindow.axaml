@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ca="using:Budiff.CodeAnalysis"
+        xmlns:app="using:Budiff.App"
         xmlns:budiff="using:Budiff.Avalonia"
         xmlns:materialIcons="using:Material.Icons.Avalonia"
         x:Class="Budiff.App.MainWindow"
@@ -13,6 +14,7 @@
     <Window.Styles>
         <Style Selector="TreeViewItem">
             <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+            <Setter Property="IsVisible" Value="{Binding IsSearchVisible}" />
         </Style>
         <Style Selector="TextBlock.num">
             <Setter Property="HorizontalAlignment" Value="Right" />
@@ -56,7 +58,7 @@
                 Background="{DynamicResource BudiffToolbarBrush}"
                 BorderBrush="{DynamicResource BudiffBorderBrush}"
                 BorderThickness="0,0,0,1">
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto" ColumnSpacing="10">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="10">
                 <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                     <materialIcons:MaterialIcon Kind="FileCompare" Width="18" Height="18"
                                                 Foreground="{DynamicResource BudiffMutedTextBrush}" />
@@ -76,40 +78,14 @@
                            Foreground="{DynamicResource BudiffMutedTextBrush}"
                            TextTrimming="CharacterEllipsis" />
 
-                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                    <TextBlock Text="Base" Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
-                    <ComboBox Width="210"
-                              ItemsSource="{Binding BaseRefs}"
-                              SelectedItem="{Binding SelectedBaseRef, Mode=TwoWay}">
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate>
-                                <TextBlock Text="{Binding Display}" />
-                            </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                    </ComboBox>
-                </StackPanel>
-
-                <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                    <TextBlock Text="Head" Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
-                    <ComboBox Width="230"
-                              ItemsSource="{Binding HeadRefs}"
-                              SelectedItem="{Binding SelectedHeadRef, Mode=TwoWay}">
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate>
-                                <TextBlock Text="{Binding Display}" />
-                            </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                    </ComboBox>
-                </StackPanel>
-
-                <Button Grid.Column="4"
+                <Button Grid.Column="2"
                         Padding="8,4"
                         Click="OnOpenFolder"
                         ToolTip.Tip="Open folder">
                     <materialIcons:MaterialIcon Kind="FolderOpen" Width="18" Height="18" />
                 </Button>
 
-                <Button Grid.Column="5"
+                <Button Grid.Column="3"
                         Padding="8,4"
                         Command="{Binding RefreshCommand}"
                         ToolTip.Tip="Refresh">
@@ -171,6 +147,15 @@
                                         </DataTemplate>
                                     </ComboBox.ItemTemplate>
                                 </ComboBox>
+                                <TextBox Width="52"
+                                         Text="{Binding Analysis.CustomDaysText, Mode=TwoWay}"
+                                         IsVisible="{Binding Analysis.IsCustomPeriod}"
+                                         VerticalAlignment="Center"
+                                         ToolTip.Tip="Window size in days (0 = all time)" />
+                                <TextBlock Text="days"
+                                           Foreground="{DynamicResource BudiffMutedTextBrush}"
+                                           IsVisible="{Binding Analysis.IsCustomPeriod}"
+                                           VerticalAlignment="Center" />
                             </StackPanel>
 
                             <TextBox Grid.Column="2"
@@ -206,7 +191,10 @@
                         Background="#222326"
                         BorderBrush="{DynamicResource BudiffBorderBrush}"
                         BorderThickness="1,0,0,0">
-                    <Grid RowDefinitions="*,5,*">
+                    <!-- The EXTENSIONS/AUTHORS split is re-proportioned to the data on
+                         load (see MainWindow.ApplyFilterSplit) so neither pane scrolls
+                         while the other wastes space. -->
+                    <Grid x:Name="FilterGrid" RowDefinitions="*,5,*">
                         <DockPanel Grid.Row="0">
                             <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto,Auto" Margin="12,10,10,8">
                                 <TextBlock Text="EXTENSIONS" FontSize="11" FontWeight="SemiBold"
@@ -339,8 +327,7 @@
                                     <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                                         <materialIcons:MaterialIcon Kind="{Binding Icon}" Width="15" Height="15"
                                                                     Foreground="{DynamicResource BudiffMutedTextBrush}" />
-                                        <TextBlock Text="{Binding Name}" Padding="2,0"
-                                                   Background="{Binding NameBackground}"
+                                        <TextBlock app:NameInlines.Runs="{Binding NameRuns}" Padding="2,0"
                                                    Foreground="{DynamicResource BudiffTextBrush}"
                                                    TextTrimming="CharacterEllipsis" />
                                     </StackPanel>
@@ -379,20 +366,42 @@
                         BorderBrush="{DynamicResource BudiffBorderBrush}"
                         BorderThickness="0,0,0,1"
                         Padding="4,2">
-                    <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="2" MinHeight="26">
+                    <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto" ColumnSpacing="6" MinHeight="26">
                         <Button Classes="diffTool"
                                 Command="{Binding ToggleTreeCommand}"
                                 ToolTip.Tip="{Binding TreeToggleTip}">
                             <materialIcons:MaterialIcon Kind="{Binding TreeToggleIcon}" Width="16" Height="16"
                                                         Foreground="{DynamicResource BudiffMutedTextBrush}" />
                         </Button>
-                        <Button Grid.Column="2" Classes="diffTool"
+
+                        <!-- Comparison controls live with the diff: base branch only;
+                             head is the working tree (or HEAD when the toggle is off). -->
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <TextBlock Text="Base" FontSize="12" Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
+                            <ComboBox Width="170" FontSize="12"
+                                      ItemsSource="{Binding BaseRefs}"
+                                      SelectedItem="{Binding SelectedBaseRef, Mode=TwoWay}">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Display}" />
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                            <CheckBox IsChecked="{Binding IncludeWorkingTree, Mode=TwoWay}"
+                                      Content="Working tree"
+                                      FontSize="12"
+                                      VerticalAlignment="Center"
+                                      Foreground="{DynamicResource BudiffTextBrush}"
+                                      ToolTip.Tip="Include uncommitted working-tree changes. Off = compare to the last commit, as if your changes were not made yet." />
+                        </StackPanel>
+
+                        <Button Grid.Column="4" Classes="diffTool"
                                 Click="OnFloatDiff"
                                 ToolTip.Tip="Open diff in its own window">
                             <materialIcons:MaterialIcon Kind="OpenInNew" Width="16" Height="16"
                                                         Foreground="{DynamicResource BudiffMutedTextBrush}" />
                         </Button>
-                        <Button Grid.Column="3" Classes="diffTool"
+                        <Button Grid.Column="5" Classes="diffTool"
                                 Command="{Binding CloseDiffCommand}"
                                 ToolTip.Tip="Close diff">
                             <materialIcons:MaterialIcon Kind="Close" Width="16" Height="16"
