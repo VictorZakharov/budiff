@@ -7,7 +7,7 @@
   <text x="90" y="24" fill="#9da0a8" font-family="Cascadia Code,Consolas,monospace" font-size="14">budiff</text>
   <g font-family="Cascadia Code,Consolas,monospace" font-size="18">
     <text x="28" y="72" fill="#dfe1e5">budiff bird&apos;s-eye</text>
-    <text x="28" y="104" fill="#9da0a8">repo: G:\Git\budiff</text>
+    <text x="28" y="104" fill="#9da0a8">repo: ~/src/budiff</text>
     <text x="28" y="132" fill="#9da0a8">scope: .</text>
     <text x="28" y="160" fill="#9da0a8">period: last 30 days</text>
     <text x="28" y="198" fill="#dfe1e5">24 files - 8,412 lines (6,950 code / 782 blank / 680 comment) - +418 / -74 - 9 commits, 3 authors</text>
