@@ -4,6 +4,7 @@ using Xunit;
 
 namespace Budiff.Cli.Tests;
 
+[Collection("GitRepositoryReader environment")]
 public sealed class GitRepositoryReaderTests
 {
     [Fact]
@@ -30,6 +31,7 @@ public sealed class GitRepositoryReaderTests
     [Fact]
     public void ListChanges_MapsWorkingTreeStatesAndHistoryCounts()
     {
+        using var _ = HistoryLimit(null);
         using var repo = TempRepo.Create();
         repo.Write("tracked.txt", "one\n");
         repo.Write("deleted.txt", "gone\n");
@@ -53,6 +55,51 @@ public sealed class GitRepositoryReaderTests
     }
 
     [Fact]
+    public void ListChanges_SkipsHistoryCountsWhenLimitIsZero()
+    {
+        using var _ = HistoryLimit("0");
+        using var repo = TempRepo.Create();
+        repo.Write("tracked.txt", "one\n");
+        repo.Commit("initial", "Alice");
+
+        repo.Write("tracked.txt", "one\ntwo\n");
+
+        var scope = GitRepositoryReader.Open(repo.Root, gitRoot: true);
+        var changes = GitRepositoryReader.ListChanges(scope, DiffTarget.WorkingTree);
+
+        var tracked = Assert.Single(changes.Files, file => file.Path == "tracked.txt");
+        Assert.Equal(0, tracked.AuthorCount);
+        Assert.Equal(0, tracked.CommitCount);
+        Assert.True(tracked.Churn.Total > 0);
+    }
+
+    [Fact]
+    public void ListChanges_CapsHistoryCountsByRecentCommitWindow()
+    {
+        using var repo = TempRepo.Create();
+        repo.Write("tracked.txt", "one\n");
+        repo.Commit("initial", "Alice");
+        repo.Write("other.txt", "other\n");
+        repo.Commit("unrelated", "Bob");
+
+        repo.Write("tracked.txt", "one\ntwo\n");
+
+        using (HistoryLimit("1"))
+        {
+            var tracked = LoadTrackedChange(repo);
+            Assert.Equal(0, tracked.AuthorCount);
+            Assert.Equal(0, tracked.CommitCount);
+        }
+
+        using (HistoryLimit("2"))
+        {
+            var tracked = LoadTrackedChange(repo);
+            Assert.Equal(1, tracked.AuthorCount);
+            Assert.Equal(1, tracked.CommitCount);
+        }
+    }
+
+    [Fact]
     public void ListChanges_DetectsRenamesForTreeTargets()
     {
         using var repo = TempRepo.Create();
@@ -71,6 +118,31 @@ public sealed class GitRepositoryReaderTests
         Assert.Equal("new.txt", file.Path);
         Assert.Equal("old.txt", file.OldPath);
         Assert.Equal(GitFileState.Renamed, file.State);
+    }
+
+    private static ChangedFile LoadTrackedChange(TempRepo repo)
+    {
+        var scope = GitRepositoryReader.Open(repo.Root, gitRoot: true);
+        var changes = GitRepositoryReader.ListChanges(scope, DiffTarget.WorkingTree);
+        return Assert.Single(changes.Files, file => file.Path == "tracked.txt");
+    }
+
+    private static IDisposable HistoryLimit(string? value) => new HistoryLimitScope(value);
+
+    private sealed class HistoryLimitScope : IDisposable
+    {
+        private readonly string? _previous;
+
+        public HistoryLimitScope(string? value)
+        {
+            _previous = Environment.GetEnvironmentVariable(GitRepositoryReader.HistoryMaxCommitsEnvironmentVariable);
+            Environment.SetEnvironmentVariable(GitRepositoryReader.HistoryMaxCommitsEnvironmentVariable, value);
+        }
+
+        public void Dispose()
+        {
+            Environment.SetEnvironmentVariable(GitRepositoryReader.HistoryMaxCommitsEnvironmentVariable, _previous);
+        }
     }
 
     private sealed class TempRepo : IDisposable
@@ -128,4 +200,9 @@ public sealed class GitRepositoryReaderTests
             }
         }
     }
+}
+
+[CollectionDefinition("GitRepositoryReader environment", DisableParallelization = true)]
+public sealed class GitRepositoryReaderEnvironmentCollection
+{
 }

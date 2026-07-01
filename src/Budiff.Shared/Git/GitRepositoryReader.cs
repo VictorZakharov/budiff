@@ -9,6 +9,9 @@ namespace Budiff.Git;
 
 public static class GitRepositoryReader
 {
+    internal const int DefaultHistoryCommitLimit = 1_000;
+    internal const string HistoryMaxCommitsEnvironmentVariable = "BUDIFF_HISTORY_MAX_COMMITS";
+
     public static GitRepositoryScope Open(string startPath, bool gitRoot)
     {
         var start = Path.GetFullPath(string.IsNullOrWhiteSpace(startPath) ? Environment.CurrentDirectory : startPath);
@@ -181,22 +184,44 @@ public static class GitRepositoryReader
 
     private static Dictionary<string, PathHistory> LoadHistory(Repository repo, IReadOnlyCollection<string> paths)
     {
-        var result = paths.ToDictionary(p => p, _ => new PathHistory(), StringComparer.OrdinalIgnoreCase);
+        var historyPaths = paths
+            .Select(NormalizeRepoPath)
+            .Where(p => p.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var result = historyPaths.ToDictionary(p => p, _ => new PathHistory(), StringComparer.OrdinalIgnoreCase);
         if (result.Count == 0)
         {
             return result;
         }
 
+        var maxCommits = HistoryCommitLimit();
+        if (maxCommits <= 0)
+        {
+            return result;
+        }
+
         var compareOptions = new CompareOptions { Similarity = SimilarityOptions.Renames };
+        var explicitPathsOptions = new ExplicitPathsOptions { ShouldFailOnUnmatchedPath = false };
         var commitIndex = -1;
         foreach (var commit in repo.Commits)
         {
             commitIndex++;
+            if (commitIndex >= maxCommits)
+            {
+                break;
+            }
+
             Tree? parentTree = commit.Parents.FirstOrDefault()?.Tree;
             TreeChanges changes;
             try
             {
-                changes = repo.Diff.Compare<TreeChanges>(parentTree, commit.Tree, compareOptions);
+                changes = repo.Diff.Compare<TreeChanges>(
+                    parentTree,
+                    commit.Tree,
+                    historyPaths,
+                    explicitPathsOptions,
+                    compareOptions);
             }
             catch
             {
@@ -228,6 +253,14 @@ public static class GitRepositoryReader
         }
 
         return result;
+    }
+
+    internal static int HistoryCommitLimit()
+    {
+        var configured = Environment.GetEnvironmentVariable(HistoryMaxCommitsEnvironmentVariable);
+        return int.TryParse(configured, out var limit)
+            ? Math.Max(0, limit)
+            : DefaultHistoryCommitLimit;
     }
 
     private static BlobInfo ReadBlob(Tree? tree, string path)
