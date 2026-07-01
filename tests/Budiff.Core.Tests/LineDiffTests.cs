@@ -39,4 +39,23 @@ public sealed class LineDiffTests
 
         Assert.Equal(new DiffChurn(2, 1), DiffMetrics.Churn(rows));
     }
+
+    [Fact]
+    public void InlineDiff_IdenticalTextIsSingleUnchangedRun()
+    {
+        var pair = InlineDiff.Compute("same", "same");
+
+        Assert.Equal(new[] { new InlineSegment("same", InlineChangeKind.Unchanged) }, pair.Old);
+        Assert.Equal(new[] { new InlineSegment("same", InlineChangeKind.Unchanged) }, pair.New);
+    }
+
+    [Fact]
+    public void InlineDiff_TracksInsertedAndRemovedCharacters()
+    {
+        var pair = InlineDiff.Compute("abc", "axc!");
+
+        Assert.Contains(pair.Old, segment => segment is { Text: "b", Kind: InlineChangeKind.Removed });
+        Assert.Contains(pair.New, segment => segment is { Text: "x", Kind: InlineChangeKind.Added });
+        Assert.Contains(pair.New, segment => segment is { Text: "!", Kind: InlineChangeKind.Added });
+    }
 }
