@@ -50,6 +50,10 @@ budiff -i              # open the GUI
 
 The GUI provides the same changed-file listing, a base/head picker for branch or commit comparisons, and a syntax-highlighted side-by-side diff pane.
 
+## Performance
+
+The changed-file listing computes `+/-` churn from the current diff, then enriches each changed path with recent author and commit counts. History enrichment is path-scoped and scans at most 1,000 recent commits by default so `budiff` stays responsive in large repositories. Set `BUDIFF_HISTORY_MAX_COMMITS=0` to skip author/commit counts, or set it to a larger number when you want a deeper history window.
+
 ## Components
 
 | Project | What it is |
