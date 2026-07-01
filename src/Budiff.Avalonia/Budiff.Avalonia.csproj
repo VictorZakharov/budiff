@@ -2,6 +2,7 @@
   <PropertyGroup>
     <Description>Avalonia side-by-side diff control for budiff.</Description>
     <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
+    <PackageTags>$(PackageTags);diff-control;ui</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
