@@ -2,9 +2,19 @@
 
 **`ls`, but for your diffs.** Run it in a folder and instantly see what changed.
 
-> **Status: scaffolding / pre-release.** v1 is being built from [`SPEC.md`](SPEC.md). Nothing is released yet.
+budiff is a folder-scoped, read-only diff viewer. The CLI lists changed files under the current folder by default, including `+/-` churn and author/commit counts, then prints a side-by-side diff when you drill into a file. `--gitroot` widens scope to the whole repository. `-i` opens the desktop GUI on the same target.
 
-budiff is a folder-scoped, read-only, run-from-anywhere diff viewer - the diff equivalent of `ls`. In a terminal it lists the current folder's changes (files, `+/-` churn, author/commit counts) and renders a syntax-highlighted, intra-line **side-by-side** diff when you drill into a file. `-i` opens the same view as a desktop GUI. `--gitroot` widens scope from the current folder to the whole repository.
+## Usage
+
+```sh
+budiff                 # list changes under the current folder
+budiff --gitroot       # list changes for the whole repository
+budiff src/App.cs      # print a side-by-side diff for one changed file
+budiff --base main --head feature/foo --gitroot
+budiff -i              # open the GUI
+```
+
+The GUI provides the same changed-file listing, a base/head picker for branch or commit comparisons, and a syntax-highlighted side-by-side diff pane.
 
 ## Components
 
@@ -24,6 +34,8 @@ dotnet test
 ```
 
 Requires the .NET 10 SDK.
+
+The UI snapshot test writes PNGs under the test output folder by default. Set `BUDIFF_UISNAPSHOT_DIR` to collect them elsewhere.
 
 ## License
 

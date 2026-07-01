@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Pure diff engine and binary/size policy for budiff.</Description>
+  </PropertyGroup>
+
+</Project>

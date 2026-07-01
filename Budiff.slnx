@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Budiff.App/Budiff.App.csproj" />
+    <Project Path="src/Budiff.Avalonia.TextMate/Budiff.Avalonia.TextMate.csproj" />
+    <Project Path="src/Budiff.Avalonia/Budiff.Avalonia.csproj" />
+    <Project Path="src/Budiff.Cli/Budiff.Cli.csproj" />
+    <Project Path="src/Budiff.Core/Budiff.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Budiff.Avalonia.Tests/Budiff.Avalonia.Tests.csproj" />
+    <Project Path="tests/Budiff.Core.Tests/Budiff.Core.Tests.csproj" />
+  </Folder>
+</Solution>
