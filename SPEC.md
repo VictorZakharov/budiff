@@ -14,7 +14,7 @@ Section 5 maps the exact Burin source files to budiff projects. The mapping tell
 
 budiff is **`ls` for diffs**. You run it in a folder and instantly see what changed: zero config, read-only, run-from-anywhere, folder-scoped (never a single file). Like `ls`, the value is that it is always there and frictionless.
 
-- **Default (terminal):** `budiff` with no args lists the **current folder's** changes - changed files with `+/-` churn and author/commit counts (a bird's-eye) - and prints a syntax-highlighted side-by-side diff when you drill into a file.
+- **Default (terminal):** `budiff` with no args shows the **current folder's** Code Analysis bird's-eye - folders/projects, LOC, file counts, period churn, commits, and authors - and prints a syntax-highlighted side-by-side diff when you drill into a file.
 - **Scope:** the current folder by default (changes under the CWD subtree, like `ls` lists the current dir, not the whole repo). `--gitroot` (name TBD: `--gitroot` / `--repo` / `-r`) widens to the whole repository. The CLI never silently widens scope.
 - **`-i`:** opens the desktop GUI on the same target.
 - Read-only. Never mutates the repo.
@@ -42,13 +42,13 @@ Tagline: *"ls, but for your diffs."*
 
 ## 4. What v1 includes
 
-- The **changed-files listing** (the `ls` surface): per file, `+/-` churn and author/commit counts (the "bird's-eye"), for the working tree vs HEAD. Folder-scoped (CWD subtree) by default; `--gitroot` for the whole repo.
+- The **Code Analysis bird's-eye** (the `ls` surface): folder/project tree, period selector, sortable columns for Lines / Code / Blank / Comment / Files / Added / Removed / Commits / Authors, file search, extension filters, and author filters. Folder-scoped (CWD subtree) by default; `--gitroot` for the whole repo.
 - **Drill-in side-by-side diff**: syntax-highlighted, intra-line highlighted, with the Rider-style centre "funnel" connectors, collapse-unchanged, and gap expansion.
 - A **commit / branch picker** so you can diff points other than working-tree-vs-HEAD.
 - Both surfaces in **terminal** (CLI) and **desktop GUI** (`-i` / `Budiff.App`).
 - Binary / very-large files: a short placeholder instead of a garbage text diff.
 
-Out of v1 (later, see section 9): the fuller Code-Analysis "power view" (periods, full LOC tree, sorting / filtering by extension or author), the git-pager (stdin unified diff) mode, `--json` output, and the MCP server.
+Out of v1 (later, see section 9): the MCP server and deeper agent-specific repo summaries.
 
 ## 5. Porting source from coderide (Burin)
 
@@ -84,8 +84,9 @@ Reference checkout: `../coderide` (see section 0). Port these files into the bud
 ### -> `Budiff.Avalonia.TextMate`
 - `src/Burin.App/Docking/DiffSyntax.cs` + `src/Burin.App/TextMatePalette.cs` -> an `ISyntaxHighlighter` implementation. Keep the DarkPlus theme, the grammar + brush caches, the off-thread tokenization serialized on a single lock ("gate"), and the ~6000-line highlight cap.
 
-### -> the bird's-eye listing (churn + authors)
-- `src/Burin.Core/CodeAnalysis/GitHistory.cs` (commits and authors per path; a windowed metric is a NET diff against an empty-tree base) and `AnalysisTreeBuilder.cs` (the tree + per-node stats). This is the engine behind the changed-files listing's `+/-` and author/commit counts. v1 needs per-file churn + author/commit counts; the heavier period / LOC / sort / filter machinery is the post-v1 power view.
+### -> the Code Analysis bird's-eye
+- `src/Burin.Core/CodeAnalysis/AnalysisTreeBuilder.cs`, `AnalysisNode.cs`, `CodeScan.cs`, `LineCounter.cs`, and `CommentSyntax.cs` - the folder/project tree, LOC scanner, extension stats, filters, and per-node aggregates.
+- `src/Burin.Core/CodeAnalysis/GitHistory.cs` - commits and authors per path plus the windowed net-diff metric. The model is pure; the git loader lives with the CLI/App git reader per section 5.5.
 
 ### 5.5 -> the git reader (lives in the CLI / App, never in Core/Avalonia)
 - `src/Burin.Vcs/GitService.cs` (LibGit2Sharp): `GetStatus`, `GetHeadFileBlob`, `GetCommitFileBlobs`, history, branches. It reads the repo and feeds a `DiffResult` into `DiffViewModel.BeginLoad`. **Core and Avalonia never reference git** - the CLI and the App own the git reader and inject text / results into the engine.
@@ -95,8 +96,8 @@ Reference checkout: `../coderide` (see section 0). Port these files into the bud
 
 ## 6. `Budiff.Cli`
 
-- `budiff` (no args) -> terminal mode, **current folder**: print the changed-files listing; drilling into a file prints the side-by-side ANSI diff. Folder-scoped to the CWD subtree.
-- `budiff --gitroot` -> widen scope to the whole repository (flag name TBD).
+- `budiff` (no args) -> terminal mode, **current folder**: print the Code Analysis bird's-eye; drilling into a file prints the side-by-side ANSI diff. Folder-scoped to the CWD subtree.
+- `budiff --gitroot` -> widen analysis scope to the whole repository (flag name TBD).
 - `budiff -i` -> launch `Budiff.App` on the target.
 - Keep **Avalonia out** of the CLI (reference `Budiff.Core` + a small ANSI renderer) so it stays tiny and Native-AOT-friendly.
 - **Architectural rule:** render the terminal output from a **structured change-model**, never by concatenating ANSI strings ad hoc. Keeping the data model separate from the renderer is what makes `--json` and an MCP server (section 9) cheap to add later.
@@ -105,7 +106,7 @@ Reference checkout: `../coderide` (see section 0). Port these files into the bud
 
 A thin desktop window around the diff control - **no Dock dependency**:
 - open a repo (or the CWD); **repo-root detection**: when launched from a subfolder, *offer* to widen to the repo root (this suggestion is GUI-only; the CLI does not do it),
-- a **changed-files listing** panel (file + `+/-` churn + author/commit counts),
+- a **Code Analysis bird's-eye** panel with grouping, period, sort, search, extension filters, and author filters,
 - selection -> the `DiffView` side-by-side pane,
 - a commit / branch picker to diff other points.
 

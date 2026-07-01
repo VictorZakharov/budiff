@@ -1,14 +1,49 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ca="using:Budiff.CodeAnalysis"
         xmlns:budiff="using:Budiff.Avalonia"
         xmlns:materialIcons="using:Material.Icons.Avalonia"
         x:Class="Budiff.App.MainWindow"
         x:CompileBindings="False"
-        Width="1180"
-        Height="760"
-        MinWidth="900"
+        Width="1440"
+        Height="820"
+        MinWidth="1180"
         MinHeight="560"
         Title="{Binding WindowTitle}">
+    <Window.Styles>
+        <Style Selector="TreeViewItem">
+            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+        </Style>
+        <Style Selector="TextBlock.num">
+            <Setter Property="HorizontalAlignment" Value="Right" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="FontFamily" Value="Cascadia Code,Consolas,monospace" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Margin" Value="8,0,8,0" />
+        </Style>
+        <Style Selector="ProgressBar.size">
+            <Setter Property="Height" Value="7" />
+            <Setter Property="MinHeight" Value="7" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="Foreground" Value="#61AFEF" />
+            <Setter Property="Background" Value="#22FFFFFF" />
+            <Setter Property="CornerRadius" Value="3" />
+        </Style>
+        <Style Selector="Button.colHeader">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="4,2" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Right" />
+        </Style>
+        <Style Selector="Button.colHeader TextBlock">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource BudiffMutedTextBrush}" />
+        </Style>
+    </Window.Styles>
+
     <Grid RowDefinitions="Auto,*" Background="{DynamicResource BudiffEditorBackgroundBrush}">
         <Border Grid.Row="0"
                 Padding="10,8"
@@ -77,87 +112,250 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Row="1" ColumnDefinitions="340,*">
-            <Border Grid.Column="0"
-                    Background="#252629"
-                    BorderBrush="{DynamicResource BudiffBorderBrush}"
-                    BorderThickness="0,0,1,0">
+        <Grid Grid.Row="1" ColumnDefinitions="*,5,500">
+            <DockPanel Grid.Column="0" Background="#252629">
+                <Border DockPanel.Dock="Top"
+                        IsVisible="{Binding ShowScopeOffer}"
+                        Padding="10,8"
+                        Background="#202B3F"
+                        BorderBrush="#314A70"
+                        BorderThickness="0,0,0,1">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                        <TextBlock Text="Showing only this folder."
+                                   Foreground="{DynamicResource BudiffTextBrush}"
+                                   VerticalAlignment="Center" />
+                        <Button Grid.Column="1"
+                                Content="Use repo root"
+                                Command="{Binding UseRepoRootCommand}"
+                                Padding="8,4" />
+                    </Grid>
+                </Border>
+
+                <Border DockPanel.Dock="Top"
+                        Padding="10,8"
+                        Background="{DynamicResource BudiffToolbarBrush}"
+                        BorderBrush="{DynamicResource BudiffBorderBrush}"
+                        BorderThickness="0,0,0,1">
+                    <StackPanel Spacing="8">
+                        <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto" ColumnSpacing="10">
+                            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                <TextBlock Text="Group" Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
+                                <ComboBox Width="116"
+                                          ItemsSource="{Binding Analysis.Groupings}"
+                                          SelectedItem="{Binding Analysis.SelectedGrouping, Mode=TwoWay}">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Label}" />
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                <TextBlock Text="Period" Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
+                                <ComboBox Width="132"
+                                          ItemsSource="{Binding Analysis.Periods}"
+                                          IsEnabled="{Binding Analysis.GitAvailable}"
+                                          SelectedItem="{Binding Analysis.SelectedPeriod, Mode=TwoWay}">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Label}" />
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                            </StackPanel>
+
+                            <TextBox Grid.Column="2"
+                                     PlaceholderText="Filter files..."
+                                     Text="{Binding Analysis.SearchText, Mode=TwoWay}"
+                                     VerticalAlignment="Center" />
+
+                            <Button Grid.Column="3"
+                                    Content="Reset"
+                                    Command="{Binding Analysis.ResetViewCommand}"
+                                    Padding="10,5" />
+
+                            <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"
+                                        IsVisible="{Binding Analysis.IsScanning}">
+                                <ProgressBar IsIndeterminate="True" Width="72" Height="6" />
+                                <TextBlock Text="Scanning" Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                            </StackPanel>
+                        </Grid>
+
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding Analysis.SummaryHead}" FontSize="12" Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                            <TextBlock Text="{Binding Analysis.SummaryCode}" FontSize="12" Foreground="{DynamicResource BudiffTextBrush}" />
+                            <TextBlock Text="{Binding Analysis.SummaryBlank}" FontSize="12" Foreground="#6E747E" />
+                            <TextBlock Text="{Binding Analysis.SummaryComment}" FontSize="12" Foreground="#5E8C5E" />
+                            <TextBlock Text="{Binding Analysis.SummaryTail}" FontSize="12" Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border DockPanel.Dock="Right"
+                        Width="220"
+                        Background="#222326"
+                        BorderBrush="{DynamicResource BudiffBorderBrush}"
+                        BorderThickness="1,0,0,0">
+                    <Grid RowDefinitions="*,5,*">
+                        <DockPanel Grid.Row="0">
+                            <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto,Auto" Margin="12,10,10,8">
+                                <TextBlock Text="EXTENSIONS" FontSize="11" FontWeight="SemiBold"
+                                           Foreground="#61AFEF" VerticalAlignment="Center" />
+                                <Button Grid.Column="1" Content="All" Command="{Binding Analysis.SelectAllExtensionsCommand}"
+                                        IsEnabled="{Binding Analysis.CanSelectAllExtensions}" Padding="7,2" FontSize="11" />
+                                <Button Grid.Column="2" Content="None" Command="{Binding Analysis.SelectNoExtensionsCommand}"
+                                        IsEnabled="{Binding Analysis.CanSelectNoneExtensions}" Padding="7,2" FontSize="11" Margin="6,0,0,0" />
+                            </Grid>
+                            <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                                <ItemsControl ItemsSource="{Binding Analysis.Extensions}" Margin="8,0,8,10">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <CheckBox IsChecked="{Binding Included, Mode=TwoWay}" Margin="4,2" Padding="6,0,0,0">
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding Display}" FontSize="13" FontFamily="Cascadia Code,Consolas,monospace" />
+                                                    <TextBlock Text="{Binding Summary}" FontSize="11" Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                                                </StackPanel>
+                                            </CheckBox>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </DockPanel>
+
+                        <GridSplitter Grid.Row="1" Height="5" ResizeDirection="Rows" HorizontalAlignment="Stretch"
+                                      Background="{DynamicResource BudiffBorderBrush}" />
+
+                        <DockPanel Grid.Row="2">
+                            <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto,Auto" Margin="12,10,10,8">
+                                <TextBlock Text="AUTHORS" FontSize="11" FontWeight="SemiBold"
+                                           Foreground="#61AFEF" VerticalAlignment="Center" />
+                                <Button Grid.Column="1" Content="All" Command="{Binding Analysis.SelectAllAuthorsCommand}"
+                                        IsEnabled="{Binding Analysis.CanSelectAllAuthors}" Padding="7,2" FontSize="11" />
+                                <Button Grid.Column="2" Content="None" Command="{Binding Analysis.SelectNoneAuthorsCommand}"
+                                        IsEnabled="{Binding Analysis.CanSelectNoneAuthors}" Padding="7,2" FontSize="11" Margin="6,0,0,0" />
+                            </Grid>
+                            <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                                <ItemsControl ItemsSource="{Binding Analysis.Authors}" Margin="8,0,8,10">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <CheckBox IsChecked="{Binding Included, Mode=TwoWay}" Margin="4,2" Padding="6,0,0,0">
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding Author}" FontSize="13" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{Binding Summary}" FontSize="11" Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                                                </StackPanel>
+                                            </CheckBox>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                        </DockPanel>
+                    </Grid>
+                </Border>
+
                 <DockPanel>
                     <Border DockPanel.Dock="Top"
-                            IsVisible="{Binding ShowScopeOffer}"
-                            Padding="10,8"
-                            Background="#202B3F"
-                            BorderBrush="#314A70"
-                            BorderThickness="0,0,0,1">
-                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                            <TextBlock Text="Showing only this folder."
-                                       Foreground="{DynamicResource BudiffTextBrush}"
-                                       VerticalAlignment="Center" />
-                            <Button Grid.Column="1"
-                                    Content="Use repo root"
-                                    Command="{Binding UseRepoRootCommand}"
-                                    Padding="8,4" />
-                        </Grid>
-                    </Border>
-
-                    <Border DockPanel.Dock="Top"
-                            Padding="10,8"
                             BorderBrush="{DynamicResource BudiffBorderBrush}"
-                            BorderThickness="0,0,0,1">
-                        <Grid ColumnDefinitions="*,Auto">
-                            <TextBlock Text="Changed files"
-                                       FontWeight="SemiBold"
-                                       Foreground="{DynamicResource BudiffTextBrush}"
-                                       VerticalAlignment="Center" />
-                            <TextBlock Grid.Column="1"
-                                       Text="{Binding FileCountText}"
-                                       Foreground="{DynamicResource BudiffMutedTextBrush}"
-                                       VerticalAlignment="Center" />
+                            BorderThickness="0,0,0,1"
+                            Padding="6,6,18,6">
+                        <Grid ColumnDefinitions="*,72,72,64,76,54,78,78,64,60,90">
+                            <Button Grid.Column="0" Classes="colHeader" HorizontalContentAlignment="Left"
+                                    Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Name}">
+                                <StackPanel Orientation="Horizontal" Spacing="3">
+                                    <TextBlock Text="Name" /><TextBlock Text="{Binding Analysis.NameGlyph}" FontSize="9" />
+                                </StackPanel>
+                            </Button>
+                            <Button Grid.Column="1" Classes="colHeader" Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Lines}">
+                                <StackPanel Orientation="Horizontal" Spacing="3" HorizontalAlignment="Right">
+                                    <TextBlock Text="Lines" /><TextBlock Text="{Binding Analysis.LinesGlyph}" FontSize="9" />
+                                </StackPanel>
+                            </Button>
+                            <Button Grid.Column="2" Classes="colHeader" Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Code}">
+                                <StackPanel Orientation="Horizontal" Spacing="3" HorizontalAlignment="Right">
+                                    <TextBlock Text="Code" /><TextBlock Text="{Binding Analysis.CodeGlyph}" FontSize="9" />
+                                </StackPanel>
+                            </Button>
+                            <Button Grid.Column="3" Classes="colHeader" Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Blank}">
+                                <StackPanel Orientation="Horizontal" Spacing="3" HorizontalAlignment="Right">
+                                    <TextBlock Text="Blank" /><TextBlock Text="{Binding Analysis.BlankGlyph}" FontSize="9" />
+                                </StackPanel>
+                            </Button>
+                            <Button Grid.Column="4" Classes="colHeader" Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Comment}">
+                                <StackPanel Orientation="Horizontal" Spacing="3" HorizontalAlignment="Right">
+                                    <TextBlock Text="Comment" /><TextBlock Text="{Binding Analysis.CommentGlyph}" FontSize="9" />
+                                </StackPanel>
+                            </Button>
+                            <Button Grid.Column="5" Classes="colHeader" Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Files}">
+                                <StackPanel Orientation="Horizontal" Spacing="3" HorizontalAlignment="Right">
+                                    <TextBlock Text="Files" /><TextBlock Text="{Binding Analysis.FilesGlyph}" FontSize="9" />
+                                </StackPanel>
+                            </Button>
+                            <Button Grid.Column="6" Classes="colHeader" Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Added}">
+                                <StackPanel Orientation="Horizontal" Spacing="3" HorizontalAlignment="Right">
+                                    <TextBlock Text="Added" /><TextBlock Text="{Binding Analysis.AddedGlyph}" FontSize="9" />
+                                </StackPanel>
+                            </Button>
+                            <Button Grid.Column="7" Classes="colHeader" Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Removed}">
+                                <StackPanel Orientation="Horizontal" Spacing="3" HorizontalAlignment="Right">
+                                    <TextBlock Text="Removed" /><TextBlock Text="{Binding Analysis.RemovedGlyph}" FontSize="9" />
+                                </StackPanel>
+                            </Button>
+                            <Button Grid.Column="8" Classes="colHeader" Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Commits}">
+                                <StackPanel Orientation="Horizontal" Spacing="3" HorizontalAlignment="Right">
+                                    <TextBlock Text="Commits" /><TextBlock Text="{Binding Analysis.CommitsGlyph}" FontSize="9" />
+                                </StackPanel>
+                            </Button>
+                            <Button Grid.Column="9" Classes="colHeader" Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Authors}">
+                                <StackPanel Orientation="Horizontal" Spacing="3" HorizontalAlignment="Right">
+                                    <TextBlock Text="Authors" /><TextBlock Text="{Binding Analysis.AuthorsGlyph}" FontSize="9" />
+                                </StackPanel>
+                            </Button>
+                            <TextBlock Grid.Column="10" Text="Size" FontSize="11" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" Margin="12,0,0,0" />
                         </Grid>
                     </Border>
 
-                    <TextBlock Text="{Binding EmptyText}"
-                               IsVisible="{Binding HasNoFiles}"
-                               TextAlignment="Center"
-                               TextWrapping="Wrap"
-                               Margin="24"
-                               HorizontalAlignment="Center"
-                               VerticalAlignment="Center"
-                               Foreground="{DynamicResource BudiffMutedTextBrush}" />
-
-                    <ListBox ItemsSource="{Binding Files}"
-                             SelectedItem="{Binding SelectedFile, Mode=TwoWay}"
-                             Background="Transparent"
-                             BorderThickness="0">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <Grid ColumnDefinitions="32,*,Auto" ColumnSpacing="8" MinHeight="44" Margin="0,2">
-                                    <TextBlock Text="{Binding StateText}"
-                                               Foreground="{Binding StateBrush}"
-                                               FontFamily="Cascadia Code,Consolas,monospace"
-                                               VerticalAlignment="Center"
-                                               HorizontalAlignment="Center" />
-                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                        <TextBlock Text="{Binding Path}"
+                    <TreeView x:Name="AnalysisTree"
+                              ItemsSource="{Binding Analysis.Roots}"
+                              DoubleTapped="OnAnalysisRowDoubleTapped"
+                              Background="Transparent"
+                              BorderThickness="0"
+                              Padding="6,0,18,0">
+                        <TreeView.ItemTemplate>
+                            <TreeDataTemplate ItemsSource="{Binding Children}">
+                                <Grid Height="24" Background="Transparent" ColumnDefinitions="*,72,72,64,76,54,78,78,64,60,90">
+                                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                        <materialIcons:MaterialIcon Kind="{Binding Icon}" Width="15" Height="15"
+                                                                    Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                                        <TextBlock Text="{Binding Name}" Padding="2,0"
+                                                   Background="{Binding NameBackground}"
                                                    Foreground="{DynamicResource BudiffTextBrush}"
                                                    TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Text="{Binding DetailText}"
-                                                   FontSize="11.5"
-                                                   Foreground="{DynamicResource BudiffMutedTextBrush}"
-                                                   TextTrimming="CharacterEllipsis" />
                                     </StackPanel>
-                                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                        <TextBlock Text="{Binding AddedText}" Foreground="#7EE787" />
-                                        <TextBlock Text="{Binding RemovedText}" Foreground="#FF7B72" />
-                                    </StackPanel>
+                                    <TextBlock Grid.Column="1" Classes="num" Text="{Binding LinesText}" Foreground="{DynamicResource BudiffTextBrush}" />
+                                    <TextBlock Grid.Column="2" Classes="num" Text="{Binding CodeText}" Foreground="{DynamicResource BudiffTextBrush}" />
+                                    <TextBlock Grid.Column="3" Classes="num" Text="{Binding BlankText}" Foreground="#6E747E" />
+                                    <TextBlock Grid.Column="4" Classes="num" Text="{Binding CommentText}" Foreground="#5E8C5E" />
+                                    <TextBlock Grid.Column="5" Classes="num" Text="{Binding FilesText}" Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                                    <TextBlock Grid.Column="6" Classes="num" Text="{Binding AddedText}" Foreground="#6BB36B" />
+                                    <TextBlock Grid.Column="7" Classes="num" Text="{Binding RemovedText}" Foreground="#D16969" />
+                                    <TextBlock Grid.Column="8" Classes="num" Text="{Binding CommitsText}" Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                                    <TextBlock Grid.Column="9" Classes="num" Text="{Binding AuthorsText}" Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                                    <ProgressBar Grid.Column="10" Classes="size" Minimum="0" Maximum="1"
+                                                 Value="{Binding BarFraction}" VerticalAlignment="Center" Margin="12,0,8,0" />
                                 </Grid>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
+                            </TreeDataTemplate>
+                        </TreeView.ItemTemplate>
+                    </TreeView>
                 </DockPanel>
-            </Border>
+            </DockPanel>
 
-            <budiff:DiffView Grid.Column="1" DataContext="{Binding Diff}" />
+            <GridSplitter Grid.Column="1"
+                          ResizeDirection="Columns"
+                          Background="{DynamicResource BudiffBorderBrush}"
+                          HorizontalAlignment="Stretch" />
+
+            <budiff:DiffView Grid.Column="2" DataContext="{Binding Diff}" />
         </Grid>
     </Grid>
 </Window>

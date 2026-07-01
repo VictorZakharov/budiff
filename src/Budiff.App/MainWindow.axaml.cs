@@ -1,5 +1,7 @@
 using System;
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
@@ -39,5 +41,29 @@ public sealed partial class MainWindow : Window
         {
             await _viewModel.LoadAsync(path, gitRoot: false);
         }
+    }
+
+    private async void OnAnalysisRowDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        if (FindAnalysisRow(e.Source) is { IsFile: true } row)
+        {
+            await _viewModel.Analysis.OpenAsync(row);
+        }
+    }
+
+    private static CodeAnalysisRow? FindAnalysisRow(object? source)
+    {
+        var node = source as StyledElement;
+        while (node is not null)
+        {
+            if (node.DataContext is CodeAnalysisRow row)
+            {
+                return row;
+            }
+
+            node = node.Parent;
+        }
+
+        return null;
     }
 }

@@ -1,5 +1,6 @@
 using System.IO;
 using Budiff;
+using Budiff.CodeAnalysis;
 using Budiff.Git;
 using Xunit;
 
@@ -33,6 +34,41 @@ public sealed class AnsiRendererTests
         Assert.Contains("budiff HEAD vs working tree", text);
         Assert.Contains("src/App.cs", text);
         Assert.Contains("Run `budiff <file>`", text);
+    }
+
+    [Fact]
+    public void RenderAnalysis_PrintsBirdsEyeColumns()
+    {
+        var output = new StringWriter();
+        var scan = new ScanResult
+        {
+            Root = "G:\\Git\\budiff",
+            HasGit = true,
+            Files = new[]
+            {
+                new FileStat { RelativePath = "src/App.cs", Extension = ".cs", Lines = new LineCounts(10, 2, 3) },
+                new FileStat { RelativePath = "README.md", Extension = ".md", Lines = new LineCounts(5, 1, 0) },
+            },
+        };
+        var history = new HistoryResult();
+        var app = history.ForPath("src/App.cs");
+        app.Added = 4;
+        app.Removed = 1;
+        app.Commits.Add(0);
+        app.Authors.Add("Ada");
+        history.AuthorCommits["Ada"] = 1;
+
+        AnsiRenderer.RenderAnalysis(
+            new CodeAnalysisSnapshot(scan, history),
+            output,
+            new GitRepositoryScope("G:\\Git\\budiff", "G:\\Git\\budiff", string.Empty, true, "main"),
+            sinceDays: 30);
+
+        var text = output.ToString();
+        Assert.Contains("bird's-eye", text);
+        Assert.Contains("lines", text);
+        Assert.Contains("src", text);
+        Assert.Contains("+4", text);
     }
 
     [Fact]
