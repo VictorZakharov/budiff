@@ -497,60 +497,19 @@ public sealed partial class DiffViewModel : ObservableObject
     {
         // Built as a list and swapped in with ONE reset: per-row Add events made
         // the items host (and the gutter) process thousands of changes per toggle.
-        var rows = new List<DiffRowVm>(_all.Count);
-        var n = _all.Count;
-        var i = 0;
-        while (i < n)
+        // The collapse/gap shape itself lives in DiffRowCollapser.
+        var plan = DiffRowCollapser.Build(_all, _collapseUnchanged, ContextLines, _expandedGaps);
+        var rows = new List<DiffRowVm>(plan.Count);
+        foreach (var item in plan)
         {
-            if (_collapseUnchanged && _all[i].Kind == DiffKind.Unchanged)
-            {
-                var j = i;
-                while (j < n && _all[j].Kind == DiffKind.Unchanged)
+            rows.Add(item.IsGap
+                ? new DiffRowVm
                 {
-                    j++;
+                    IsGap = true,
+                    GapRunStart = item.GapRunStart,
+                    GapText = DiffRowCollapser.GapText(item.Hidden),
                 }
-
-                var runLen = j - i;
-                if (runLen > (2 * ContextLines) + 1 && !_expandedGaps.Contains(i))
-                {
-                    var lead = i == 0 ? 0 : ContextLines;
-                    var trail = j == n ? 0 : ContextLines;
-                    for (var k = i; k < i + lead; k++)
-                    {
-                        rows.Add(Content(_all[k]));
-                    }
-
-                    var hidden = runLen - lead - trail;
-                    if (hidden > 0)
-                    {
-                        rows.Add(new DiffRowVm
-                        {
-                            IsGap = true,
-                            GapRunStart = i,
-                            GapText = $"...   {hidden} unchanged line{(hidden == 1 ? string.Empty : "s")}   -   click to expand   ...",
-                        });
-                    }
-
-                    for (var k = j - trail; k < j; k++)
-                    {
-                        rows.Add(Content(_all[k]));
-                    }
-                }
-                else
-                {
-                    for (var k = i; k < j; k++)
-                    {
-                        rows.Add(Content(_all[k]));
-                    }
-                }
-
-                i = j;
-            }
-            else
-            {
-                rows.Add(Content(_all[i]));
-                i++;
-            }
+                : Content(_all[item.Index]));
         }
 
         Rows.ReplaceAll(rows);

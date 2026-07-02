@@ -170,9 +170,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     private HistoryResult? _history;
     private bool _ready;
     private bool _suspendRebuild;
-    private bool _searching;
     private bool _lastWasSearching;
-    private string _query = string.Empty;
     private PeriodOption _appliedPeriod = null!;
     private int? _appliedDays;
     private double _msPerCommit;
@@ -519,17 +517,10 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         }
     }
 
-    // A broad query (the first 1-2 typed characters match almost every name) is
-    // not a useful filter yet, but hiding/expanding rows for it forces the
-    // non-virtualized TreeView through a layout pass over every realized row -
-    // the typing lag. So while matches exceed this threshold the search only
-    // HIGHLIGHTS in place; filtering and match-path expansion kick in together
-    // once the match set is narrow enough to be worth scanning.
-    internal const int SearchExpandThreshold = 64;
-
-    // In-place search: walks the existing rows setting visibility, the substring
-    // highlight, and match-path expansion via observable properties - the TreeView
-    // keeps its containers, so this is instant even on large trees.
+    // In-place search: RowSearch walks the existing rows setting visibility,
+    // the substring highlight, and match-path expansion via observable
+    // properties - the TreeView keeps its containers, so this is instant even
+    // on large trees. The threshold policy lives on RowSearch.ExpandThreshold.
     private void ApplySearch()
     {
         var query = SearchText.Trim();
@@ -539,64 +530,11 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             CaptureExpansion();
         }
 
-        _query = query;
-        _searching = searching;
-
-        var matches = 0;
-        foreach (var row in Roots)
-        {
-            ComputeMatches(row, ref matches);
-        }
-
-        // Expansion rides along in pass 2 (which already visits every row)
-        // instead of a third full traversal per keystroke.
-        var narrow = searching && matches <= SearchExpandThreshold;
+        var matches = RowSearch.ComputeMatches(Roots, query);
+        var narrow = searching && matches <= RowSearch.ExpandThreshold;
         var applyExpansion = searching || _lastWasSearching;
-        foreach (var row in Roots)
-        {
-            ApplySearchToRow(row, ancestorMatched: false, filter: narrow, applyExpansion);
-        }
-
+        RowSearch.Apply(Roots, query, filter: narrow, applyExpansion, _expanded);
         _lastWasSearching = searching;
-    }
-
-    // Pass 1: match state per row (the filter decision needs the TOTAL count first).
-    private bool ComputeMatches(CodeAnalysisRow row, ref int matches)
-    {
-        var index = _searching ? row.Name.IndexOf(_query, StringComparison.OrdinalIgnoreCase) : -1;
-        if (index >= 0)
-        {
-            matches++;
-        }
-
-        var descendantMatch = false;
-        foreach (var child in row.Children)
-        {
-            descendantMatch |= ComputeMatches(child, ref matches);
-        }
-
-        row.MatchIndex = index;
-        row.HasDescendantMatch = descendantMatch;
-        return index >= 0 || descendantMatch;
-    }
-
-    // Pass 2: highlight always; hide non-matching rows only in filter (narrow)
-    // mode; while searching (or when a search just ended) also set expansion -
-    // match paths in narrow mode, the captured user expansion otherwise.
-    private void ApplySearchToRow(CodeAnalysisRow row, bool ancestorMatched, bool filter, bool applyExpansion)
-    {
-        var matched = row.MatchIndex >= 0;
-        row.SetNameHighlight(row.MatchIndex, _query.Length);
-        row.IsSearchVisible = !filter || matched || row.HasDescendantMatch || ancestorMatched;
-        if (applyExpansion && !row.IsFile)
-        {
-            row.IsExpanded = _searching && filter ? row.HasDescendantMatch : _expanded.Contains(row.RelativePath);
-        }
-
-        foreach (var child in row.Children)
-        {
-            ApplySearchToRow(child, ancestorMatched || matched, filter, applyExpansion);
-        }
     }
 
     private CodeAnalysisRow BuildRow(AnalysisNode node, int depth)
