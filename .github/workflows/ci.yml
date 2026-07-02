@@ -8,6 +8,34 @@ on:
     branches: [main]
 
 jobs:
+  # The release publishes linux-x64 / osx-arm64 self-contained CLIs, so build
+  # and test on Linux too. Keep the Integration filter: the runner ships Node,
+  # which defeats those tests' toolchain self-skip. The tag/pack/release steps
+  # stay in the Windows job - the packaged GUI is a win-x64 NativeAOT publish
+  # that cannot cross-compile.
+  build-test-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore Budiff.slnx
+
+      - name: Build
+        run: dotnet build Budiff.slnx -c Release --no-restore
+
+      - name: Test
+        run: dotnet test Budiff.slnx -c Release --no-build --filter "Category!=Integration"
+
   build-test:
     runs-on: windows-latest
 
