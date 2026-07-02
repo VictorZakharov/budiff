@@ -54,6 +54,18 @@
             <Setter Property="Width" Value="18" />
             <Setter Property="Height" Value="18" />
         </Style>
+        <Style Selector="Button.segment">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="Padding" Value="12,5" />
+            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="Foreground" Value="{DynamicResource BudiffMutedTextBrush}" />
+        </Style>
+        <Style Selector="Button.segment.active">
+            <Setter Property="Background" Value="#2D5A9E" />
+            <Setter Property="Foreground" Value="#FFFFFF" />
+        </Style>
         <Style Selector="TextBlock.num">
             <Setter Property="HorizontalAlignment" Value="Right" />
             <Setter Property="VerticalAlignment" Value="Center" />
@@ -171,18 +183,26 @@
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                <TextBlock Text="Group" Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
-                                <ComboBox Width="116"
-                                          ItemsSource="{Binding Analysis.Groupings}"
-                                          SelectedItem="{Binding Analysis.SelectedGrouping, Mode=TwoWay}">
-                                    <ComboBox.ItemTemplate>
-                                        <DataTemplate>
-                                            <TextBlock Text="{Binding Label}" />
-                                        </DataTemplate>
-                                    </ComboBox.ItemTemplate>
-                                </ComboBox>
-                            </StackPanel>
+                            <!-- Segmented Folders/Projects switch (#49): both labels
+                                 visible, the active side highlighted - one click flips. -->
+                            <Border BorderBrush="{DynamicResource BudiffBorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="4"
+                                    ClipToBounds="True"
+                                    VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Classes="segment"
+                                            Classes.active="{Binding Analysis.IsFoldersGrouping}"
+                                            Content="Folders"
+                                            Command="{Binding Analysis.SelectGroupingCommand}"
+                                            CommandParameter="{Binding Analysis.Groupings[0]}" />
+                                    <Button Classes="segment"
+                                            Classes.active="{Binding Analysis.IsProjectsGrouping}"
+                                            Content="Projects"
+                                            Command="{Binding Analysis.SelectGroupingCommand}"
+                                            CommandParameter="{Binding Analysis.Groupings[1]}" />
+                                </StackPanel>
+                            </Border>
 
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                                 <TextBlock Text="Period" Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />

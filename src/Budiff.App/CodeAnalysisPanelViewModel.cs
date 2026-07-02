@@ -723,7 +723,20 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         }
     }
 
-    partial void OnSelectedGroupingChanged(GroupingOption value) => Rebuild();
+    // The segmented Folders/Projects toggle highlights the active side.
+    public bool IsFoldersGrouping => SelectedGrouping.Value == AnalysisGrouping.Folders;
+
+    public bool IsProjectsGrouping => SelectedGrouping.Value == AnalysisGrouping.Projects;
+
+    [RelayCommand]
+    private void SelectGrouping(GroupingOption option) => SelectedGrouping = option;
+
+    partial void OnSelectedGroupingChanged(GroupingOption value)
+    {
+        OnPropertyChanged(nameof(IsFoldersGrouping));
+        OnPropertyChanged(nameof(IsProjectsGrouping));
+        Rebuild();
+    }
 
     partial void OnSelectedPeriodChanged(PeriodOption value)
     {
