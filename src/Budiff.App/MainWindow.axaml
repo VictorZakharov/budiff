@@ -23,6 +23,12 @@
              inside the name cell instead (Depth on the row VM). -->
         <Style Selector="TreeView#AnalysisTree TreeViewItem">
             <Setter Property="Padding" Value="0" />
+            <!-- The Fluent theme's TreeViewItem MinHeight is taller than the
+                 24px row content, leaving a dead un-highlighted band between
+                 rows (hover/selection looked like disconnected stripes).
+                 Zeroing it makes rows contiguous so the highlight rolls from
+                 one row to the next. -->
+            <Setter Property="MinHeight" Value="0" />
             <Setter Property="Template">
                 <ControlTemplate>
                     <StackPanel>
@@ -65,6 +71,16 @@
         <Style Selector="Button.segment.active">
             <Setter Property="Background" Value="#2D5A9E" />
             <Setter Property="Foreground" Value="#FFFFFF" />
+        </Style>
+        <!-- The container border is rounded (4) but ClipToBounds clips to the
+             RECTANGULAR bounds, so a square highlight pokes into the rounded
+             corners. Round each segment's outer corners instead (4 minus the
+             1px border). -->
+        <Style Selector="Button.segment.left">
+            <Setter Property="CornerRadius" Value="3,0,0,3" />
+        </Style>
+        <Style Selector="Button.segment.right">
+            <Setter Property="CornerRadius" Value="0,3,3,0" />
         </Style>
         <Style Selector="TextBlock.num">
             <Setter Property="HorizontalAlignment" Value="Right" />
@@ -191,12 +207,12 @@
                                     ClipToBounds="True"
                                     VerticalAlignment="Center">
                                 <StackPanel Orientation="Horizontal">
-                                    <Button Classes="segment"
+                                    <Button Classes="segment left"
                                             Classes.active="{Binding Analysis.IsFoldersGrouping}"
                                             Content="Folders"
                                             Command="{Binding Analysis.SelectGroupingCommand}"
                                             CommandParameter="{Binding Analysis.Groupings[0]}" />
-                                    <Button Classes="segment"
+                                    <Button Classes="segment right"
                                             Classes.active="{Binding Analysis.IsProjectsGrouping}"
                                             Content="Projects"
                                             Command="{Binding Analysis.SelectGroupingCommand}"
