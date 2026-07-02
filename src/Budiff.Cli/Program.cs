@@ -43,10 +43,7 @@ internal static class BudiffCli
 
         if (options.OpenGui)
         {
-            // The GUI takes a moment to paint its first window; say something
-            // immediately so the launch does not look like a silent failure.
-            output.WriteLine("Opening budiff GUI...");
-            return AppLauncher.Launch(options);
+            return AppLauncher.Launch(options, output);
         }
 
         // --days 0 = all time; default window is 30 days.

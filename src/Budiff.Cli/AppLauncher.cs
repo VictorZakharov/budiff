@@ -2,18 +2,22 @@ using System.Diagnostics;
 
 internal static class AppLauncher
 {
+    // The GUI takes about a second to first paint; give up on the window
+    // well after that so a slow cold start still gets the "ready" moment.
+    private const int WindowWaitTimeoutMs = 15000;
+
     // A real launch failure (permissions, broken exe) is a different problem
     // than "no GUI found"; remember it so the final message can say which.
     private static string? _lastLaunchError;
 
-    public static int Launch(CliOptions options)
+    public static int Launch(CliOptions options, TextWriter output)
     {
         var start = Environment.CurrentDirectory;
         _lastLaunchError = null;
         var configured = Environment.GetEnvironmentVariable("BUDIFF_APP_PATH");
-        if (!string.IsNullOrWhiteSpace(configured) && TryStart(configured, start, options.GitRoot))
+        if (!string.IsNullOrWhiteSpace(configured) && TryStart(configured, start, options.GitRoot) is { } fromEnv)
         {
-            return 0;
+            return WaitForFirstWindow(fromEnv, output);
         }
 
         // The GUI ships inside the tool package under gui/win-x64/ as a
@@ -33,9 +37,9 @@ internal static class AppLauncher
             candidates.Add(Path.Combine(baseDir, name));
             foreach (var path in candidates)
             {
-                if (File.Exists(path) && TryStart(path, start, options.GitRoot))
+                if (File.Exists(path) && TryStart(path, start, options.GitRoot) is { } fromPackage)
                 {
-                    return 0;
+                    return WaitForFirstWindow(fromPackage, output);
                 }
             }
         }
@@ -44,9 +48,9 @@ internal static class AppLauncher
         // the assembly through the dotnet host instead. The shipped package is
         // win-x64 only, so this serves hand-assembled portable layouts.
         var bundledDll = Path.Combine(baseDir, "gui", "Budiff.App.dll");
-        if (File.Exists(bundledDll) && TryStartDll(bundledDll, start, options.GitRoot))
+        if (File.Exists(bundledDll) && TryStartDll(bundledDll, start, options.GitRoot) is { } fromDll)
         {
-            return 0;
+            return WaitForFirstWindow(fromDll, output);
         }
 
         // Dev fallback: inside the budiff repo, launch the exe a normal build
@@ -56,9 +60,9 @@ internal static class AppLauncher
         if (appDir is not null)
         {
             var built = FindNewestBuiltApp(appDir);
-            if (built is not null && TryStart(built, start, options.GitRoot))
+            if (built is not null && TryStart(built, start, options.GitRoot) is { } fromDev)
             {
-                return 0;
+                return WaitForFirstWindow(fromDev, output);
             }
 
             Console.Error.WriteLine(_lastLaunchError is { } devError
@@ -73,35 +77,81 @@ internal static class AppLauncher
         return 1;
     }
 
-    private static bool TryStart(string executable, string startPath, bool gitRoot)
+    // Hold the prompt with a spinner until the GUI actually has a window, so
+    // the launch never reads as "nothing happened". Returns non-zero if the
+    // app died before showing one.
+    private static int WaitForFirstWindow(Process process, TextWriter output)
+    {
+        output.Write("Opening budiff GUI... ");
+        if (!OperatingSystem.IsWindows())
+        {
+            // MainWindowHandle is Windows-only; elsewhere just report the start.
+            output.WriteLine();
+            return 0;
+        }
+
+        var spinner = new[] { '|', '/', '-', '\\' };
+        var animate = !Console.IsOutputRedirected;
+        var stopwatch = Stopwatch.StartNew();
+        var frame = 0;
+        while (stopwatch.ElapsedMilliseconds < WindowWaitTimeoutMs)
+        {
+            process.Refresh();
+            if (process.HasExited)
+            {
+                output.WriteLine();
+                Console.Error.WriteLine($"Budiff.App exited before showing a window (exit code {process.ExitCode}).");
+                return 1;
+            }
+
+            if (process.MainWindowHandle != IntPtr.Zero)
+            {
+                output.WriteLine("ready.");
+                return 0;
+            }
+
+            if (animate)
+            {
+                output.Write(spinner[frame++ % spinner.Length]);
+                output.Write('\b');
+            }
+
+            Thread.Sleep(80);
+        }
+
+        // No window within the timeout; the app may still be coming up, so
+        // hand the prompt back without failing the launch.
+        output.WriteLine();
+        return 0;
+    }
+
+    private static Process? TryStart(string executable, string startPath, bool gitRoot)
     {
         try
         {
             // UseShellExecute detaches the GUI from this console entirely - the
             // terminal gets its prompt back and never waits on the GUI's lifetime.
             var args = $"\"{startPath}\"" + (gitRoot ? " --gitroot" : string.Empty);
-            Process.Start(new ProcessStartInfo(executable, args) { UseShellExecute = true });
-            return true;
+            return Process.Start(new ProcessStartInfo(executable, args) { UseShellExecute = true });
         }
         catch (Exception ex)
         {
             _lastLaunchError = $"{executable}: {ex.Message}";
-            return false;
+            return null;
         }
     }
 
-    private static bool TryStartDll(string assemblyPath, string startPath, bool gitRoot)
+    private static Process? TryStartDll(string assemblyPath, string startPath, bool gitRoot)
     {
         try
         {
             var args = $"\"{assemblyPath}\" \"{startPath}\"" + (gitRoot ? " --gitroot" : string.Empty);
-            Process.Start(new ProcessStartInfo("dotnet", args) { UseShellExecute = true });
-            return true;
+            return Process.Start(new ProcessStartInfo("dotnet", args) { UseShellExecute = true });
         }
         catch (Exception ex)
         {
             _lastLaunchError = $"dotnet {assemblyPath}: {ex.Message}";
-            return false;
+            return null;
         }
     }
 
