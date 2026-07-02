@@ -338,14 +338,27 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
         IsScanning = true;
         ShowMessage("Scanning...");
-        var days = SinceDays;
-        var sw = Stopwatch.StartNew();
-        var snapshot = await Task.Run(() => CodeAnalysisRepositoryReader.Load(root, days));
-        RecordTiming(sw.ElapsedMilliseconds, snapshot.History?.CommitCount ?? 0);
-        _appliedPeriod = SelectedPeriod;
-        _appliedDays = days;
-        LoadFrom(snapshot.Scan, snapshot.History);
-        IsScanning = false;
+        try
+        {
+            var days = SinceDays;
+            var sw = Stopwatch.StartNew();
+            var snapshot = await Task.Run(() => CodeAnalysisRepositoryReader.Load(root, days));
+            RecordTiming(sw.ElapsedMilliseconds, snapshot.History?.CommitCount ?? 0);
+            _appliedPeriod = SelectedPeriod;
+            _appliedDays = days;
+            LoadFrom(snapshot.Scan, snapshot.History);
+        }
+        catch (Exception ex)
+        {
+            ShowMessage("Scan failed: " + ex.Message);
+            return;
+        }
+        finally
+        {
+            // Never leave the spinner stuck when the scan throws.
+            IsScanning = false;
+        }
+
         HistoryApplied?.Invoke();
     }
 
@@ -786,12 +799,25 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         }
 
         IsScanning = true;
-        var sw = Stopwatch.StartNew();
-        _history = await Task.Run(() => GitHistory.Load(_root, days));
-        RecordTiming(sw.ElapsedMilliseconds, _history?.CommitCount ?? 0);
-        _appliedPeriod = SelectedPeriod;
-        _appliedDays = days;
-        IsScanning = false;
+        try
+        {
+            var sw = Stopwatch.StartNew();
+            _history = await Task.Run(() => GitHistory.Load(_root, days));
+            RecordTiming(sw.ElapsedMilliseconds, _history?.CommitCount ?? 0);
+            _appliedPeriod = SelectedPeriod;
+            _appliedDays = days;
+        }
+        catch (Exception ex)
+        {
+            ShowMessage("Reload failed: " + ex.Message);
+            return;
+        }
+        finally
+        {
+            // Never leave the spinner stuck when the reload throws.
+            IsScanning = false;
+        }
+
         Rebuild();
         HistoryApplied?.Invoke();
     }

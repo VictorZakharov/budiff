@@ -191,6 +191,9 @@ public sealed partial class DiffViewModel : ObservableObject
 
     public void SetPlaceholder(string text)
     {
+        // A direct placeholder must also silence a pending BeginLoad
+        // "Loading diff..." tick, or the timer overwrites this text.
+        _loadingTimer?.Stop();
         _tokenizeGen++;
         IsHighlighting = false;
         _all = Array.Empty<DiffRow>();
@@ -208,6 +211,8 @@ public sealed partial class DiffViewModel : ObservableObject
 
     public void SetDiff(IReadOnlyList<DiffRow> rows)
     {
+        _loadingTimer?.Stop();
+
         // A reload that produced the exact same rows (e.g. the working-tree
         // toggle with a clean tree) keeps everything - rows, highlighting,
         // scroll - instead of rebuilding into a visible flicker.

@@ -482,7 +482,7 @@ internal static class AnsiRenderer
             }
         }
 
-        var width = Math.Max(96, Console.IsOutputRedirected ? 120 : Console.BufferWidth);
+        var width = Math.Max(96, ConsoleWidthOrDefault());
         var pane = Math.Max(32, (width - 7) / 2);
         foreach (var item in CollapseRows(rows))
         {
@@ -664,6 +664,20 @@ internal static class AnsiRenderer
 
     private static string ExpandTabs(string text) => text.Replace("\t", "    ", StringComparison.Ordinal);
 
+    // BufferWidth throws when stdout is not redirected yet no real console is
+    // attached (PTY-less hosts); fall back to a sane default instead of dying.
+    private static int ConsoleWidthOrDefault()
+    {
+        try
+        {
+            return Console.IsOutputRedirected ? 120 : Console.BufferWidth;
+        }
+        catch (IOException)
+        {
+            return 120;
+        }
+    }
+
     private static string FormatSide(
         int? lineNo,
         string? text,
@@ -841,9 +855,14 @@ internal static class AnsiRenderer
 
 internal static class AppLauncher
 {
+    // A real launch failure (permissions, broken exe) is a different problem
+    // than "no GUI found"; remember it so the final message can say which.
+    private static string? _lastLaunchError;
+
     public static int Launch(CliOptions options)
     {
         var start = Environment.CurrentDirectory;
+        _lastLaunchError = null;
         var configured = Environment.GetEnvironmentVariable("BUDIFF_APP_PATH");
         if (!string.IsNullOrWhiteSpace(configured) && TryStart(configured, start, options.GitRoot))
         {
@@ -884,11 +903,15 @@ internal static class AppLauncher
                 return 0;
             }
 
-            Console.Error.WriteLine($"Budiff.App at {appDir} is not built. Run: dotnet build");
+            Console.Error.WriteLine(_lastLaunchError is { } devError
+                ? $"Could not start Budiff.App ({devError})."
+                : $"Budiff.App at {appDir} is not built. Run: dotnet build");
             return 1;
         }
 
-        Console.Error.WriteLine("Could not find Budiff.App. Set BUDIFF_APP_PATH to the GUI executable.");
+        Console.Error.WriteLine(_lastLaunchError is { } error
+            ? $"Could not start Budiff.App ({error})."
+            : "Could not find Budiff.App. Set BUDIFF_APP_PATH to the GUI executable.");
         return 1;
     }
 
@@ -902,8 +925,9 @@ internal static class AppLauncher
             Process.Start(new ProcessStartInfo(executable, args) { UseShellExecute = true });
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            _lastLaunchError = $"{executable}: {ex.Message}";
             return false;
         }
     }
@@ -916,8 +940,9 @@ internal static class AppLauncher
             Process.Start(new ProcessStartInfo("dotnet", args) { UseShellExecute = true });
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            _lastLaunchError = $"dotnet {assemblyPath}: {ex.Message}";
             return false;
         }
     }

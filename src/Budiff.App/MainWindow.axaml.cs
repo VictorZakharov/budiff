@@ -201,22 +201,30 @@ public sealed partial class MainWindow : Window
         base.OnClosed(e);
     }
 
+    // async void: a throw here is an unhandled process crash, so guard.
     private async void OnOpenFolder(object? sender, RoutedEventArgs e)
     {
-        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        try
         {
-            Title = "Open repository or folder",
-            AllowMultiple = false,
-        });
+            var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            {
+                Title = "Open repository or folder",
+                AllowMultiple = false,
+            });
 
-        if (folders.Count == 0)
-        {
-            return;
+            if (folders.Count == 0)
+            {
+                return;
+            }
+
+            if (folders[0].TryGetLocalPath() is { } path)
+            {
+                await _viewModel.LoadAsync(path, gitRoot: false);
+            }
         }
-
-        if (folders[0].TryGetLocalPath() is { } path)
+        catch (Exception ex)
         {
-            await _viewModel.LoadAsync(path, gitRoot: false);
+            _viewModel.StatusText = "Open folder failed: " + ex.Message;
         }
     }
 
@@ -228,11 +236,19 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // async void: a throw here is an unhandled process crash, so guard.
     private async void OnAnalysisRowDoubleTapped(object? sender, TappedEventArgs e)
     {
-        if (FindAnalysisRow(e.Source) is { IsFile: true } row)
+        try
         {
-            await _viewModel.Analysis.OpenAsync(row);
+            if (FindAnalysisRow(e.Source) is { IsFile: true } row)
+            {
+                await _viewModel.Analysis.OpenAsync(row);
+            }
+        }
+        catch (Exception ex)
+        {
+            _viewModel.StatusText = "Open file failed: " + ex.Message;
         }
     }
 

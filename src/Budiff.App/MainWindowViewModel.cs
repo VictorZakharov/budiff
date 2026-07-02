@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
@@ -145,14 +146,24 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _ = Task.Run(() =>
         {
             var forNewSide = false;
-            var blame = GitRepositoryReader.LoadBlame(scope, file.OldPath ?? file.Path, target.BaseRef);
-            if (blame.Count == 0)
+            IReadOnlyList<BlameLineInfo?> blame;
+            try
             {
-                blame = GitHistory.BlameFile(
-                    scope.RepositoryRoot,
-                    file.Path,
-                    target.HeadIsWorkingTree ? null : target.HeadRef ?? "HEAD");
-                forNewSide = true;
+                blame = GitRepositoryReader.LoadBlame(scope, file.OldPath ?? file.Path, target.BaseRef);
+                if (blame.Count == 0)
+                {
+                    blame = GitHistory.BlameFile(
+                        scope.RepositoryRoot,
+                        file.Path,
+                        target.HeadIsWorkingTree ? null : target.HeadRef ?? "HEAD");
+                    forNewSide = true;
+                }
+            }
+            catch
+            {
+                // Blame is decoration: on any git failure leave the column
+                // empty instead of dying as an unobserved task exception.
+                blame = Array.Empty<BlameLineInfo?>();
             }
 
             var entries = new BlameEntry?[blame.Count];
