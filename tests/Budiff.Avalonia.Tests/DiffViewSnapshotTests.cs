@@ -10,6 +10,33 @@ namespace Budiff.Avalonia.Tests;
 
 public sealed class DiffViewSnapshotTests
 {
+    // #48: a wholly-added (new file) diff renders single-pane - only the right
+    // side, full width; a mixed diff stays two-pane.
+    [AvaloniaFact]
+    public void DiffView_NewFile_RendersSinglePane()
+    {
+        var model = new DiffViewModel { Title = "New.cs", Extension = ".cs" };
+        model.SetDiff(LineDiff.Compute(string.Empty, "public class New\n{\n    public int Value => 1;\n}\n"));
+        Assert.True(model.IsSinglePane);
+        // All change rows are Added; the missing old side leaves one blank
+        // Unchanged row (empty line pairing), which single-pane tolerates.
+        Assert.All(model.Rows.Where(r => r.Kind != DiffKind.Unchanged), r => Assert.Equal(DiffKind.Added, r.Kind));
+
+        var window = new Window
+        {
+            Width = 920,
+            Height = 300,
+            Content = new DiffView { DataContext = model },
+        };
+        var snapshot = UiSnapshot.Capture(window, "diff-view-single");
+        Assert.True(new FileInfo(snapshot.Path).Length > 1000);
+
+        // Mixed diff: back to two panes.
+        model.SetDiff(LineDiff.Compute("a\nb\n", "a\nc\n"));
+        Assert.False(model.IsSinglePane);
+        window.Close();
+    }
+
     // Regression for the Collapse-unchanged freeze (#45): the rows host is
     // virtualized, so a large diff must realize only the viewport's rows, and
     // toggling collapse must not re-realize one container per line.

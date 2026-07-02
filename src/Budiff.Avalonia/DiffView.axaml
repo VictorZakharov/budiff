@@ -108,7 +108,55 @@
                                                    Foreground="{Binding MutedTextBrush, ElementName=Root}" />
                                     </Border>
 
-                                    <Grid IsVisible="{Binding !IsGap}" Height="18" ColumnDefinitions="Auto,*,18,*">
+                                    <!-- Single-pane layout (#48): a wholly added/deleted diff
+                                         shows only its populated side at full width. -->
+                                    <Grid Height="18" ColumnDefinitions="Auto,46,*">
+                                        <Grid.IsVisible>
+                                            <MultiBinding Converter="{x:Static BoolConverters.And}">
+                                                <Binding Path="!IsGap" />
+                                                <Binding Path="$parent[ItemsControl].DataContext.IsSinglePane" />
+                                            </MultiBinding>
+                                        </Grid.IsVisible>
+                                        <TextBlock Grid.Column="0"
+                                                   Width="120"
+                                                   Text="{Binding Blame.Label}"
+                                                   IsVisible="{Binding $parent[ItemsControl].DataContext.IsBlameVisible}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Padding="8,0,4,0"
+                                                   FontSize="11"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{Binding MutedTextBrush, ElementName=Root}" />
+                                        <Border Grid.Column="1" Grid.ColumnSpan="2" Background="{Binding SingleBackground}">
+                                            <Grid ColumnDefinitions="46,*">
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding SingleNo}"
+                                                           TextAlignment="Right"
+                                                           Padding="0,0,8,0"
+                                                           FontFamily="Cascadia Code,Consolas,monospace"
+                                                           FontSize="12.5"
+                                                           Foreground="{Binding MutedTextBrush, ElementName=Root}" />
+                                                <ScrollViewer Grid.Column="1"
+                                                              HorizontalScrollBarVisibility="Hidden"
+                                                              VerticalScrollBarVisibility="Disabled"
+                                                              Offset="{Binding $parent[ItemsControl].DataContext.HorizontalScroll, Converter={x:Static local:HScrollOffsetConverter.Instance}}">
+                                                    <TextBlock local:DiffInlines.Runs="{Binding SingleRuns}"
+                                                               TextWrapping="NoWrap"
+                                                               Padding="2,0,4,0"
+                                                               FontFamily="Cascadia Code,Consolas,monospace"
+                                                               FontSize="12.5"
+                                                               Foreground="{Binding TextBrush, ElementName=Root}" />
+                                                </ScrollViewer>
+                                            </Grid>
+                                        </Border>
+                                    </Grid>
+
+                                    <Grid Height="18" ColumnDefinitions="Auto,*,18,*">
+                                        <Grid.IsVisible>
+                                            <MultiBinding Converter="{x:Static BoolConverters.And}">
+                                                <Binding Path="!IsGap" />
+                                                <Binding Path="!$parent[ItemsControl].DataContext.IsSinglePane" />
+                                            </MultiBinding>
+                                        </Grid.IsVisible>
                                         <!-- Blame gutter (#46): who last touched the OLD side's line;
                                              hover for the commit's details. Its own OUTER column, so
                                              showing it costs BOTH code halves equally. -->
@@ -192,6 +240,7 @@
                     <local:DiffFunnelGutter Rows="{Binding Rows}"
                                             ItemsHost="{Binding #RowsHost}"
                                             BlameWidth="{Binding BlameGutterWidth}"
+                                            IsVisible="{Binding !IsSinglePane}"
                                             AddedBrush="{Binding FunnelAddedBrush, ElementName=Root}"
                                             RemovedBrush="{Binding FunnelRemovedBrush, ElementName=Root}"
                                             ModifiedBrush="{Binding FunnelModifiedBrush, ElementName=Root}"

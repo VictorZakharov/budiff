@@ -84,6 +84,11 @@ public sealed partial class DiffViewModel : ObservableObject
     [ObservableProperty]
     private bool _isPlaceholder;
 
+    // A wholly added (new file) or wholly deleted diff has one empty side -
+    // render just the populated side at full width instead of a dead half.
+    [ObservableProperty]
+    private bool _isSinglePane;
+
     [ObservableProperty]
     private string _placeholder = string.Empty;
 
@@ -187,6 +192,7 @@ public sealed partial class DiffViewModel : ObservableObject
         _expandedGaps.Clear();
         MaxScroll = 0;
         HorizontalScroll = 0;
+        IsSinglePane = false;
         Rows.Clear();
         Placeholder = text;
         IsPlaceholder = true;
@@ -199,6 +205,29 @@ public sealed partial class DiffViewModel : ObservableObject
         _all = rows;
         _expandedGaps.Clear();
         HorizontalScroll = 0;
+
+        // A missing side diffs as one empty line, which pairs with the other
+        // side's trailing blank into an Unchanged row - tolerate blank
+        // Unchanged rows when deciding "wholly added/deleted".
+        var anyChange = false;
+        var allAdded = true;
+        var allRemoved = true;
+        foreach (var row in rows)
+        {
+            if (row.Kind == DiffKind.Unchanged)
+            {
+                var blank = string.IsNullOrEmpty(row.OldText) && string.IsNullOrEmpty(row.NewText);
+                allAdded &= blank;
+                allRemoved &= blank;
+                continue;
+            }
+
+            anyChange = true;
+            allAdded &= row.Kind == DiffKind.Added;
+            allRemoved &= row.Kind == DiffKind.Removed;
+        }
+
+        IsSinglePane = anyChange && (allAdded || allRemoved);
 
         var maxLen = 0;
         foreach (var row in rows)
