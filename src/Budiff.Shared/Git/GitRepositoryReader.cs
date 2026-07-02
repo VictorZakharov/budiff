@@ -20,13 +20,13 @@ public static class GitRepositoryReader
             start = Path.GetDirectoryName(start) ?? start;
         }
 
-        var gitDir = Repository.Discover(start);
-        if (string.IsNullOrEmpty(gitDir))
+        var repoDir = DiscoverRepositoryRoot(start);
+        if (repoDir is null)
         {
             throw new InvalidOperationException("This folder is not inside a git repository.");
         }
 
-        using var repo = new Repository(gitDir);
+        using var repo = new Repository(repoDir);
         var root = NormalizeFullPath(repo.Info.WorkingDirectory);
         var scopeRoot = gitRoot ? root : NormalizeFullPath(start);
         if (!IsUnder(root, scopeRoot))
@@ -367,17 +367,38 @@ public static class GitRepositoryReader
         return repo.Lookup<Commit>(refName);
     }
 
+    // Repository.Discover silently returns null under NativeAOT (verified
+    // empirically; its out-buffer marshaling path does not survive AOT), so
+    // walk up for a .git entry ourselves. A .git FILE (worktree / submodule
+    // pointer) also counts - new Repository(dir) resolves it natively.
+    internal static string? DiscoverRepositoryRoot(string start)
+    {
+        var dir = new DirectoryInfo(start);
+        while (dir is not null)
+        {
+            var marker = Path.Combine(dir.FullName, ".git");
+            if (Directory.Exists(marker) || File.Exists(marker))
+            {
+                return dir.FullName;
+            }
+
+            dir = dir.Parent;
+        }
+
+        return null;
+    }
+
     private static T WithRepo<T>(string repositoryRoot, Func<Repository, T> body, T fallback)
     {
         try
         {
-            var gitDir = Repository.Discover(repositoryRoot);
-            if (string.IsNullOrEmpty(gitDir))
+            var repoDir = DiscoverRepositoryRoot(repositoryRoot);
+            if (repoDir is null)
             {
                 return fallback;
             }
 
-            using var repo = new Repository(gitDir);
+            using var repo = new Repository(repoDir);
             return body(repo);
         }
         catch

@@ -19,11 +19,12 @@ internal sealed class McpServer
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
-    private static readonly JsonSerializerOptions ContentJsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-        WriteIndented = true,
-    };
+    // Source-generated (no reflection) so the serialization survives NativeAOT.
+    private static readonly BudiffJsonContext ContentJsonContext = new(
+        new JsonSerializerOptions(BudiffJsonContext.Default.Options)
+        {
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        });
 
     private readonly TextReader _input;
     private readonly TextWriter _output;
@@ -299,7 +300,7 @@ internal sealed class McpServer
                 .Select(row => McpRepoOverviewRowDto.From(row.Node, row.Depth))
                 .ToArray());
 
-        return JsonSerializer.Serialize(dto, ContentJsonOptions);
+        return JsonSerializer.Serialize(dto, ContentJsonContext.McpRepoOverviewDto);
     }
 
     private GitRepositoryScope OpenScope(JsonElement arguments, string? fallbackPath = null, bool usePathArgument = true)
@@ -437,14 +438,13 @@ internal sealed class McpServer
     private static JsonNode ToolResult(string text, bool isError)
         => new JsonObject
         {
-            ["content"] = new JsonArray
+            // The (JsonNode) cast picks the non-generic JsonArray ctor; the
+            // collection-initializer Add<T> path is not NativeAOT-safe.
+            ["content"] = new JsonArray((JsonNode)new JsonObject
             {
-                new JsonObject
-                {
-                    ["type"] = "text",
-                    ["text"] = text,
-                },
-            },
+                ["type"] = "text",
+                ["text"] = text,
+            }),
             ["isError"] = isError,
         };
 

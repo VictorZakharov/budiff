@@ -151,4 +151,5 @@ internal sealed record JsonInlineSegmentDto(string Text, string Kind)
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(JsonChangeListDto))]
 [JsonSerializable(typeof(JsonFileDiffDto))]
+[JsonSerializable(typeof(McpRepoOverviewDto))]
 internal sealed partial class BudiffJsonContext : JsonSerializerContext;
