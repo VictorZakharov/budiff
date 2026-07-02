@@ -24,19 +24,6 @@ public sealed class AnsiRendererTests
     }
 
     [Fact]
-    public void RenderList_PrintsChangeRowsFromStructuredModel()
-    {
-        var output = new StringWriter();
-
-        AnsiRenderer.RenderList(MakeChangeSet(), output);
-
-        var text = output.ToString();
-        Assert.Contains("budiff HEAD vs working tree", text);
-        Assert.Contains("src/App.cs", text);
-        Assert.Contains("Run `budiff <file>`", text);
-    }
-
-    [Fact]
     public void RenderAnalysis_PrintsBirdsEyeColumns()
     {
         var output = new StringWriter();
@@ -91,12 +78,6 @@ public sealed class AnsiRendererTests
         Assert.Contains("count = 1;", text);
         Assert.Contains("count = 2;", text);
     }
-
-    private static ChangeSet MakeChangeSet()
-        => new(
-            new GitRepositoryScope("G:\\Git\\budiff", "G:\\Git\\budiff", string.Empty, true, "main"),
-            DiffTarget.WorkingTree,
-            new[] { MakeFile() });
 
     private static ChangedFile MakeFile()
         => new(

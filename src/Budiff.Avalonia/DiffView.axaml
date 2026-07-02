@@ -4,6 +4,27 @@
              x:Class="Budiff.Avalonia.DiffView"
              x:Name="Root"
              x:CompileBindings="False">
+    <UserControl.Styles>
+        <!-- One commit-details tooltip (#54) for the blame cell of BOTH row
+             layouts - two-pane and the single-pane whole-file view. -->
+        <Style Selector="TextBlock.blameCell">
+            <Setter Property="ToolTip.Tip">
+                <Template>
+                    <StackPanel Spacing="3" MaxWidth="440">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <TextBlock Text="{Binding Blame.Sha}"
+                                       FontFamily="Cascadia Code,Consolas,monospace"
+                                       Foreground="#61AFEF" />
+                            <TextBlock Text="{Binding Blame.Author}" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding Blame.Email}" Foreground="#9DA0A8" />
+                            <TextBlock Text="{Binding Blame.Date}" Foreground="#9DA0A8" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding Blame.Message}" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Template>
+            </Setter>
+        </Style>
+    </UserControl.Styles>
     <DockPanel Background="{Binding EditorBackgroundBrush, ElementName=Root}">
         <!-- The title path lives in a star column and trims, so a long path or a
              narrow pane can never paint over the neighbors (a StackPanel here
@@ -118,6 +139,7 @@
                                             </MultiBinding>
                                         </Grid.IsVisible>
                                         <TextBlock Grid.Column="0"
+                                                   Classes="blameCell"
                                                    Width="120"
                                                    Text="{Binding Blame.Label}"
                                                    IsVisible="{Binding $parent[ItemsControl].DataContext.IsBlameVisible}"
@@ -161,6 +183,7 @@
                                              hover for the commit's details. Its own OUTER column, so
                                              showing it costs BOTH code halves equally. -->
                                         <TextBlock Grid.Column="0"
+                                                   Classes="blameCell"
                                                    Width="120"
                                                    Text="{Binding Blame.Label}"
                                                    IsVisible="{Binding $parent[ItemsControl].DataContext.IsBlameVisible}"
@@ -168,21 +191,7 @@
                                                    Padding="8,0,4,0"
                                                    FontSize="11"
                                                    VerticalAlignment="Center"
-                                                   Foreground="{Binding MutedTextBrush, ElementName=Root}">
-                                            <ToolTip.Tip>
-                                                <StackPanel Spacing="3" MaxWidth="440">
-                                                    <StackPanel Orientation="Horizontal" Spacing="10">
-                                                        <TextBlock Text="{Binding Blame.Sha}"
-                                                                   FontFamily="Cascadia Code,Consolas,monospace"
-                                                                   Foreground="#61AFEF" />
-                                                        <TextBlock Text="{Binding Blame.Author}" FontWeight="SemiBold" />
-                                                        <TextBlock Text="{Binding Blame.Email}" Foreground="#9DA0A8" />
-                                                        <TextBlock Text="{Binding Blame.Date}" Foreground="#9DA0A8" />
-                                                    </StackPanel>
-                                                    <TextBlock Text="{Binding Blame.Message}" TextWrapping="Wrap" />
-                                                </StackPanel>
-                                            </ToolTip.Tip>
-                                        </TextBlock>
+                                                   Foreground="{Binding MutedTextBrush, ElementName=Root}" />
                                         <Border Grid.Column="1"
                                                 Background="{Binding OldBackground}"
                                                 BorderBrush="{Binding DiffBorderBrush, ElementName=Root}"

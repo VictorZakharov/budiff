@@ -114,27 +114,14 @@ public static class GitHistory
                 continue;
             }
 
-            var tab1 = line.IndexOf('\t');
-            if (tab1 < 0)
-            {
-                continue;
-            }
-
-            var tab2 = line.IndexOf('\t', tab1 + 1);
-            if (tab2 < 0)
-            {
-                continue;
-            }
-
-            var path = ResolveRenamePath(line[(tab2 + 1)..].Trim());
-            if (path.Length == 0)
+            if (!TryParseNumstat(line, out var added, out var removed, out var path))
             {
                 continue;
             }
 
             var entry = result.ForPath(path);
-            entry.Added += ParseCount(line[..tab1]);
-            entry.Removed += ParseCount(line[(tab1 + 1)..tab2]);
+            entry.Added += added;
+            entry.Removed += removed;
             entry.Commits.Add(commitIndex);
             if (author.Length > 0)
             {
@@ -326,28 +313,46 @@ public static class GitHistory
 
         foreach (var line in LineCounter.SplitLines(diff))
         {
-            var tab1 = line.IndexOf('\t');
-            if (tab1 < 0)
-            {
-                continue;
-            }
-
-            var tab2 = line.IndexOf('\t', tab1 + 1);
-            if (tab2 < 0)
-            {
-                continue;
-            }
-
-            var path = NormalizePath(line[(tab2 + 1)..].Trim());
-            if (path.Length == 0)
+            if (!TryParseNumstat(line, out var added, out var removed, out var path))
             {
                 continue;
             }
 
             var entry = result.ForPath(path);
-            entry.Added = ParseCount(line[..tab1]);
-            entry.Removed = ParseCount(line[(tab1 + 1)..tab2]);
+            entry.Added = added;
+            entry.Removed = removed;
         }
+    }
+
+    // One "added<TAB>removed<TAB>path" numstat line ("-" counts for binary
+    // files parse as 0). Both git invocations pass --no-renames, but tolerate
+    // rename arrows anyway so a caller without the flag still resolves.
+    private static bool TryParseNumstat(string line, out long added, out long removed, out string path)
+    {
+        added = 0;
+        removed = 0;
+        path = string.Empty;
+        var tab1 = line.IndexOf('\t');
+        if (tab1 < 0)
+        {
+            return false;
+        }
+
+        var tab2 = line.IndexOf('\t', tab1 + 1);
+        if (tab2 < 0)
+        {
+            return false;
+        }
+
+        path = ResolveRenamePath(line[(tab2 + 1)..].Trim());
+        if (path.Length == 0)
+        {
+            return false;
+        }
+
+        added = ParseCount(line[..tab1]);
+        removed = ParseCount(line[(tab1 + 1)..tab2]);
+        return true;
     }
 
     private static long ParseCount(string text) => long.TryParse(text, out var count) ? count : 0;
@@ -362,7 +367,7 @@ public static class GitHistory
         return NormalizePath(path);
     }
 
-    private static string NormalizePath(string path) => path.Replace('\\', '/').TrimStart('/').Trim();
+    private static string NormalizePath(string path) => RepoPaths.Normalize(path);
 }
 
 public sealed record CodeAnalysisSnapshot(ScanResult Scan, HistoryResult? History);
@@ -397,6 +402,7 @@ internal static class GitCli
             UseShellExecute = false,
             CreateNoWindow = true,
             StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
         };
         foreach (var arg in args)
         {
@@ -411,7 +417,11 @@ internal static class GitCli
                 return false;
             }
 
-            var output = proc.StandardOutput.ReadToEnd();
+            // Drain BOTH pipes off-thread: reading stdout inline would block
+            // forever when git fills the un-read stderr pipe (and that block
+            // would also keep the timeout below from ever firing).
+            var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+            var stderrTask = proc.StandardError.ReadToEndAsync();
             if (!proc.WaitForExit(TimeoutMs))
             {
                 try
@@ -426,6 +436,8 @@ internal static class GitCli
                 return false;
             }
 
+            var output = stdoutTask.GetAwaiter().GetResult();
+            stderrTask.GetAwaiter().GetResult();
             ct.ThrowIfCancellationRequested();
             if (proc.ExitCode != 0)
             {

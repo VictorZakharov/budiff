@@ -115,6 +115,20 @@ public sealed class AnalysisNode
         Removed = removed;
     }
 
+    // Depth-first walk with depth, in display order - the shape both the CLI
+    // renderer and the MCP overview flatten the tree into.
+    public static IEnumerable<(AnalysisNode Node, int Depth)> Flatten(IEnumerable<AnalysisNode> nodes, int depth = 0)
+    {
+        foreach (var node in nodes)
+        {
+            yield return (node, depth);
+            foreach (var child in Flatten(node.Children, depth + 1))
+            {
+                yield return child;
+            }
+        }
+    }
+
     public void SortAndScale(AnalysisSortKey key, bool ascending)
     {
         if (Children.Count == 0)

@@ -22,6 +22,11 @@ public sealed class DiffViewSnapshotTests
         // Unchanged row (empty line pairing), which single-pane tolerates.
         Assert.All(model.Rows.Where(r => r.Kind != DiffKind.Unchanged), r => Assert.Equal(DiffKind.Added, r.Kind));
 
+        // New-side blame (#51): the single-pane blame cell must carry the
+        // commit-details tooltip too (#54 - it used to exist only two-pane).
+        var ada = new BlameEntry("Ada Lovelace 10d", "abc1234", "Ada Lovelace", "ada@example.com", "2026-06-22 10:00", "Add New.cs");
+        model.SetBlame(new[] { ada, ada, ada, ada }, forNewSide: true);
+
         var window = new Window
         {
             Width = 920,
@@ -30,11 +35,41 @@ public sealed class DiffViewSnapshotTests
         };
         var snapshot = UiSnapshot.Capture(window, "diff-view-single");
         Assert.True(new FileInfo(snapshot.Path).Length > 1000);
+        AssertBlameCellHasTooltip(window);
 
-        // Mixed diff: back to two panes.
+        // Mixed diff: back to two panes - tooltip present there as well.
         model.SetDiff(LineDiff.Compute("a\nb\n", "a\nc\n"));
         Assert.False(model.IsSinglePane);
+        model.SetBlame(new[] { ada, ada });
+        UiSnapshot.Pump();
+        AssertBlameCellHasTooltip(window);
         window.Close();
+    }
+
+    private static void AssertBlameCellHasTooltip(Window window)
+    {
+        var cells = global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(window)
+            .OfType<global::Avalonia.Controls.TextBlock>()
+            .Where(t => t.Classes.Contains("blameCell") && t.IsEffectivelyVisible)
+            .ToList();
+        Assert.NotEmpty(cells);
+        Assert.All(cells, cell => Assert.NotNull(ToolTip.GetTip(cell)));
+
+        // Open it for real: the template content must bind the row's commit
+        // details, not just exist.
+        var cell = cells[0];
+        ToolTip.SetIsOpen(cell, true);
+        UiSnapshot.Pump();
+        var tip = Assert.IsAssignableFrom<global::Avalonia.Controls.Control>(ToolTip.GetTip(cell));
+        var texts = global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(tip)
+            .OfType<global::Avalonia.Controls.TextBlock>()
+            .Select(t => t.Text)
+            .ToList();
+        Assert.Contains("abc1234", texts);
+        Assert.Contains("Ada Lovelace", texts);
+        Assert.Contains("ada@example.com", texts);
+        ToolTip.SetIsOpen(cell, false);
+        UiSnapshot.Pump();
     }
 
     // Regression for the Collapse-unchanged freeze (#45): the rows host is

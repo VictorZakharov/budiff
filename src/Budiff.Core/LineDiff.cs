@@ -24,8 +24,35 @@ public static class LineDiff
         return ops is null ? NaiveRows(oldLines, newLines) : PairRows(ops, oldLines, newLines);
     }
 
-    public static string[] SplitLines(string text) =>
-        (text ?? string.Empty).Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n');
+    // Split on \n, \r\n, or lone \r. Note "" yields [""] - a single empty line,
+    // like string.Split - which downstream pairing relies on (an empty old side
+    // pairs into one blank Unchanged row). Manual scan to avoid the two full
+    // normalization copies the old Replace/Replace/Split made per file.
+    public static string[] SplitLines(string text)
+    {
+        text ??= string.Empty;
+        var lines = new List<string>();
+        var start = 0;
+        for (var i = 0; i < text.Length; i++)
+        {
+            var ch = text[i];
+            if (ch != '\n' && ch != '\r')
+            {
+                continue;
+            }
+
+            lines.Add(text[start..i]);
+            if (ch == '\r' && i + 1 < text.Length && text[i + 1] == '\n')
+            {
+                i++;
+            }
+
+            start = i + 1;
+        }
+
+        lines.Add(text[start..]);
+        return lines.ToArray();
+    }
 
     private readonly record struct Op(int Kind, int OldIdx, int NewIdx);
 

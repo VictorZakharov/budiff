@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
@@ -9,18 +10,12 @@ using Budiff.Avalonia.TextMate;
 using Budiff.Git;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Avalonia.Media;
-using Avalonia.Media.Immutable;
 using Material.Icons;
 
 namespace Budiff.App;
 
 public sealed partial class MainWindowViewModel : ObservableObject
 {
-    private readonly IBrush _addedBrush = Brush("#7EE787");
-    private readonly IBrush _removedBrush = Brush("#FF7B72");
-    private readonly IBrush _modifiedBrush = Brush("#E2C08D");
-    private readonly IBrush _mutedBrush = Brush("#9DA0A8");
     private bool _suppressRefresh;
     private string _startPath;
     private bool _gitRoot;
@@ -53,8 +48,6 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
     }
 
-    public ObservableCollection<ChangedFileVm> Files { get; } = new();
-
     public CodeAnalysisPanelViewModel Analysis { get; }
 
     public ObservableCollection<GitReferenceOption> BaseRefs { get; } = new();
@@ -78,23 +71,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private bool _isGitRootScope = true;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasNoFiles))]
-    [NotifyPropertyChangedFor(nameof(FileCountText))]
-    private int _fileCount;
-
-    [ObservableProperty]
-    private string _emptyText = "No changes in scope.";
-
-    [ObservableProperty]
     private GitReferenceOption? _selectedBaseRef;
 
     // OFF = compare against HEAD only, i.e. "as if my uncommitted changes were
     // not made yet". ON (default) = compare against what's on disk.
     [ObservableProperty]
     private bool _includeWorkingTree = true;
-
-    [ObservableProperty]
-    private ChangedFileVm? _selectedFile;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowDiffPane))]
@@ -164,14 +146,24 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _ = Task.Run(() =>
         {
             var forNewSide = false;
-            var blame = GitRepositoryReader.LoadBlame(scope, file.OldPath ?? file.Path, target.BaseRef);
-            if (blame.Count == 0)
+            IReadOnlyList<BlameLineInfo?> blame;
+            try
             {
-                blame = GitHistory.BlameFile(
-                    scope.RepositoryRoot,
-                    file.Path,
-                    target.HeadIsWorkingTree ? null : target.HeadRef ?? "HEAD");
-                forNewSide = true;
+                blame = GitRepositoryReader.LoadBlame(scope, file.OldPath ?? file.Path, target.BaseRef);
+                if (blame.Count == 0)
+                {
+                    blame = GitHistory.BlameFile(
+                        scope.RepositoryRoot,
+                        file.Path,
+                        target.HeadIsWorkingTree ? null : target.HeadRef ?? "HEAD");
+                    forNewSide = true;
+                }
+            }
+            catch
+            {
+                // Blame is decoration: on any git failure leave the column
+                // empty instead of dying as an unobserved task exception.
+                blame = Array.Empty<BlameLineInfo?>();
             }
 
             var entries = new BlameEntry?[blame.Count];
@@ -215,10 +207,6 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     public bool ShowScopeOffer => !IsGitRootScope;
 
-    public bool HasNoFiles => FileCount == 0;
-
-    public string FileCountText => FileCount == 1 ? "1 file" : $"{FileCount} files";
-
     // Base and the working-tree toggle affect the drill-in diff only; the
     // bird's-eye is governed by the period filter.
     partial void OnSelectedBaseRefChanged(GitReferenceOption? value)
@@ -237,11 +225,6 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
     }
 
-    partial void OnSelectedFileChanged(ChangedFileVm? value)
-    {
-        LoadSelectedDiff(value);
-    }
-
     public async Task LoadAsync(string startPath, bool gitRoot)
     {
         _startPath = startPath;
@@ -255,8 +238,6 @@ public sealed partial class MainWindowViewModel : ObservableObject
             // Not a git repository: fall back to the plain folder analysis. The
             // analysis panel already handles GitAvailable=false (no churn columns).
             _scope = null;
-            Files.Clear();
-            FileCount = 0;
             BaseRefs.Clear();
             var folderName = Path.GetFileName(Path.TrimEndingDirectorySeparator(startPath));
             RepoTitle = string.IsNullOrEmpty(folderName) ? startPath : folderName;
@@ -370,24 +351,6 @@ public sealed partial class MainWindowViewModel : ObservableObject
         return target.HeadIsWorkingTree ? baseLabel + " vs working tree" : baseLabel + " vs HEAD";
     }
 
-    private void LoadSelectedDiff(ChangedFileVm? value)
-    {
-        if (_scope is null || value is null)
-        {
-            return;
-        }
-
-        var target = CurrentTarget();
-        Diff.Title = value.Path;
-        Diff.Subtitle = DescribeTarget(target);
-        Diff.Extension = Path.GetExtension(value.Path);
-        var file = value.Model;
-        _openDiffFile = file;
-        IsDiffOpen = true;
-        Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(_scope, file, target));
-        BeginLoadBlame(_scope, file, target);
-    }
-
     private Task OpenAnalysisFileAsync(string fullPath, string relativePath)
     {
         if (_scope is null)
@@ -412,46 +375,5 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         var rel = Path.GetRelativePath(repositoryRoot, fullPath);
         return rel == "." ? string.Empty : rel.Replace('\\', '/');
-    }
-
-    private static IBrush Brush(string hex) => new ImmutableSolidColorBrush(Color.Parse(hex));
-}
-
-public sealed class ChangedFileVm
-{
-    public ChangedFileVm(ChangedFile model, IBrush addedBrush, IBrush removedBrush, IBrush modifiedBrush, IBrush mutedBrush)
-    {
-        Model = model;
-        StateBrush = model.State switch
-        {
-            Budiff.GitFileState.Added or Budiff.GitFileState.Untracked => addedBrush,
-            Budiff.GitFileState.Deleted => removedBrush,
-            Budiff.GitFileState.Renamed => modifiedBrush,
-            Budiff.GitFileState.Conflicted => removedBrush,
-            Budiff.GitFileState.Modified => modifiedBrush,
-            _ => mutedBrush,
-        };
-    }
-
-    public ChangedFile Model { get; }
-
-    public string Path => Model.Path;
-
-    public string StateText => Model.StateText;
-
-    public IBrush StateBrush { get; }
-
-    public string AddedText => "+" + Model.Churn.Added;
-
-    public string RemovedText => "-" + Model.Churn.Removed;
-
-    public string DetailText
-    {
-        get
-        {
-            var authors = Model.AuthorCount == 1 ? "1 author" : $"{Model.AuthorCount} authors";
-            var commits = Model.CommitCount == 1 ? "1 commit" : $"{Model.CommitCount} commits";
-            return Model.IsBinary ? $"{authors}, {commits}, binary" : $"{authors}, {commits}";
-        }
     }
 }

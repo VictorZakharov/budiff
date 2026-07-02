@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -145,12 +144,12 @@ public static class CodeScanner
             }
 
             var bytes = File.ReadAllBytes(fullPath);
-            if (LineCounter.LooksBinary(bytes))
+            if (TextBytes.LooksBinary(bytes))
             {
                 return new FileStat { RelativePath = relativePath, Extension = ext, IsBinary = true };
             }
 
-            var text = Decode(bytes);
+            var text = TextBytes.DecodeUtf8(bytes);
             var counts = LineCounter.Count(text, CommentSyntax.For(relativePath));
             return new FileStat { RelativePath = relativePath, Extension = ext, Lines = counts };
         }
@@ -164,15 +163,5 @@ public static class CodeScanner
         }
     }
 
-    private static string Decode(byte[] bytes)
-    {
-        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
-        {
-            return Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
-        }
-
-        return new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: false).GetString(bytes);
-    }
-
-    private static string NormalizePath(string path) => path.Replace('\\', '/').TrimStart('/');
+    private static string NormalizePath(string path) => RepoPaths.Normalize(path);
 }

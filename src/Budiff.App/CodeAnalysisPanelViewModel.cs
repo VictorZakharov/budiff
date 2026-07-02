@@ -20,26 +20,26 @@ public sealed record GroupingOption(string Label, AnalysisGrouping Value);
 
 public sealed record PeriodOption(string Label, int? Days, bool IsCustom = false);
 
-public sealed partial class ExtensionFilterItem : ObservableObject
+// Common shape of one include/exclude filter entry (extension, author); the
+// panel wires all filter lists through the same subscribe/set-all helpers.
+public abstract partial class FilterItem : ObservableObject
 {
     [ObservableProperty]
     private bool _included = true;
-
-    public required string Extension { get; init; }
-
-    public required string Display { get; init; }
 
     public required string Summary { get; init; }
 }
 
-public sealed partial class AuthorFilterItem : ObservableObject
+public sealed class ExtensionFilterItem : FilterItem
 {
-    [ObservableProperty]
-    private bool _included = true;
+    public required string Extension { get; init; }
 
+    public required string Display { get; init; }
+}
+
+public sealed class AuthorFilterItem : FilterItem
+{
     public required string Author { get; init; }
-
-    public required string Summary { get; init; }
 }
 
 public sealed partial class CodeAnalysisRow : ObservableObject
@@ -170,9 +170,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     private HistoryResult? _history;
     private bool _ready;
     private bool _suspendRebuild;
-    private bool _searching;
     private bool _lastWasSearching;
-    private string _query = string.Empty;
     private PeriodOption _appliedPeriod = null!;
     private int? _appliedDays;
     private double _msPerCommit;
@@ -338,14 +336,27 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
         IsScanning = true;
         ShowMessage("Scanning...");
-        var days = SinceDays;
-        var sw = Stopwatch.StartNew();
-        var snapshot = await Task.Run(() => CodeAnalysisRepositoryReader.Load(root, days));
-        RecordTiming(sw.ElapsedMilliseconds, snapshot.History?.CommitCount ?? 0);
-        _appliedPeriod = SelectedPeriod;
-        _appliedDays = days;
-        LoadFrom(snapshot.Scan, snapshot.History);
-        IsScanning = false;
+        try
+        {
+            var days = SinceDays;
+            var sw = Stopwatch.StartNew();
+            var snapshot = await Task.Run(() => CodeAnalysisRepositoryReader.Load(root, days));
+            RecordTiming(sw.ElapsedMilliseconds, snapshot.History?.CommitCount ?? 0);
+            _appliedPeriod = SelectedPeriod;
+            _appliedDays = days;
+            LoadFrom(snapshot.Scan, snapshot.History);
+        }
+        catch (Exception ex)
+        {
+            ShowMessage("Scan failed: " + ex.Message);
+            return;
+        }
+        finally
+        {
+            // Never leave the spinner stuck when the scan throws.
+            IsScanning = false;
+        }
+
         HistoryApplied?.Invoke();
     }
 
@@ -425,18 +436,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
                 ? $"{s.FileCount:N0} files - {s.Lines:N0} lines - {s.Percent:0.0}%"
                 : $"{s.FileCount:N0} files - {s.Lines:N0} lines",
         }).ToList();
-        foreach (var item in extensionItems)
-        {
-            item.PropertyChanged += (_, e) =>
-            {
-                if (e.PropertyName == nameof(ExtensionFilterItem.Included))
-                {
-                    UpdateExtensionToggleState();
-                    Rebuild();
-                }
-            };
-        }
-
+        WireFilterItems(extensionItems, UpdateExtensionToggleState);
         Extensions = new ObservableCollection<ExtensionFilterItem>(extensionItems);
         UpdateExtensionToggleState();
 
@@ -445,20 +445,24 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             Author = a.Author,
             Summary = a.Percent >= 0.05 ? $"{a.Commits:N0} commits - {a.Percent:0.0}%" : $"{a.Commits:N0} commits",
         }).ToList();
-        foreach (var item in authorItems)
+        WireFilterItems(authorItems, UpdateAuthorToggleState);
+        Authors = new ObservableCollection<AuthorFilterItem>(authorItems);
+        UpdateAuthorToggleState();
+    }
+
+    private void WireFilterItems(IEnumerable<FilterItem> items, Action updateToggle)
+    {
+        foreach (var item in items)
         {
             item.PropertyChanged += (_, e) =>
             {
-                if (e.PropertyName == nameof(AuthorFilterItem.Included))
+                if (e.PropertyName == nameof(FilterItem.Included))
                 {
-                    UpdateAuthorToggleState();
+                    updateToggle();
                     Rebuild();
                 }
             };
         }
-
-        Authors = new ObservableCollection<AuthorFilterItem>(authorItems);
-        UpdateAuthorToggleState();
     }
 
     private void Rebuild()
@@ -513,17 +517,10 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         }
     }
 
-    // A broad query (the first 1-2 typed characters match almost every name) is
-    // not a useful filter yet, but hiding/expanding rows for it forces the
-    // non-virtualized TreeView through a layout pass over every realized row -
-    // the typing lag. So while matches exceed this threshold the search only
-    // HIGHLIGHTS in place; filtering and match-path expansion kick in together
-    // once the match set is narrow enough to be worth scanning.
-    internal const int SearchExpandThreshold = 64;
-
-    // In-place search: walks the existing rows setting visibility, the substring
-    // highlight, and match-path expansion via observable properties - the TreeView
-    // keeps its containers, so this is instant even on large trees.
+    // In-place search: RowSearch walks the existing rows setting visibility,
+    // the substring highlight, and match-path expansion via observable
+    // properties - the TreeView keeps its containers, so this is instant even
+    // on large trees. The threshold policy lives on RowSearch.ExpandThreshold.
     private void ApplySearch()
     {
         var query = SearchText.Trim();
@@ -533,75 +530,11 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             CaptureExpansion();
         }
 
-        _query = query;
-        _searching = searching;
-
-        var matches = 0;
-        foreach (var row in Roots)
-        {
-            ComputeMatches(row, ref matches);
-        }
-
-        var narrow = searching && matches <= SearchExpandThreshold;
-        foreach (var row in Roots)
-        {
-            ApplySearchToRow(row, ancestorMatched: false, filter: narrow);
-        }
-
-        if (searching)
-        {
-            foreach (var row in Roots.SelectMany(r => r.SelfAndDescendants()))
-            {
-                if (!row.IsFile)
-                {
-                    row.IsExpanded = narrow ? row.HasDescendantMatch : _expanded.Contains(row.RelativePath);
-                }
-            }
-        }
-        else if (_lastWasSearching)
-        {
-            foreach (var row in Roots.SelectMany(r => r.SelfAndDescendants()))
-            {
-                if (!row.IsFile)
-                {
-                    row.IsExpanded = _expanded.Contains(row.RelativePath);
-                }
-            }
-        }
-
+        var matches = RowSearch.ComputeMatches(Roots, query);
+        var narrow = searching && matches <= RowSearch.ExpandThreshold;
+        var applyExpansion = searching || _lastWasSearching;
+        RowSearch.Apply(Roots, query, filter: narrow, applyExpansion, _expanded);
         _lastWasSearching = searching;
-    }
-
-    // Pass 1: match state per row (the filter decision needs the TOTAL count first).
-    private bool ComputeMatches(CodeAnalysisRow row, ref int matches)
-    {
-        var index = _searching ? row.Name.IndexOf(_query, StringComparison.OrdinalIgnoreCase) : -1;
-        if (index >= 0)
-        {
-            matches++;
-        }
-
-        var descendantMatch = false;
-        foreach (var child in row.Children)
-        {
-            descendantMatch |= ComputeMatches(child, ref matches);
-        }
-
-        row.MatchIndex = index;
-        row.HasDescendantMatch = descendantMatch;
-        return index >= 0 || descendantMatch;
-    }
-
-    // Pass 2: highlight always; hide non-matching rows only in filter (narrow) mode.
-    private void ApplySearchToRow(CodeAnalysisRow row, bool ancestorMatched, bool filter)
-    {
-        var matched = row.MatchIndex >= 0;
-        row.SetNameHighlight(row.MatchIndex, _query.Length);
-        row.IsSearchVisible = !filter || matched || row.HasDescendantMatch || ancestorMatched;
-        foreach (var child in row.Children)
-        {
-            ApplySearchToRow(child, ancestorMatched || matched, filter);
-        }
     }
 
     private CodeAnalysisRow BuildRow(AnalysisNode node, int depth)
@@ -673,29 +606,20 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         SummaryCode = SummaryBlank = SummaryComment = SummaryTail = string.Empty;
     }
 
-    private void SetAllExtensions(bool included)
+    private void SetAllExtensions(bool included) => SetAllFilterItems(Extensions, included, UpdateExtensionToggleState);
+
+    private void SetAllAuthors(bool included) => SetAllFilterItems(Authors, included, UpdateAuthorToggleState);
+
+    private void SetAllFilterItems(IEnumerable<FilterItem> items, bool included, Action updateToggle)
     {
         _suspendRebuild = true;
-        foreach (var item in Extensions)
+        foreach (var item in items)
         {
             item.Included = included;
         }
 
         _suspendRebuild = false;
-        UpdateExtensionToggleState();
-        Rebuild();
-    }
-
-    private void SetAllAuthors(bool included)
-    {
-        _suspendRebuild = true;
-        foreach (var item in Authors)
-        {
-            item.Included = included;
-        }
-
-        _suspendRebuild = false;
-        UpdateAuthorToggleState();
+        updateToggle();
         Rebuild();
     }
 
@@ -786,12 +710,25 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         }
 
         IsScanning = true;
-        var sw = Stopwatch.StartNew();
-        _history = await Task.Run(() => GitHistory.Load(_root, days));
-        RecordTiming(sw.ElapsedMilliseconds, _history?.CommitCount ?? 0);
-        _appliedPeriod = SelectedPeriod;
-        _appliedDays = days;
-        IsScanning = false;
+        try
+        {
+            var sw = Stopwatch.StartNew();
+            _history = await Task.Run(() => GitHistory.Load(_root, days));
+            RecordTiming(sw.ElapsedMilliseconds, _history?.CommitCount ?? 0);
+            _appliedPeriod = SelectedPeriod;
+            _appliedDays = days;
+        }
+        catch (Exception ex)
+        {
+            ShowMessage("Reload failed: " + ex.Message);
+            return;
+        }
+        finally
+        {
+            // Never leave the spinner stuck when the reload throws.
+            IsScanning = false;
+        }
+
         Rebuild();
         HistoryApplied?.Invoke();
     }
