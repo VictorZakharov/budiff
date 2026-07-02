@@ -55,9 +55,70 @@ public sealed partial class CodeAnalysisRow : ObservableObject
     [ObservableProperty]
     private IReadOnlyList<NameRun>? _nameRuns;
 
+    private int _highlightIndex = int.MinValue;
+    private int _highlightLength;
+
+    // Search pass scratch: where this row's name matches the query (-1 = no
+    // match) and whether any descendant matches.
+    public int MatchIndex { get; set; } = -1;
+
+    public bool HasDescendantMatch { get; set; }
+
+    // Rebuilding NameRuns notifies every realized row's inline presenter, so
+    // skip it when the highlight span did not actually change.
+    public void SetNameHighlight(int index, int length)
+    {
+        if (index < 0)
+        {
+            length = 0;
+        }
+
+        if (_highlightIndex == index && _highlightLength == length)
+        {
+            return;
+        }
+
+        _highlightIndex = index;
+        _highlightLength = length;
+        NameRuns = BuildNameRuns(Name, index, length);
+    }
+
+    private static IReadOnlyList<NameRun> BuildNameRuns(string name, int index, int length)
+    {
+        if (index < 0 || length <= 0 || index + length > name.Length)
+        {
+            return new[] { new NameRun(name, false) };
+        }
+
+        var runs = new List<NameRun>(3);
+        if (index > 0)
+        {
+            runs.Add(new NameRun(name[..index], false));
+        }
+
+        runs.Add(new NameRun(name.Substring(index, length), true));
+        if (index + length < name.Length)
+        {
+            runs.Add(new NameRun(name[(index + length)..], false));
+        }
+
+        return runs;
+    }
+
     public required string Name { get; init; }
 
     public required string RelativePath { get; init; }
+
+    // Tree level; the row template indents INSIDE the name cell (the
+    // TreeViewItem chrome is retemplated away so every row grid spans the
+    // full pane width and stays column-aligned with the header).
+    public int Depth { get; init; }
+
+    public double IndentWidth => Depth * 16;
+
+    public MaterialIconKind ExpandIcon => IsExpanded ? MaterialIconKind.ChevronDown : MaterialIconKind.ChevronRight;
+
+    partial void OnIsExpandedChanged(bool value) => OnPropertyChanged(nameof(ExpandIcon));
 
     public string? FullPath { get; init; }
 
@@ -250,6 +311,17 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
     private bool Historical => SinceDays.HasValue;
 
+    // The window the visible analysis was actually computed with (null = all
+    // time). The drill-in diff aligns its default base to this.
+    public int? AppliedSinceDays => _appliedDays;
+
+    // The currently SELECTED window (may not be applied yet).
+    public int? SelectedSinceDays => SinceDays;
+
+    // Raised after a (re)load applied a new history window - lets the shell
+    // re-run an open period-aligned diff.
+    public event Action? HistoryApplied;
+
     public async Task LoadAsync(string root)
     {
         _root = root;
@@ -274,6 +346,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         _appliedDays = days;
         LoadFrom(snapshot.Scan, snapshot.History);
         IsScanning = false;
+        HistoryApplied?.Invoke();
     }
 
     public void LoadFrom(ScanResult scan, HistoryResult? history)
@@ -415,7 +488,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             allTime: !Historical,
             includedAuthors: authorFilter);
 
-        Roots = new ObservableCollection<CodeAnalysisRow>(root.Children.Select(BuildRow));
+        Roots = new ObservableCollection<CodeAnalysisRow>(root.Children.Select(n => BuildRow(n, depth: 0)));
         SetSummary(root);
         ApplySearch();
     }
@@ -440,6 +513,14 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         }
     }
 
+    // A broad query (the first 1-2 typed characters match almost every name) is
+    // not a useful filter yet, but hiding/expanding rows for it forces the
+    // non-virtualized TreeView through a layout pass over every realized row -
+    // the typing lag. So while matches exceed this threshold the search only
+    // HIGHLIGHTS in place; filtering and match-path expansion kick in together
+    // once the match set is narrow enough to be worth scanning.
+    internal const int SearchExpandThreshold = 64;
+
     // In-place search: walks the existing rows setting visibility, the substring
     // highlight, and match-path expansion via observable properties - the TreeView
     // keeps its containers, so this is instant even on large trees.
@@ -455,12 +536,29 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         _query = query;
         _searching = searching;
 
+        var matches = 0;
         foreach (var row in Roots)
         {
-            ApplySearchToRow(row, ancestorMatched: false);
+            ComputeMatches(row, ref matches);
         }
 
-        if (!searching && _lastWasSearching)
+        var narrow = searching && matches <= SearchExpandThreshold;
+        foreach (var row in Roots)
+        {
+            ApplySearchToRow(row, ancestorMatched: false, filter: narrow);
+        }
+
+        if (searching)
+        {
+            foreach (var row in Roots.SelectMany(r => r.SelfAndDescendants()))
+            {
+                if (!row.IsFile)
+                {
+                    row.IsExpanded = narrow ? row.HasDescendantMatch : _expanded.Contains(row.RelativePath);
+                }
+            }
+        }
+        else if (_lastWasSearching)
         {
             foreach (var row in Roots.SelectMany(r => r.SelfAndDescendants()))
             {
@@ -474,54 +572,44 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         _lastWasSearching = searching;
     }
 
-    // Returns true when the row or any descendant matches the query.
-    private bool ApplySearchToRow(CodeAnalysisRow row, bool ancestorMatched)
+    // Pass 1: match state per row (the filter decision needs the TOTAL count first).
+    private bool ComputeMatches(CodeAnalysisRow row, ref int matches)
     {
         var index = _searching ? row.Name.IndexOf(_query, StringComparison.OrdinalIgnoreCase) : -1;
-        var matched = index >= 0;
+        if (index >= 0)
+        {
+            matches++;
+        }
+
         var descendantMatch = false;
         foreach (var child in row.Children)
         {
-            descendantMatch |= ApplySearchToRow(child, ancestorMatched || matched);
+            descendantMatch |= ComputeMatches(child, ref matches);
         }
 
-        row.NameRuns = BuildNameRuns(row.Name, index, _query.Length);
-        row.IsSearchVisible = !_searching || matched || descendantMatch || ancestorMatched;
-        if (_searching && !row.IsFile)
-        {
-            row.IsExpanded = descendantMatch;
-        }
-
-        return matched || descendantMatch;
+        row.MatchIndex = index;
+        row.HasDescendantMatch = descendantMatch;
+        return index >= 0 || descendantMatch;
     }
 
-    private static IReadOnlyList<NameRun> BuildNameRuns(string name, int index, int length)
+    // Pass 2: highlight always; hide non-matching rows only in filter (narrow) mode.
+    private void ApplySearchToRow(CodeAnalysisRow row, bool ancestorMatched, bool filter)
     {
-        if (index < 0 || length <= 0 || index + length > name.Length)
+        var matched = row.MatchIndex >= 0;
+        row.SetNameHighlight(row.MatchIndex, _query.Length);
+        row.IsSearchVisible = !filter || matched || row.HasDescendantMatch || ancestorMatched;
+        foreach (var child in row.Children)
         {
-            return new[] { new NameRun(name, false) };
+            ApplySearchToRow(child, ancestorMatched || matched, filter);
         }
-
-        var runs = new List<NameRun>(3);
-        if (index > 0)
-        {
-            runs.Add(new NameRun(name[..index], false));
-        }
-
-        runs.Add(new NameRun(name.Substring(index, length), true));
-        if (index + length < name.Length)
-        {
-            runs.Add(new NameRun(name[(index + length)..], false));
-        }
-
-        return runs;
     }
 
-    private CodeAnalysisRow BuildRow(AnalysisNode node)
+    private CodeAnalysisRow BuildRow(AnalysisNode node, int depth)
     {
         var showGit = _history is not null;
         var row = new CodeAnalysisRow
         {
+            Depth = depth,
             Name = node.Name,
             RelativePath = node.RelativePath,
             IsFile = node.IsFile,
@@ -543,7 +631,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
         foreach (var child in node.Children)
         {
-            row.Children.Add(BuildRow(child));
+            row.Children.Add(BuildRow(child, depth + 1));
         }
 
         return row;
@@ -635,7 +723,20 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         }
     }
 
-    partial void OnSelectedGroupingChanged(GroupingOption value) => Rebuild();
+    // The segmented Folders/Projects toggle highlights the active side.
+    public bool IsFoldersGrouping => SelectedGrouping.Value == AnalysisGrouping.Folders;
+
+    public bool IsProjectsGrouping => SelectedGrouping.Value == AnalysisGrouping.Projects;
+
+    [RelayCommand]
+    private void SelectGrouping(GroupingOption option) => SelectedGrouping = option;
+
+    partial void OnSelectedGroupingChanged(GroupingOption value)
+    {
+        OnPropertyChanged(nameof(IsFoldersGrouping));
+        OnPropertyChanged(nameof(IsProjectsGrouping));
+        Rebuild();
+    }
 
     partial void OnSelectedPeriodChanged(PeriodOption value)
     {
@@ -692,6 +793,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         _appliedDays = days;
         IsScanning = false;
         Rebuild();
+        HistoryApplied?.Invoke();
     }
 
     private void RecordTiming(long elapsedMs, int commits)

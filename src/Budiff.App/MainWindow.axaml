@@ -16,6 +16,56 @@
             <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
             <Setter Property="IsVisible" Value="{Binding IsSearchVisible}" />
         </Style>
+        <!-- Chromeless tree items: no built-in toggle/indent, so EVERY row grid
+             spans the full pane width and its columns land exactly where the
+             header's do at any width (the default chrome shifted rows right
+             once the name column hit its minimum). Indent + chevron are drawn
+             inside the name cell instead (Depth on the row VM). -->
+        <Style Selector="TreeView#AnalysisTree TreeViewItem">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <StackPanel>
+                        <Border Name="PART_LayoutRoot"
+                                Background="Transparent"
+                                Focusable="True">
+                            <ContentPresenter Name="PART_HeaderPresenter"
+                                              Content="{TemplateBinding Header}"
+                                              ContentTemplate="{TemplateBinding HeaderTemplate}"
+                                              HorizontalContentAlignment="Stretch" />
+                        </Border>
+                        <ItemsPresenter Name="PART_ItemsPresenter"
+                                        IsVisible="{TemplateBinding IsExpanded}"
+                                        ItemsPanel="{TemplateBinding ItemsPanel}" />
+                    </StackPanel>
+                </ControlTemplate>
+            </Setter>
+        </Style>
+        <Style Selector="TreeView#AnalysisTree TreeViewItem:pointerover /template/ Border#PART_LayoutRoot">
+            <Setter Property="Background" Value="#14FFFFFF" />
+        </Style>
+        <Style Selector="TreeView#AnalysisTree TreeViewItem:selected /template/ Border#PART_LayoutRoot">
+            <Setter Property="Background" Value="#2D5A9E" />
+        </Style>
+        <Style Selector="Button.chevron">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Width" Value="18" />
+            <Setter Property="Height" Value="18" />
+        </Style>
+        <Style Selector="Button.segment">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="Padding" Value="12,5" />
+            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="Foreground" Value="{DynamicResource BudiffMutedTextBrush}" />
+        </Style>
+        <Style Selector="Button.segment.active">
+            <Setter Property="Background" Value="#2D5A9E" />
+            <Setter Property="Foreground" Value="#FFFFFF" />
+        </Style>
         <Style Selector="TextBlock.num">
             <Setter Property="HorizontalAlignment" Value="Right" />
             <Setter Property="VerticalAlignment" Value="Center" />
@@ -119,21 +169,40 @@
                         Padding="10,8"
                         Background="{DynamicResource BudiffToolbarBrush}"
                         BorderBrush="{DynamicResource BudiffBorderBrush}"
-                        BorderThickness="0,0,0,1">
+                        BorderThickness="0,0,0,1"
+                        ClipToBounds="True">
                     <StackPanel Spacing="8">
-                        <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto" ColumnSpacing="10">
-                            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                <TextBlock Text="Group" Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
-                                <ComboBox Width="116"
-                                          ItemsSource="{Binding Analysis.Groupings}"
-                                          SelectedItem="{Binding Analysis.SelectedGrouping, Mode=TwoWay}">
-                                    <ComboBox.ItemTemplate>
-                                        <DataTemplate>
-                                            <TextBlock Text="{Binding Label}" />
-                                        </DataTemplate>
-                                    </ComboBox.ItemTemplate>
-                                </ComboBox>
-                            </StackPanel>
+                        <!-- The search column keeps a working minimum; past that the
+                             toolbar clips at the pane edge instead of controls painting
+                             over each other. -->
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" MinWidth="84" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <!-- Segmented Folders/Projects switch (#49): both labels
+                                 visible, the active side highlighted - one click flips. -->
+                            <Border BorderBrush="{DynamicResource BudiffBorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="4"
+                                    ClipToBounds="True"
+                                    VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Classes="segment"
+                                            Classes.active="{Binding Analysis.IsFoldersGrouping}"
+                                            Content="Folders"
+                                            Command="{Binding Analysis.SelectGroupingCommand}"
+                                            CommandParameter="{Binding Analysis.Groupings[0]}" />
+                                    <Button Classes="segment"
+                                            Classes.active="{Binding Analysis.IsProjectsGrouping}"
+                                            Content="Projects"
+                                            Command="{Binding Analysis.SelectGroupingCommand}"
+                                            CommandParameter="{Binding Analysis.Groupings[1]}" />
+                                </StackPanel>
+                            </Border>
 
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                                 <TextBlock Text="Period" Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
@@ -250,7 +319,10 @@
                     </Grid>
                 </Border>
 
-                <DockPanel>
+                <!-- ClipToBounds: the fixed-width columns overflow to the right in a
+                     very narrow pane; clip them at the pane edge instead of letting
+                     the header/rows paint under the filter panes. -->
+                <DockPanel ClipToBounds="True">
                     <Border DockPanel.Dock="Top"
                             BorderBrush="{DynamicResource BudiffBorderBrush}"
                             BorderThickness="0,0,0,1"
@@ -258,7 +330,24 @@
                         <!-- Blank / Comment / Files / Size sit in Auto columns whose fixed-width
                              content hides in diff mode, collapsing the column to zero. Header and
                              row cells use matching total widths so the columns stay aligned. -->
-                        <Grid ColumnDefinitions="*,72,72,Auto,Auto,Auto,78,78,64,60,Auto">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <!-- Name keeps a readable minimum; when the pane is
+                                     tighter than the fixed numeric columns, the
+                                     rightmost ones clip at the pane edge (rows use
+                                     the same defs, so alignment survives). -->
+                                <ColumnDefinition Width="*" MinWidth="150" />
+                                <ColumnDefinition Width="72" />
+                                <ColumnDefinition Width="72" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="78" />
+                                <ColumnDefinition Width="78" />
+                                <ColumnDefinition Width="64" />
+                                <ColumnDefinition Width="60" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
                             <Button Grid.Column="0" Classes="colHeader" HorizontalContentAlignment="Left"
                                     Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Name}">
                                 <StackPanel Orientation="Horizontal" Spacing="3">
@@ -315,22 +404,54 @@
                         </Grid>
                     </Border>
 
+                    <!-- Horizontal scrolling is disabled so row grids are constrained
+                         to the viewport - the same width the header grid gets - and
+                         the two stay column-aligned at any pane width. (With it on,
+                         rows size to the scroll EXTENT and drift right of the header
+                         the moment content outgrows a narrow pane.) -->
                     <TreeView x:Name="AnalysisTree"
                               ItemsSource="{Binding Analysis.Roots}"
                               DoubleTapped="OnAnalysisRowDoubleTapped"
                               Background="Transparent"
                               BorderThickness="0"
+                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                              ScrollViewer.AllowAutoHide="True"
                               Padding="6,0,18,0">
                         <TreeView.ItemTemplate>
                             <TreeDataTemplate ItemsSource="{Binding Children}">
-                                <Grid Height="24" Background="Transparent" ColumnDefinitions="*,72,72,Auto,Auto,Auto,78,78,64,60,Auto">
-                                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                        <materialIcons:MaterialIcon Kind="{Binding Icon}" Width="15" Height="15"
+                                <Grid Height="24" Background="Transparent">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" MinWidth="150" />
+                                        <ColumnDefinition Width="72" />
+                                        <ColumnDefinition Width="72" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="78" />
+                                        <ColumnDefinition Width="78" />
+                                        <ColumnDefinition Width="64" />
+                                        <ColumnDefinition Width="60" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <!-- Auto,Auto,Auto,* (not a StackPanel) so the name TRIMS
+                                         when the cell is tight instead of pushing the row wider.
+                                         Indent + chevron live here (chromeless TreeViewItem). -->
+                                    <Grid Grid.Column="0" ColumnDefinitions="Auto,Auto,Auto,*" VerticalAlignment="Center">
+                                        <Border Width="{Binding IndentWidth}" />
+                                        <Panel Grid.Column="1" Width="18">
+                                            <Button Classes="chevron" Click="OnToggleExpand" IsVisible="{Binding !IsFile}">
+                                                <materialIcons:MaterialIcon Kind="{Binding ExpandIcon}" Width="14" Height="14"
+                                                                            Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                                            </Button>
+                                        </Panel>
+                                        <materialIcons:MaterialIcon Grid.Column="2" Kind="{Binding Icon}" Width="15" Height="15"
                                                                     Foreground="{DynamicResource BudiffMutedTextBrush}" />
-                                        <TextBlock app:NameInlines.Runs="{Binding NameRuns}" Padding="2,0"
+                                        <TextBlock Grid.Column="3" app:NameInlines.Runs="{Binding NameRuns}" Padding="2,0" Margin="6,0,0,0"
+                                                   HorizontalAlignment="Left"
+                                                   VerticalAlignment="Center"
                                                    Foreground="{DynamicResource BudiffTextBrush}"
                                                    TextTrimming="CharacterEllipsis" />
-                                    </StackPanel>
+                                    </Grid>
                                     <TextBlock Grid.Column="1" Classes="num" Text="{Binding LinesText}" Foreground="{DynamicResource BudiffTextBrush}" />
                                     <TextBlock Grid.Column="2" Classes="num" Text="{Binding CodeText}" Foreground="{DynamicResource BudiffTextBrush}" />
                                     <TextBlock Grid.Column="3" Classes="num" Width="48" TextAlignment="Right" Text="{Binding BlankText}" Foreground="#6E747E"
@@ -365,43 +486,79 @@
                         Background="{DynamicResource BudiffToolbarBrush}"
                         BorderBrush="{DynamicResource BudiffBorderBrush}"
                         BorderThickness="0,0,0,1"
-                        Padding="4,2">
-                    <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto" ColumnSpacing="6" MinHeight="26">
+                        Padding="4,2"
+                        ClipToBounds="True">
+                    <!-- ONE compact control row (#47): chevron, Diff <file>, Base,
+                         Working tree, Collapse unchanged, float, close. The title and
+                         the combo sit in shrinkable star columns (title keeps a 110px
+                         floor, combo caps at 170 / floors at 90) so nothing overlaps
+                         in a narrow pane. -->
+                    <Grid ColumnSpacing="6" MinHeight="26">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" MinWidth="110" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="1000*" MaxWidth="170" MinWidth="90" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
                         <Button Classes="diffTool"
                                 Command="{Binding ToggleTreeCommand}"
                                 ToolTip.Tip="{Binding TreeToggleTip}">
                             <materialIcons:MaterialIcon Kind="{Binding TreeToggleIcon}" Width="16" Height="16"
                                                         Foreground="{DynamicResource BudiffMutedTextBrush}" />
                         </Button>
+                        <TextBlock Grid.Column="1" Text="Diff" FontWeight="SemiBold" FontSize="12"
+                                   Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="2" Text="{Binding Diff.Title}" FontWeight="SemiBold" FontSize="12"
+                                   HorizontalAlignment="Left" TextTrimming="CharacterEllipsis"
+                                   Foreground="{DynamicResource BudiffTextBrush}" VerticalAlignment="Center" />
 
                         <!-- Comparison controls live with the diff: base branch only;
                              head is the working tree (or HEAD when the toggle is off). -->
-                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                            <TextBlock Text="Base" FontSize="12" Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
-                            <ComboBox Width="170" FontSize="12"
-                                      ItemsSource="{Binding BaseRefs}"
-                                      SelectedItem="{Binding SelectedBaseRef, Mode=TwoWay}">
-                                <ComboBox.ItemTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="{Binding Display}" />
-                                    </DataTemplate>
-                                </ComboBox.ItemTemplate>
-                            </ComboBox>
-                            <CheckBox IsChecked="{Binding IncludeWorkingTree, Mode=TwoWay}"
-                                      Content="Working tree"
-                                      FontSize="12"
-                                      VerticalAlignment="Center"
-                                      Foreground="{DynamicResource BudiffTextBrush}"
-                                      ToolTip.Tip="Include uncommitted working-tree changes. Off = compare to the last commit, as if your changes were not made yet." />
-                        </StackPanel>
+                        <TextBlock Grid.Column="3" Text="Base" FontSize="12" Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
+                        <ComboBox Grid.Column="4" FontSize="12"
+                                  HorizontalAlignment="Stretch"
+                                  ItemsSource="{Binding BaseRefs}"
+                                  SelectedItem="{Binding SelectedBaseRef, Mode=TwoWay}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Display}" TextTrimming="CharacterEllipsis" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                        <CheckBox Grid.Column="5"
+                                  IsChecked="{Binding IncludeWorkingTree, Mode=TwoWay}"
+                                  Content="Working tree"
+                                  FontSize="12"
+                                  VerticalAlignment="Center"
+                                  Foreground="{DynamicResource BudiffTextBrush}"
+                                  ToolTip.Tip="Include uncommitted working-tree changes. Off = compare to the last commit, as if your changes were not made yet." />
+                        <CheckBox Grid.Column="6"
+                                  IsChecked="{Binding Diff.ShowBlame, Mode=TwoWay}"
+                                  Content="Blame"
+                                  FontSize="12"
+                                  VerticalAlignment="Center"
+                                  Foreground="{DynamicResource BudiffTextBrush}"
+                                  ToolTip.Tip="Show who last touched each line. Auto-hides when the pane drops under half the window (the checkmark tracks it); re-check to force it on." />
+                        <CheckBox Grid.Column="7"
+                                  IsChecked="{Binding Diff.CollapseUnchanged, Mode=TwoWay}"
+                                  Content="Collapse unchanged"
+                                  FontSize="12"
+                                  VerticalAlignment="Center"
+                                  Foreground="{DynamicResource BudiffTextBrush}" />
 
-                        <Button Grid.Column="4" Classes="diffTool"
+                        <Button Grid.Column="8" Classes="diffTool"
                                 Click="OnFloatDiff"
                                 ToolTip.Tip="Open diff in its own window">
                             <materialIcons:MaterialIcon Kind="OpenInNew" Width="16" Height="16"
                                                         Foreground="{DynamicResource BudiffMutedTextBrush}" />
                         </Button>
-                        <Button Grid.Column="5" Classes="diffTool"
+                        <Button Grid.Column="9" Classes="diffTool"
                                 Command="{Binding CloseDiffCommand}"
                                 ToolTip.Tip="Close diff">
                             <materialIcons:MaterialIcon Kind="Close" Width="16" Height="16"
@@ -409,7 +566,21 @@
                         </Button>
                     </Grid>
                 </Border>
-                <budiff:DiffView DataContext="{Binding Diff}" />
+
+                <!-- Thin comparison strip: just what is being compared. -->
+                <Border DockPanel.Dock="Top"
+                        Background="{DynamicResource BudiffToolbarBrush}"
+                        BorderBrush="{DynamicResource BudiffBorderBrush}"
+                        BorderThickness="0,0,0,1"
+                        Padding="10,1"
+                        ClipToBounds="True">
+                    <TextBlock Text="{Binding Diff.Subtitle}"
+                               FontSize="11"
+                               FontFamily="Cascadia Code,Consolas,monospace"
+                               TextTrimming="CharacterEllipsis"
+                               Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                </Border>
+                <budiff:DiffView DataContext="{Binding Diff}" ShowHeader="False" />
             </DockPanel>
         </Grid>
     </Grid>

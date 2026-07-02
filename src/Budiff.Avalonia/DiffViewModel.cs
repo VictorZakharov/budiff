@@ -25,6 +25,7 @@ public sealed partial class DiffViewModel : ObservableObject
     private IBrush _removedBackground = Brush("#33E05252");
     private IBrush _defaultSyntaxBrush = Brush("#D4D4D4");
     private bool _collapseUnchanged = true;
+    private IReadOnlyList<BlameEntry?>? _blameLines;
     private int _tokenizeGen;
     private int _loadGen;
     private DispatcherTimer? _loadingTimer;
@@ -35,7 +36,7 @@ public sealed partial class DiffViewModel : ObservableObject
         Placeholder = "No diff selected.";
     }
 
-    public ObservableCollection<DiffRowVm> Rows { get; } = new();
+    public BulkObservableCollection<DiffRowVm> Rows { get; } = new();
 
     public ISyntaxHighlighter? SyntaxHighlighter { get; set; }
 
@@ -58,8 +59,35 @@ public sealed partial class DiffViewModel : ObservableObject
     [ObservableProperty]
     private bool _isHighlighting;
 
+    // Blame gutter: ShowBlame is BOTH the column's visibility and the header
+    // checkbox, so the checkmark always tracks what is on screen. Crossing the
+    // "pane under half the window" boundary auto-sets it (off when cramped, on
+    // when roomy again); the user can flip the checkbox afterwards to override
+    // in either direction until the next crossing.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsBlameVisible))]
+    [NotifyPropertyChangedFor(nameof(BlameGutterWidth))]
+    private bool _showBlame = true;
+
+    [ObservableProperty]
+    private bool _blameCramped;
+
+    partial void OnBlameCrampedChanged(bool value) => ShowBlame = !value;
+
+    public bool IsBlameVisible => ShowBlame;
+
+    // The funnel gutter offsets its center by this (the blame column sits left
+    // of both code halves). Keep in sync with the column's Width in the row
+    // template.
+    public double BlameGutterWidth => IsBlameVisible ? 120 : 0;
+
     [ObservableProperty]
     private bool _isPlaceholder;
+
+    // A wholly added (new file) or wholly deleted diff has one empty side -
+    // render just the populated side at full width instead of a dead half.
+    [ObservableProperty]
+    private bool _isSinglePane;
 
     [ObservableProperty]
     private string _placeholder = string.Empty;
@@ -139,16 +167,40 @@ public sealed partial class DiffViewModel : ObservableObject
         });
     }
 
+    // Blame arrives asynchronously (1-based line n at index n-1); null clears
+    // it, e.g. when a new diff starts loading. It normally describes the OLD
+    // side; forNewSide maps by NEW line numbers instead (used when the base
+    // has nothing to blame - a new file's lines were still written by someone).
+    public void SetBlame(IReadOnlyList<BlameEntry?>? lines, bool forNewSide = false)
+    {
+        _blameLines = lines;
+        _blameOnNewSide = forNewSide;
+        foreach (var vm in Rows)
+        {
+            vm.Blame = BlameFor(vm.Source);
+        }
+    }
+
+    private bool _blameOnNewSide;
+
+    private BlameEntry? BlameFor(DiffRow? row)
+    {
+        var lineNo = _blameOnNewSide ? row?.NewNo : row?.OldNo;
+        return _blameLines is { } blame && lineNo is { } n && n >= 1 && n <= blame.Count ? blame[n - 1] : null;
+    }
+
     public void SetPlaceholder(string text)
     {
         _tokenizeGen++;
         IsHighlighting = false;
         _all = Array.Empty<DiffRow>();
+        _blameLines = null;
         _oldRuns = Array.Empty<DiffRun[]>();
         _newRuns = Array.Empty<DiffRun[]>();
         _expandedGaps.Clear();
         MaxScroll = 0;
         HorizontalScroll = 0;
+        IsSinglePane = false;
         Rows.Clear();
         Placeholder = text;
         IsPlaceholder = true;
@@ -156,11 +208,42 @@ public sealed partial class DiffViewModel : ObservableObject
 
     public void SetDiff(IReadOnlyList<DiffRow> rows)
     {
+        // A reload that produced the exact same rows (e.g. the working-tree
+        // toggle with a clean tree) keeps everything - rows, highlighting,
+        // scroll - instead of rebuilding into a visible flicker.
+        if (!IsPlaceholder && SameRows(_all, rows))
+        {
+            return;
+        }
+
         IsPlaceholder = false;
         Placeholder = string.Empty;
         _all = rows;
         _expandedGaps.Clear();
         HorizontalScroll = 0;
+
+        // A missing side diffs as one empty line, which pairs with the other
+        // side's trailing blank into an Unchanged row - tolerate blank
+        // Unchanged rows when deciding "wholly added/deleted".
+        var anyChange = false;
+        var allAdded = true;
+        var allRemoved = true;
+        foreach (var row in rows)
+        {
+            if (row.Kind == DiffKind.Unchanged)
+            {
+                var blank = string.IsNullOrEmpty(row.OldText) && string.IsNullOrEmpty(row.NewText);
+                allAdded &= blank;
+                allRemoved &= blank;
+                continue;
+            }
+
+            anyChange = true;
+            allAdded &= row.Kind == DiffKind.Added;
+            allRemoved &= row.Kind == DiffKind.Removed;
+        }
+
+        IsSinglePane = anyChange && (allAdded || allRemoved);
 
         var maxLen = 0;
         foreach (var row in rows)
@@ -339,6 +422,24 @@ public sealed partial class DiffViewModel : ObservableObject
         });
     }
 
+    private static bool SameRows(IReadOnlyList<DiffRow> a, IReadOnlyList<DiffRow> b)
+    {
+        if (a.Count != b.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < a.Count; i++)
+        {
+            if (a[i] != b[i])
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private (string[] Old, string[] New) ReconstructSides()
     {
         int oldMax = 0, newMax = 0;
@@ -389,7 +490,9 @@ public sealed partial class DiffViewModel : ObservableObject
 
     private void Rebuild()
     {
-        Rows.Clear();
+        // Built as a list and swapped in with ONE reset: per-row Add events made
+        // the items host (and the gutter) process thousands of changes per toggle.
+        var rows = new List<DiffRowVm>(_all.Count);
         var n = _all.Count;
         var i = 0;
         while (i < n)
@@ -409,13 +512,13 @@ public sealed partial class DiffViewModel : ObservableObject
                     var trail = j == n ? 0 : ContextLines;
                     for (var k = i; k < i + lead; k++)
                     {
-                        Rows.Add(Content(_all[k]));
+                        rows.Add(Content(_all[k]));
                     }
 
                     var hidden = runLen - lead - trail;
                     if (hidden > 0)
                     {
-                        Rows.Add(new DiffRowVm
+                        rows.Add(new DiffRowVm
                         {
                             IsGap = true,
                             GapRunStart = i,
@@ -425,14 +528,14 @@ public sealed partial class DiffViewModel : ObservableObject
 
                     for (var k = j - trail; k < j; k++)
                     {
-                        Rows.Add(Content(_all[k]));
+                        rows.Add(Content(_all[k]));
                     }
                 }
                 else
                 {
                     for (var k = i; k < j; k++)
                     {
-                        Rows.Add(Content(_all[k]));
+                        rows.Add(Content(_all[k]));
                     }
                 }
 
@@ -440,10 +543,12 @@ public sealed partial class DiffViewModel : ObservableObject
             }
             else
             {
-                Rows.Add(Content(_all[i]));
+                rows.Add(Content(_all[i]));
                 i++;
             }
         }
+
+        Rows.ReplaceAll(rows);
     }
 
     private DiffRowVm Content(DiffRow row)
@@ -465,6 +570,7 @@ public sealed partial class DiffViewModel : ObservableObject
             NewText = row.NewText,
             OldRuns = RunsFor(_oldRuns, row.OldNo),
             NewRuns = RunsFor(_newRuns, row.NewNo),
+            Blame = BlameFor(row),
             Kind = row.Kind,
             OldBackground = oldBg,
             NewBackground = newBg,

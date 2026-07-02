@@ -13,6 +13,11 @@ public sealed class DiffFunnelGutter : Control
 {
     private const double GutterWidth = 18;
 
+    // Every diff row (content and gap) renders at this fixed height; geometry is
+    // pure index math so it works with a VIRTUALIZED items host, where off-screen
+    // rows have no container to measure.
+    private const double RowHeight = 18;
+
     public static readonly StyledProperty<IEnumerable?> RowsProperty =
         AvaloniaProperty.Register<DiffFunnelGutter, IEnumerable?>(nameof(Rows));
 
@@ -27,6 +32,11 @@ public sealed class DiffFunnelGutter : Control
 
     public static readonly StyledProperty<IBrush> ModifiedBrushProperty =
         AvaloniaProperty.Register<DiffFunnelGutter, IBrush>(nameof(ModifiedBrush), Brush("#55E2C08D"));
+
+    // Width of the blame column left of the code halves (0 when hidden): the
+    // funnel sits at the center of the REMAINING width, not the full row.
+    public static readonly StyledProperty<double> BlameWidthProperty =
+        AvaloniaProperty.Register<DiffFunnelGutter, double>(nameof(BlameWidth));
 
     public IEnumerable? Rows
     {
@@ -56,6 +66,12 @@ public sealed class DiffFunnelGutter : Control
     {
         get => GetValue(ModifiedBrushProperty);
         set => SetValue(ModifiedBrushProperty, value);
+    }
+
+    public double BlameWidth
+    {
+        get => GetValue(BlameWidthProperty);
+        set => SetValue(BlameWidthProperty, value);
     }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
@@ -91,7 +107,8 @@ public sealed class DiffFunnelGutter : Control
         }
         else if (change.Property == AddedBrushProperty
                  || change.Property == RemovedBrushProperty
-                 || change.Property == ModifiedBrushProperty)
+                 || change.Property == ModifiedBrushProperty
+                 || change.Property == BlameWidthProperty)
         {
             InvalidateVisual();
         }
@@ -117,9 +134,45 @@ public sealed class DiffFunnelGutter : Control
             }
         }
 
-        var gutterLeft = (Bounds.Width - GutterWidth) / 2;
-        var gutterRight = (Bounds.Width + GutterWidth) / 2;
-        var midX = Bounds.Width / 2;
+        var gutterLeft = BlameWidth + (Bounds.Width - BlameWidth - GutterWidth) / 2;
+        var gutterRight = gutterLeft + GutterWidth;
+        var midX = gutterLeft + GutterWidth / 2;
+
+        // Self-calibrating geometry: the virtualized panel scrolls LOGICALLY
+        // (the host itself never moves), so derive row 0's y AND the actual
+        // row pitch from realized containers instead of assuming either.
+        var hostTop = host.TranslatePoint(new Point(0, 0), this)?.Y ?? 0;
+        var pitch = RowHeight;
+        (int Index, double Top)? first = null;
+        (int Index, double Top)? last = null;
+        foreach (var container in host.GetRealizedContainers())
+        {
+            var index = host.IndexFromContainer(container);
+            if (index < 0 || container.TranslatePoint(new Point(0, 0), this) is not { } top)
+            {
+                continue;
+            }
+
+            if (first is null || index < first.Value.Index)
+            {
+                first = (index, top.Y);
+            }
+
+            if (last is null || index > last.Value.Index)
+            {
+                last = (index, top.Y);
+            }
+        }
+
+        if (first is { } f)
+        {
+            if (last is { } l && l.Index > f.Index)
+            {
+                pitch = (l.Top - f.Top) / (l.Index - f.Index);
+            }
+
+            hostTop = f.Top - f.Index * pitch;
+        }
 
         var i = 0;
         while (i < rows.Count)
@@ -164,11 +217,11 @@ public sealed class DiffFunnelGutter : Control
                 j++;
             }
 
-            var blockTop = RowTop(host, i);
-            var leftTop = leftFirst >= 0 ? RowTop(host, leftFirst) : blockTop;
-            var leftBottom = leftLast >= 0 ? RowBottom(host, leftLast) : blockTop;
-            var rightTop = rightFirst >= 0 ? RowTop(host, rightFirst) : blockTop;
-            var rightBottom = rightLast >= 0 ? RowBottom(host, rightLast) : blockTop;
+            var blockTop = hostTop + i * pitch;
+            var leftTop = leftFirst >= 0 ? hostTop + leftFirst * pitch : blockTop;
+            var leftBottom = leftLast >= 0 ? hostTop + (leftLast + 1) * pitch : blockTop;
+            var rightTop = rightFirst >= 0 ? hostTop + rightFirst * pitch : blockTop;
+            var rightBottom = rightLast >= 0 ? hostTop + (rightLast + 1) * pitch : blockTop;
 
             var brush = modified || (added && removed) ? ModifiedBrush : added ? AddedBrush : RemovedBrush;
             var geometry = new StreamGeometry();
@@ -184,27 +237,6 @@ public sealed class DiffFunnelGutter : Control
             context.DrawGeometry(brush, null, geometry);
             i = j;
         }
-    }
-
-    private double RowTop(ItemsControl host, int index)
-    {
-        if (host.ContainerFromIndex(index) is Control container)
-        {
-            return container.TranslatePoint(new Point(0, 0), this)?.Y ?? 0;
-        }
-
-        return 0;
-    }
-
-    private double RowBottom(ItemsControl host, int index)
-    {
-        if (host.ContainerFromIndex(index) is Control container)
-        {
-            var top = container.TranslatePoint(new Point(0, 0), this)?.Y ?? 0;
-            return top + container.Bounds.Height;
-        }
-
-        return 0;
     }
 
     private static IBrush Brush(string hex) => new ImmutableSolidColorBrush(Color.Parse(hex));

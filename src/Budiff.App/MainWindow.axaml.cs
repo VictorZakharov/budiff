@@ -27,6 +27,7 @@ public sealed partial class MainWindow : Window
         DataContext = _viewModel;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         _viewModel.Analysis.PropertyChanged += OnAnalysisPropertyChanged;
+        BodyGrid.SizeChanged += (_, _) => ClampDockedDiff();
         ApplyDiffLayout();
     }
 
@@ -105,6 +106,7 @@ public sealed partial class MainWindow : Window
                 cols[1].Width = new GridLength(5);
                 cols[2].MinWidth = 360;
                 cols[2].Width = _diffWidth;
+                ClampDockedDiff();
             }
         }
         else
@@ -122,13 +124,44 @@ public sealed partial class MainWindow : Window
         SyncFloatWindow();
     }
 
+    // A fixed diff width (default or splitter-dragged) can exceed what a small
+    // window fits next to the tree's minimum: the grid then runs past the window
+    // edge and the diff toolbar's controls get cut off. Shrink the minimums and
+    // the diff column to the space that actually exists.
+    private void ClampDockedDiff()
+    {
+        var cols = BodyGrid.ColumnDefinitions;
+        if (!DiffHost.IsVisible || !BirdsEyePanel.IsVisible || !cols[2].Width.IsAbsolute)
+        {
+            return;
+        }
+
+        var available = BodyGrid.Bounds.Width;
+        if (available <= 0)
+        {
+            return;
+        }
+
+        var splitter = cols[1].Width.Value;
+        var treeMin = Math.Clamp(available - 360 - splitter, 0, 420);
+        var diffMin = Math.Clamp(available - treeMin - splitter, 0, 360);
+        cols[0].MinWidth = treeMin;
+        cols[2].MinWidth = diffMin;
+
+        var diff = Math.Max(diffMin, Math.Min(cols[2].Width.Value, available - treeMin - splitter));
+        if (Math.Abs(diff - cols[2].Width.Value) > 0.5)
+        {
+            cols[2].Width = new GridLength(diff);
+        }
+    }
+
     private void SyncFloatWindow()
     {
         if (_viewModel.IsDiffFloating && _viewModel.IsDiffOpen)
         {
             if (_floatWindow is null)
             {
-                _floatWindow = new DiffWindow(_viewModel.Diff);
+                _floatWindow = new DiffWindow(_viewModel.Diff, dockBack: () => _viewModel.IsDiffFloating = false);
                 _floatWindow.Closed += OnFloatWindowClosed;
                 _floatWindow.Show(this);
             }
@@ -184,6 +217,14 @@ public sealed partial class MainWindow : Window
         if (folders[0].TryGetLocalPath() is { } path)
         {
             await _viewModel.LoadAsync(path, gitRoot: false);
+        }
+    }
+
+    private void OnToggleExpand(object? sender, RoutedEventArgs e)
+    {
+        if (FindAnalysisRow(sender) is { IsFile: false } row)
+        {
+            row.IsExpanded = !row.IsExpanded;
         }
     }
 

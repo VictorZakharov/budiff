@@ -5,39 +5,67 @@
              x:Name="Root"
              x:CompileBindings="False">
     <DockPanel Background="{Binding EditorBackgroundBrush, ElementName=Root}">
+        <!-- The title path lives in a star column and trims, so a long path or a
+             narrow pane can never paint over the neighbors (a StackPanel here
+             used to overflow across the checkbox). -->
         <Border DockPanel.Dock="Top"
+                IsVisible="{Binding ShowHeader, ElementName=Root}"
                 Background="{Binding ToolbarBrush, ElementName=Root}"
                 BorderBrush="{Binding DiffBorderBrush, ElementName=Root}"
                 BorderThickness="0,0,0,1"
-                Padding="10,6">
-            <DockPanel LastChildFill="True">
-                <CheckBox DockPanel.Dock="Right"
+                Padding="10,6"
+                ClipToBounds="True">
+            <Grid ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <!-- The file name always keeps a readable minimum; past that the
+                         right-side extras clip at the pane edge. -->
+                    <ColumnDefinition Width="*" MinWidth="110" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="Diff"
+                           FontWeight="SemiBold"
+                           Foreground="{Binding MutedTextBrush, ElementName=Root}"
+                           VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1"
+                           Text="{Binding Title}"
+                           FontWeight="SemiBold"
+                           HorizontalAlignment="Left"
+                           TextTrimming="CharacterEllipsis"
+                           Foreground="{Binding TextBrush, ElementName=Root}"
+                           VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2"
+                           Text="{Binding Subtitle}"
+                           FontSize="11.5"
+                           FontFamily="Cascadia Code,Consolas,monospace"
+                           Foreground="{Binding MutedTextBrush, ElementName=Root}"
+                           VerticalAlignment="Center" />
+                <TextBlock Grid.Column="3"
+                           Text="Highlighting syntax..."
+                           FontSize="11.5"
+                           Foreground="{Binding MutedTextBrush, ElementName=Root}"
+                           VerticalAlignment="Center"
+                           IsVisible="{Binding IsHighlighting}" />
+                <CheckBox Grid.Column="4"
+                          IsChecked="{Binding ShowBlame}"
+                          VerticalAlignment="Center"
+                          Content="Blame"
+                          FontSize="12.5"
+                          Foreground="{Binding TextBrush, ElementName=Root}" />
+                <CheckBox Grid.Column="5"
                           IsChecked="{Binding CollapseUnchanged}"
                           VerticalAlignment="Center"
                           Content="Collapse unchanged"
                           FontSize="12.5"
                           Foreground="{Binding TextBrush, ElementName=Root}" />
-                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <TextBlock Text="Diff"
-                               FontWeight="SemiBold"
-                               Foreground="{Binding MutedTextBrush, ElementName=Root}"
-                               VerticalAlignment="Center" />
-                    <TextBlock Text="{Binding Title}"
-                               FontWeight="SemiBold"
-                               Foreground="{Binding TextBrush, ElementName=Root}"
-                               VerticalAlignment="Center" />
-                    <TextBlock Text="{Binding Subtitle}"
-                               FontSize="11.5"
-                               FontFamily="Cascadia Code,Consolas,monospace"
-                               Foreground="{Binding MutedTextBrush, ElementName=Root}"
-                               VerticalAlignment="Center" />
-                    <TextBlock Text="Highlighting syntax..."
-                               FontSize="11.5"
-                               Foreground="{Binding MutedTextBrush, ElementName=Root}"
-                               VerticalAlignment="Center"
-                               IsVisible="{Binding IsHighlighting}" />
-                </StackPanel>
-            </DockPanel>
+                <ContentPresenter Grid.Column="6"
+                                  Content="{Binding HeaderExtra, ElementName=Root}"
+                                  VerticalAlignment="Center" />
+            </Grid>
         </Border>
 
         <ScrollBar DockPanel.Dock="Bottom"
@@ -54,6 +82,15 @@
                           VerticalScrollBarVisibility="Auto">
                 <Grid>
                     <ItemsControl x:Name="RowsHost" ItemsSource="{Binding Rows}">
+                        <!-- Virtualized: only the viewport's rows get containers, so a
+                             Collapse-unchanged toggle or a big diff open realizes ~40
+                             rows instead of one per line (which froze the UI). All
+                             rows are a fixed 18px - DiffFunnelGutter relies on that. -->
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VirtualizingStackPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <Panel>
@@ -71,8 +108,82 @@
                                                    Foreground="{Binding MutedTextBrush, ElementName=Root}" />
                                     </Border>
 
-                                    <Grid IsVisible="{Binding !IsGap}" Height="18" ColumnDefinitions="*,18,*">
-                                        <Border Grid.Column="0"
+                                    <!-- Single-pane layout (#48): a wholly added/deleted diff
+                                         shows only its populated side at full width. -->
+                                    <Grid Height="18" ColumnDefinitions="Auto,46,*">
+                                        <Grid.IsVisible>
+                                            <MultiBinding Converter="{x:Static BoolConverters.And}">
+                                                <Binding Path="!IsGap" />
+                                                <Binding Path="$parent[ItemsControl].DataContext.IsSinglePane" />
+                                            </MultiBinding>
+                                        </Grid.IsVisible>
+                                        <TextBlock Grid.Column="0"
+                                                   Width="120"
+                                                   Text="{Binding Blame.Label}"
+                                                   IsVisible="{Binding $parent[ItemsControl].DataContext.IsBlameVisible}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Padding="8,0,4,0"
+                                                   FontSize="11"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{Binding MutedTextBrush, ElementName=Root}" />
+                                        <Border Grid.Column="1" Grid.ColumnSpan="2" Background="{Binding SingleBackground}">
+                                            <Grid ColumnDefinitions="46,*">
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding SingleNo}"
+                                                           TextAlignment="Right"
+                                                           Padding="0,0,8,0"
+                                                           FontFamily="Cascadia Code,Consolas,monospace"
+                                                           FontSize="12.5"
+                                                           Foreground="{Binding MutedTextBrush, ElementName=Root}" />
+                                                <ScrollViewer Grid.Column="1"
+                                                              HorizontalScrollBarVisibility="Hidden"
+                                                              VerticalScrollBarVisibility="Disabled"
+                                                              Offset="{Binding $parent[ItemsControl].DataContext.HorizontalScroll, Converter={x:Static local:HScrollOffsetConverter.Instance}}">
+                                                    <TextBlock local:DiffInlines.Runs="{Binding SingleRuns}"
+                                                               TextWrapping="NoWrap"
+                                                               Padding="2,0,4,0"
+                                                               FontFamily="Cascadia Code,Consolas,monospace"
+                                                               FontSize="12.5"
+                                                               Foreground="{Binding TextBrush, ElementName=Root}" />
+                                                </ScrollViewer>
+                                            </Grid>
+                                        </Border>
+                                    </Grid>
+
+                                    <Grid Height="18" ColumnDefinitions="Auto,*,18,*">
+                                        <Grid.IsVisible>
+                                            <MultiBinding Converter="{x:Static BoolConverters.And}">
+                                                <Binding Path="!IsGap" />
+                                                <Binding Path="!$parent[ItemsControl].DataContext.IsSinglePane" />
+                                            </MultiBinding>
+                                        </Grid.IsVisible>
+                                        <!-- Blame gutter (#46): who last touched the OLD side's line;
+                                             hover for the commit's details. Its own OUTER column, so
+                                             showing it costs BOTH code halves equally. -->
+                                        <TextBlock Grid.Column="0"
+                                                   Width="120"
+                                                   Text="{Binding Blame.Label}"
+                                                   IsVisible="{Binding $parent[ItemsControl].DataContext.IsBlameVisible}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Padding="8,0,4,0"
+                                                   FontSize="11"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{Binding MutedTextBrush, ElementName=Root}">
+                                            <ToolTip.Tip>
+                                                <StackPanel Spacing="3" MaxWidth="440">
+                                                    <StackPanel Orientation="Horizontal" Spacing="10">
+                                                        <TextBlock Text="{Binding Blame.Sha}"
+                                                                   FontFamily="Cascadia Code,Consolas,monospace"
+                                                                   Foreground="#61AFEF" />
+                                                        <TextBlock Text="{Binding Blame.Author}" FontWeight="SemiBold" />
+                                                        <TextBlock Text="{Binding Blame.Email}" Foreground="#9DA0A8" />
+                                                        <TextBlock Text="{Binding Blame.Date}" Foreground="#9DA0A8" />
+                                                    </StackPanel>
+                                                    <TextBlock Text="{Binding Blame.Message}" TextWrapping="Wrap" />
+                                                </StackPanel>
+                                            </ToolTip.Tip>
+                                        </TextBlock>
+                                        <Border Grid.Column="1"
                                                 Background="{Binding OldBackground}"
                                                 BorderBrush="{Binding DiffBorderBrush, ElementName=Root}"
                                                 BorderThickness="0,0,1,0">
@@ -98,7 +209,7 @@
                                             </Grid>
                                         </Border>
 
-                                        <Border Grid.Column="2" Background="{Binding NewBackground}">
+                                        <Border Grid.Column="3" Background="{Binding NewBackground}">
                                             <Grid ColumnDefinitions="46,*">
                                                 <TextBlock Grid.Column="0"
                                                            Text="{Binding NewNo}"
@@ -128,6 +239,8 @@
 
                     <local:DiffFunnelGutter Rows="{Binding Rows}"
                                             ItemsHost="{Binding #RowsHost}"
+                                            BlameWidth="{Binding BlameGutterWidth}"
+                                            IsVisible="{Binding !IsSinglePane}"
                                             AddedBrush="{Binding FunnelAddedBrush, ElementName=Root}"
                                             RemovedBrush="{Binding FunnelRemovedBrush, ElementName=Root}"
                                             ModifiedBrush="{Binding FunnelModifiedBrush, ElementName=Root}"
