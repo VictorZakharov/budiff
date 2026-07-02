@@ -397,6 +397,7 @@ internal static class GitCli
             UseShellExecute = false,
             CreateNoWindow = true,
             StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
         };
         foreach (var arg in args)
         {
@@ -411,7 +412,11 @@ internal static class GitCli
                 return false;
             }
 
-            var output = proc.StandardOutput.ReadToEnd();
+            // Drain BOTH pipes off-thread: reading stdout inline would block
+            // forever when git fills the un-read stderr pipe (and that block
+            // would also keep the timeout below from ever firing).
+            var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+            var stderrTask = proc.StandardError.ReadToEndAsync();
             if (!proc.WaitForExit(TimeoutMs))
             {
                 try
@@ -426,6 +431,8 @@ internal static class GitCli
                 return false;
             }
 
+            var output = stdoutTask.GetAwaiter().GetResult();
+            stderrTask.GetAwaiter().GetResult();
             ct.ThrowIfCancellationRequested();
             if (proc.ExitCode != 0)
             {

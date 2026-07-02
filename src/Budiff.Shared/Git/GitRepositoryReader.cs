@@ -343,8 +343,15 @@ public static class GitRepositoryReader
             return BlobInfo.Empty;
         }
 
-        return blob.IsBinary
-            ? new BlobInfo(string.Empty, blob.Size, IsBinary: true)
+        if (blob.IsBinary)
+        {
+            return new BlobInfo(string.Empty, blob.Size, IsBinary: true);
+        }
+
+        // Oversized blobs never reach the inline diff (DiffLoader.Build shows a
+        // placeholder), so do not materialize the whole text just to discard it.
+        return blob.Size > DiffLoader.MaxInlineDiffBytes
+            ? new BlobInfo(string.Empty, blob.Size, IsBinary: false)
             : new BlobInfo(blob.GetContentText(), blob.Size, IsBinary: false);
     }
 
