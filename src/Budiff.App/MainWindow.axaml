@@ -66,6 +66,16 @@
             <Setter Property="Background" Value="#2D5A9E" />
             <Setter Property="Foreground" Value="#FFFFFF" />
         </Style>
+        <!-- The container border is rounded (4) but ClipToBounds clips to the
+             RECTANGULAR bounds, so a square highlight pokes into the rounded
+             corners. Round each segment's outer corners instead (4 minus the
+             1px border). -->
+        <Style Selector="Button.segment.left">
+            <Setter Property="CornerRadius" Value="3,0,0,3" />
+        </Style>
+        <Style Selector="Button.segment.right">
+            <Setter Property="CornerRadius" Value="0,3,3,0" />
+        </Style>
         <Style Selector="TextBlock.num">
             <Setter Property="HorizontalAlignment" Value="Right" />
             <Setter Property="VerticalAlignment" Value="Center" />
@@ -191,12 +201,12 @@
                                     ClipToBounds="True"
                                     VerticalAlignment="Center">
                                 <StackPanel Orientation="Horizontal">
-                                    <Button Classes="segment"
+                                    <Button Classes="segment left"
                                             Classes.active="{Binding Analysis.IsFoldersGrouping}"
                                             Content="Folders"
                                             Command="{Binding Analysis.SelectGroupingCommand}"
                                             CommandParameter="{Binding Analysis.Groupings[0]}" />
-                                    <Button Classes="segment"
+                                    <Button Classes="segment right"
                                             Classes.active="{Binding Analysis.IsProjectsGrouping}"
                                             Content="Projects"
                                             Command="{Binding Analysis.SelectGroupingCommand}"
