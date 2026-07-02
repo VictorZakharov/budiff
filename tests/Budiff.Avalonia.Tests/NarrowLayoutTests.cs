@@ -48,8 +48,8 @@ public sealed class NarrowLayoutTests
         Assert.True(vm.ShowDiffPane);
 
         // Blame auto-hide: at 900 the diff (~475px) is at least half the window,
-        // so blame may show; growing the window (diff column width stays fixed)
-        // drops it under half and must hide blame even though it stays toggled.
+        // so blame shows; growing the window (diff column width stays fixed)
+        // drops it under half - blame hides and the checkbox tracks it.
         Assert.True(vm.Diff.ShowBlame);
         Assert.False(vm.Diff.BlameCramped);
         window.Width = 1400;
@@ -57,7 +57,12 @@ public sealed class NarrowLayoutTests
         UiSnapshot.Pump();
         Assert.True(vm.Diff.BlameCramped);
         Assert.False(vm.Diff.IsBlameVisible);
-        Assert.True(vm.Diff.ShowBlame);
+        Assert.False(vm.Diff.ShowBlame);
+
+        // The user can still override the auto-hide by re-checking the box.
+        vm.Diff.ShowBlame = true;
+        UiSnapshot.Pump();
+        Assert.True(vm.Diff.IsBlameVisible);
         window.Close();
     }
 

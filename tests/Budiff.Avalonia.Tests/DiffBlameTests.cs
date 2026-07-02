@@ -30,19 +30,27 @@ public sealed class DiffBlameTests
     }
 
     [Fact]
-    public void IsBlameVisible_RequiresToggleAndRoom()
+    public void BlameCheckbox_TracksAutoHide_AndUserCanOverride()
     {
         var model = new DiffViewModel();
         Assert.True(model.IsBlameVisible);
 
-        // A cramped pane hides blame even while toggled on...
+        // Crossing into cramped auto-hides AND unchecks the box.
         model.BlameCramped = true;
+        Assert.False(model.ShowBlame);
         Assert.False(model.IsBlameVisible);
 
-        // ...and the toggle still wins when there is room again.
-        model.BlameCramped = false;
+        // The user can override while cramped; layout re-checks that do not
+        // cross the boundary must not undo the override.
+        model.ShowBlame = true;
         Assert.True(model.IsBlameVisible);
+        model.BlameCramped = true;
+        Assert.True(model.IsBlameVisible);
+
+        // Crossing back to roomy auto-shows (and re-checks the box).
         model.ShowBlame = false;
-        Assert.False(model.IsBlameVisible);
+        model.BlameCramped = false;
+        Assert.True(model.ShowBlame);
+        Assert.True(model.IsBlameVisible);
     }
 }

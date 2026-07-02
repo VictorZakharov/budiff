@@ -59,21 +59,22 @@ public sealed partial class DiffViewModel : ObservableObject
     [ObservableProperty]
     private bool _isHighlighting;
 
-    // Blame gutter: ShowBlame is the user's toggle; BlameCramped is set by the
-    // view when the pane is under half the window's width. The column shows
-    // only when both agree - a cramped pane hides blame even if toggled on,
-    // and it comes back when the pane grows again.
+    // Blame gutter: ShowBlame is BOTH the column's visibility and the header
+    // checkbox, so the checkmark always tracks what is on screen. Crossing the
+    // "pane under half the window" boundary auto-sets it (off when cramped, on
+    // when roomy again); the user can flip the checkbox afterwards to override
+    // in either direction until the next crossing.
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsBlameVisible))]
     [NotifyPropertyChangedFor(nameof(BlameGutterWidth))]
     private bool _showBlame = true;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsBlameVisible))]
-    [NotifyPropertyChangedFor(nameof(BlameGutterWidth))]
     private bool _blameCramped;
 
-    public bool IsBlameVisible => ShowBlame && !BlameCramped;
+    partial void OnBlameCrampedChanged(bool value) => ShowBlame = !value;
+
+    public bool IsBlameVisible => ShowBlame;
 
     // The funnel gutter offsets its center by this (the blame column sits left
     // of both code halves). Keep in sync with the column's Width in the row
