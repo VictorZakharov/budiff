@@ -27,6 +27,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private GitRepositoryScope? _scope;
     private ChangedFile? _openDiffFile;
     private int _blameGen;
+    private string? _blamePath;
 
     // Sentinel base option: resolves to the same boundary commit the windowed
     // churn diffs from, so the drill-in shows what the Added/Removed columns
@@ -144,27 +145,47 @@ public sealed partial class MainWindowViewModel : ObservableObject
         BeginLoadBlame(scope, file, target);
     }
 
-    // Blame describes the diff's BASE side; loaded off-thread after the diff so
-    // the rows never wait on it. The generation guard drops a stale result when
-    // the user has already moved to another file or base.
+    // Blame describes the diff's BASE side; when the base has nothing to blame
+    // (empty-tree base, or the file is absent there - a wholly new file), fall
+    // back to blaming the NEW side: those lines were still written by someone.
+    // Loaded off-thread after the diff so the rows never wait on it; the
+    // generation guard drops a stale result when the user has already moved on.
+    // Reloading the SAME file keeps the old values on screen until the fresh
+    // ones land, so a working-tree/base toggle does not blank the column.
     private void BeginLoadBlame(GitRepositoryScope scope, ChangedFile file, DiffTarget target)
     {
         var gen = ++_blameGen;
-        Diff.SetBlame(null);
+        if (!string.Equals(_blamePath, file.Path, StringComparison.OrdinalIgnoreCase))
+        {
+            Diff.SetBlame(null);
+        }
+
+        _blamePath = file.Path;
         _ = Task.Run(() =>
         {
+            var forNewSide = false;
             var blame = GitRepositoryReader.LoadBlame(scope, file.OldPath ?? file.Path, target.BaseRef);
+            if (blame.Count == 0)
+            {
+                blame = GitHistory.BlameFile(
+                    scope.RepositoryRoot,
+                    file.Path,
+                    target.HeadIsWorkingTree ? null : target.HeadRef ?? "HEAD");
+                forNewSide = true;
+            }
+
             var entries = new BlameEntry?[blame.Count];
             for (var i = 0; i < blame.Count; i++)
             {
                 if (blame[i] is { } line)
                 {
+                    var uncommitted = line.ShortSha == "0000000";
                     entries[i] = new BlameEntry(
-                        $"{line.Author} {Age(line.When)}",
+                        uncommitted ? "uncommitted" : $"{line.Author} {Age(line.When)}",
                         line.ShortSha,
                         line.Author,
                         line.Email,
-                        line.When.ToLocalTime().ToString("yyyy-MM-dd HH:mm"),
+                        uncommitted ? string.Empty : line.When.ToLocalTime().ToString("yyyy-MM-dd HH:mm"),
                         line.Message);
                 }
             }
@@ -173,7 +194,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             {
                 if (gen == _blameGen)
                 {
-                    Diff.SetBlame(entries);
+                    Diff.SetBlame(entries, forNewSide);
                 }
             });
         });

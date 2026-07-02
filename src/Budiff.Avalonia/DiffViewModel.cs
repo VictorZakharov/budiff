@@ -167,19 +167,27 @@ public sealed partial class DiffViewModel : ObservableObject
         });
     }
 
-    // Blame arrives asynchronously (indexed by OLD-side line, 1-based line n at
-    // index n-1); null clears it, e.g. when a new diff starts loading.
-    public void SetBlame(IReadOnlyList<BlameEntry?>? lines)
+    // Blame arrives asynchronously (1-based line n at index n-1); null clears
+    // it, e.g. when a new diff starts loading. It normally describes the OLD
+    // side; forNewSide maps by NEW line numbers instead (used when the base
+    // has nothing to blame - a new file's lines were still written by someone).
+    public void SetBlame(IReadOnlyList<BlameEntry?>? lines, bool forNewSide = false)
     {
         _blameLines = lines;
+        _blameOnNewSide = forNewSide;
         foreach (var vm in Rows)
         {
-            vm.Blame = BlameFor(vm.Source?.OldNo);
+            vm.Blame = BlameFor(vm.Source);
         }
     }
 
-    private BlameEntry? BlameFor(int? oldNo)
-        => _blameLines is { } blame && oldNo is { } n && n >= 1 && n <= blame.Count ? blame[n - 1] : null;
+    private bool _blameOnNewSide;
+
+    private BlameEntry? BlameFor(DiffRow? row)
+    {
+        var lineNo = _blameOnNewSide ? row?.NewNo : row?.OldNo;
+        return _blameLines is { } blame && lineNo is { } n && n >= 1 && n <= blame.Count ? blame[n - 1] : null;
+    }
 
     public void SetPlaceholder(string text)
     {
@@ -200,6 +208,14 @@ public sealed partial class DiffViewModel : ObservableObject
 
     public void SetDiff(IReadOnlyList<DiffRow> rows)
     {
+        // A reload that produced the exact same rows (e.g. the working-tree
+        // toggle with a clean tree) keeps everything - rows, highlighting,
+        // scroll - instead of rebuilding into a visible flicker.
+        if (!IsPlaceholder && SameRows(_all, rows))
+        {
+            return;
+        }
+
         IsPlaceholder = false;
         Placeholder = string.Empty;
         _all = rows;
@@ -406,6 +422,24 @@ public sealed partial class DiffViewModel : ObservableObject
         });
     }
 
+    private static bool SameRows(IReadOnlyList<DiffRow> a, IReadOnlyList<DiffRow> b)
+    {
+        if (a.Count != b.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < a.Count; i++)
+        {
+            if (a[i] != b[i])
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private (string[] Old, string[] New) ReconstructSides()
     {
         int oldMax = 0, newMax = 0;
@@ -536,7 +570,7 @@ public sealed partial class DiffViewModel : ObservableObject
             NewText = row.NewText,
             OldRuns = RunsFor(_oldRuns, row.OldNo),
             NewRuns = RunsFor(_newRuns, row.NewNo),
-            Blame = BlameFor(row.OldNo),
+            Blame = BlameFor(row),
             Kind = row.Kind,
             OldBackground = oldBg,
             NewBackground = newBg,

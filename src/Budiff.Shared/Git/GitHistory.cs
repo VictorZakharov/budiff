@@ -184,6 +184,132 @@ public static class GitHistory
         return EmptyTreeSha;
     }
 
+    // Blame of the file as it exists in the WORKING TREE (rev = null) or at a
+    // revision - used for the diff's NEW side when the base has nothing to
+    // blame (empty-tree base / file absent there). LibGit2Sharp cannot blame
+    // the working tree, so this shells out to `git blame --porcelain`, which
+    // also marks uncommitted lines (all-zero sha). Indexed by 0-based line.
+    public static IReadOnlyList<BlameLineInfo?> BlameFile(string root, string path, string? rev)
+    {
+        var args = new List<string> { "-c", "core.quotePath=false", "blame", "--porcelain" };
+        if (!string.IsNullOrEmpty(rev))
+        {
+            args.Add(rev);
+        }
+
+        args.AddRange(new[] { "--", path });
+        return GitCli.TryRun(root, out var output, args.ToArray())
+            ? ParsePorcelainBlame(output)
+            : Array.Empty<BlameLineInfo?>();
+    }
+
+    public static IReadOnlyList<BlameLineInfo?> ParsePorcelainBlame(string output)
+    {
+        // Porcelain: every line gets a "<sha> <orig> <final> [count]" header;
+        // author/summary tags appear only the FIRST time a commit shows up.
+        var meta = new Dictionary<string, (string Author, string Email, DateTimeOffset When, string Summary)>();
+        var lines = new List<BlameLineInfo?>();
+        string? sha = null;
+        var finalLine = 0;
+
+        foreach (var line in LineCounter.SplitLines(output))
+        {
+            if (line.Length == 0)
+            {
+                continue;
+            }
+
+            if (line[0] == '\t')
+            {
+                if (sha is not null && finalLine >= 1)
+                {
+                    var m = meta.GetValueOrDefault(sha);
+                    while (lines.Count < finalLine)
+                    {
+                        lines.Add(null);
+                    }
+
+                    var uncommitted = IsAllZeros(sha);
+                    lines[finalLine - 1] = new BlameLineInfo(
+                        uncommitted ? "0000000" : sha[..7],
+                        uncommitted ? "Not committed yet" : m.Author,
+                        uncommitted ? string.Empty : m.Email,
+                        m.When,
+                        uncommitted ? "uncommitted changes" : m.Summary);
+                }
+
+                sha = null;
+                continue;
+            }
+
+            var space = line.IndexOf(' ');
+            var head = space < 0 ? line : line[..space];
+            if (head.Length == 40 && IsHex(head))
+            {
+                sha = head;
+                var parts = line.Split(' ');
+                finalLine = parts.Length >= 3 && int.TryParse(parts[2], out var fl) ? fl : 0;
+                if (!meta.ContainsKey(sha))
+                {
+                    meta[sha] = (string.Empty, string.Empty, default, string.Empty);
+                }
+
+                continue;
+            }
+
+            if (sha is null || space < 0)
+            {
+                continue;
+            }
+
+            var current = meta.GetValueOrDefault(sha);
+            if (line.StartsWith("author ", StringComparison.Ordinal))
+            {
+                meta[sha] = current with { Author = line[7..] };
+            }
+            else if (line.StartsWith("author-mail ", StringComparison.Ordinal))
+            {
+                meta[sha] = current with { Email = line[12..].Trim('<', '>') };
+            }
+            else if (line.StartsWith("author-time ", StringComparison.Ordinal) && long.TryParse(line[12..], out var time))
+            {
+                meta[sha] = current with { When = DateTimeOffset.FromUnixTimeSeconds(time) };
+            }
+            else if (line.StartsWith("summary ", StringComparison.Ordinal))
+            {
+                meta[sha] = current with { Summary = line[8..] };
+            }
+        }
+
+        return lines;
+    }
+
+    private static bool IsAllZeros(string sha)
+    {
+        foreach (var c in sha)
+        {
+            if (c != '0')
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsHex(string text)
+    {
+        foreach (var c in text)
+        {
+            if (!char.IsAsciiHexDigit(c))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static void ApplyWindowNetDiff(string root, int days, HistoryResult result, CancellationToken ct)
     {
         var baseRef = FindWindowBaseCommit(root, days);

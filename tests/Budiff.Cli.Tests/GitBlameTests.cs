@@ -31,6 +31,27 @@ public sealed class GitBlameTests : IDisposable
     }
 
     [Fact]
+    public void BlameFile_WorkingTree_MarksUncommittedLines()
+    {
+        Repository.Init(_root);
+        using var repo = new Repository(_root);
+        CommitFile(repo, "a.txt", "one\ntwo\n", "Ada Lovelace", "add", daysAgo: 3);
+        File.WriteAllText(Path.Combine(_root, "a.txt"), "one\ntwo CHANGED\n");
+
+        var blame = GitHistory.BlameFile(_root, "a.txt", rev: null);
+
+        Assert.True(blame.Count >= 2);
+        Assert.Equal("Ada Lovelace", blame[0]!.Author);
+        Assert.Equal("0000000", blame[1]!.ShortSha);
+        Assert.Equal("Not committed yet", blame[1]!.Author);
+
+        // At HEAD both lines belong to the commit.
+        var atHead = GitHistory.BlameFile(_root, "a.txt", rev: "HEAD");
+        Assert.Equal("Ada Lovelace", atHead[1]!.Author);
+        Assert.Equal("add", atHead[1]!.Message);
+    }
+
+    [Fact]
     public void LoadBlame_EmptyForNonCommitBase()
     {
         Repository.Init(_root);

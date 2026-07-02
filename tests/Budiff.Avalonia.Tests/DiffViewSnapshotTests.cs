@@ -73,6 +73,17 @@ public sealed class DiffViewSnapshotTests
         model.CollapseUnchanged = true;
         UiSnapshot.Pump();
         Assert.True(model.Rows.Count < 100);
+
+        // Scrolled capture: with LOGICAL scrolling the funnel gutter must
+        // anchor its geometry on realized containers, not the host position.
+        model.CollapseUnchanged = false;
+        UiSnapshot.Pump();
+        var scroller = global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(window)
+            .OfType<ScrollViewer>().First();
+        scroller.Offset = new global::Avalonia.Vector(0, 1490 * 18);
+        UiSnapshot.Pump();
+        UiSnapshot.Pump();
+        UiSnapshot.Capture(window, "diff-view-scrolled");
         window.Close();
     }
 

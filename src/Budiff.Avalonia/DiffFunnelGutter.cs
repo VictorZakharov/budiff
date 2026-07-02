@@ -137,7 +137,42 @@ public sealed class DiffFunnelGutter : Control
         var gutterLeft = BlameWidth + (Bounds.Width - BlameWidth - GutterWidth) / 2;
         var gutterRight = gutterLeft + GutterWidth;
         var midX = gutterLeft + GutterWidth / 2;
+
+        // Self-calibrating geometry: the virtualized panel scrolls LOGICALLY
+        // (the host itself never moves), so derive row 0's y AND the actual
+        // row pitch from realized containers instead of assuming either.
         var hostTop = host.TranslatePoint(new Point(0, 0), this)?.Y ?? 0;
+        var pitch = RowHeight;
+        (int Index, double Top)? first = null;
+        (int Index, double Top)? last = null;
+        foreach (var container in host.GetRealizedContainers())
+        {
+            var index = host.IndexFromContainer(container);
+            if (index < 0 || container.TranslatePoint(new Point(0, 0), this) is not { } top)
+            {
+                continue;
+            }
+
+            if (first is null || index < first.Value.Index)
+            {
+                first = (index, top.Y);
+            }
+
+            if (last is null || index > last.Value.Index)
+            {
+                last = (index, top.Y);
+            }
+        }
+
+        if (first is { } f)
+        {
+            if (last is { } l && l.Index > f.Index)
+            {
+                pitch = (l.Top - f.Top) / (l.Index - f.Index);
+            }
+
+            hostTop = f.Top - f.Index * pitch;
+        }
 
         var i = 0;
         while (i < rows.Count)
@@ -182,11 +217,11 @@ public sealed class DiffFunnelGutter : Control
                 j++;
             }
 
-            var blockTop = hostTop + i * RowHeight;
-            var leftTop = leftFirst >= 0 ? hostTop + leftFirst * RowHeight : blockTop;
-            var leftBottom = leftLast >= 0 ? hostTop + (leftLast + 1) * RowHeight : blockTop;
-            var rightTop = rightFirst >= 0 ? hostTop + rightFirst * RowHeight : blockTop;
-            var rightBottom = rightLast >= 0 ? hostTop + (rightLast + 1) * RowHeight : blockTop;
+            var blockTop = hostTop + i * pitch;
+            var leftTop = leftFirst >= 0 ? hostTop + leftFirst * pitch : blockTop;
+            var leftBottom = leftLast >= 0 ? hostTop + (leftLast + 1) * pitch : blockTop;
+            var rightTop = rightFirst >= 0 ? hostTop + rightFirst * pitch : blockTop;
+            var rightBottom = rightLast >= 0 ? hostTop + (rightLast + 1) * pitch : blockTop;
 
             var brush = modified || (added && removed) ? ModifiedBrush : added ? AddedBrush : RemovedBrush;
             var geometry = new StreamGeometry();

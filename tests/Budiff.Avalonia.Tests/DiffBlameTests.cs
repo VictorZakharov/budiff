@@ -30,6 +30,36 @@ public sealed class DiffBlameTests
     }
 
     [Fact]
+    public void SetBlame_ForNewSide_MapsByNewLineNumbers()
+    {
+        var model = new DiffViewModel();
+        // Wholly new file: rows only have NEW line numbers.
+        model.SetDiff(LineDiff.Compute(string.Empty, "alpha\nbeta\n"));
+
+        var ada = new BlameEntry("Ada 1d", "abc1234", "Ada", "ada@example.com", "2026-07-01 10:00", "add");
+        var uncommitted = new BlameEntry("uncommitted", "0000000", "Not committed yet", "", "", "uncommitted changes");
+        model.SetBlame(new[] { ada, uncommitted }, forNewSide: true);
+
+        var byNewNo = model.Rows.Where(r => r.NewNo is not null).ToDictionary(r => r.NewNo!);
+        Assert.Equal("Ada", byNewNo["1"].Blame!.Author);
+        Assert.Equal("uncommitted", byNewNo["2"].Blame!.Label);
+    }
+
+    [Fact]
+    public void SetDiff_IdenticalReload_KeepsExistingRows()
+    {
+        var model = new DiffViewModel();
+        model.SetDiff(LineDiff.Compute("a\nb\n", "a\nc\n"));
+        var before = model.Rows[0];
+
+        // Same content again (e.g. working-tree toggle with a clean tree):
+        // nothing rebuilds, so nothing can flicker.
+        model.SetDiff(LineDiff.Compute("a\nb\n", "a\nc\n"));
+
+        Assert.Same(before, model.Rows[0]);
+    }
+
+    [Fact]
     public void BlameCheckbox_TracksAutoHide_AndUserCanOverride()
     {
         var model = new DiffViewModel();
