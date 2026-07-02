@@ -1,5 +1,7 @@
 # budiff
 
+[![CI](https://github.com/VictorZakharov/budiff/actions/workflows/ci.yml/badge.svg)](https://github.com/VictorZakharov/budiff/actions/workflows/ci.yml)
+
 **`ls`, but for your diffs.** Run it in a folder and instantly see what changed.
 
 ![budiff CLI bird's-eye](docs/cli-birdseye.svg)
@@ -40,7 +42,7 @@ curl -fsSL https://raw.githubusercontent.com/VictorZakharov/budiff/main/scripts/
 
 Set `BUDIFF_VERSION=v0.1.0` / `BUDIFF_INSTALL_DIR=...` for the shell script, or pass `-Version v0.1.0 -InstallDir ...` to the PowerShell script. Winget and Homebrew manifests are not published yet; the release assets and install scripts are the stable inputs for those manifests.
 
-Native AOT is not enabled for the CLI yet. The CLI depends on LibGit2Sharp and native libgit2, which is not trim/AOT-friendly enough for a reliable first release. The release path is self-contained single-file publishing; AOT can be revisited if the git reader moves behind trim annotations or a git-CLI backend.
+The GUI inside the tool package ships as a Native AOT publish (Windows), so `budiff -i` opens in well under a second. The self-contained CLI release builds are single-file JIT publishes; per-OS Native AOT CLI binaries are a possible future upgrade (AOT cannot cross-compile, so they need per-OS release legs).
 
 ## Usage
 
@@ -60,9 +62,22 @@ budiff -i              # open the GUI
 
 Outside a git repository, `budiff` still works: it falls back to a plain folder analysis (lines / code / blank / comment - no churn, commits, or authors). Terminal output is colored, and file diffs are syntax-highlighted with the same DarkPlus grammars the GUI uses; set `BUDIFF_FORCE_COLOR=1` to keep color when piping (e.g. `| less -R`).
 
-The stdin mode is a pure unified-diff transform; it does not need repository access. `budiff mcp` exposes `list_changes`, `get_file_diff`, and `repo_overview` over stdio for MCP-capable AI coding agents. The GUI ships inside the tool package, so `budiff -i` works from any folder right after `dotnet tool install` (set `BUDIFF_APP_PATH` only to point at a different build). The GUI provides the same bird's-eye with filters, grouping, and period controls (including a custom window in days). The diff pane stays hidden until you drill into a file; it then docks on the right (the bird's-eye compacts to its core columns) with a base-branch picker and a working-tree toggle in its toolbar, the split is resizable, the tree can collapse away entirely, and the diff can pop out into its own window - handy on a second monitor.
+The stdin mode is a pure unified-diff transform; it does not need repository access. The GUI ships inside the tool package, so `budiff -i` works from any folder right after `dotnet tool install` (set `BUDIFF_APP_PATH` only to point at a different build). The GUI provides the same bird's-eye with filters, grouping, and period controls (including a custom window in days). The diff pane stays hidden until you drill into a file; it then docks on the right (the bird's-eye compacts to its core columns) with a base-branch picker and a working-tree toggle in its toolbar, the split is resizable, the tree can collapse away entirely, and the diff can pop out into its own window - handy on a second monitor.
 
-Example MCP server config:
+## For AI agents
+
+Agents work the same way humans do here: list what changed, then drill into just the files that matter - far cheaper than paging whole diffs into context.
+
+- `budiff --json` (and `budiff <file> --json`) emit the change listing / a single file diff as structured JSON.
+- `budiff mcp` runs a stdio MCP server exposing `list_changes`, `get_file_diff`, and `repo_overview`.
+
+Register with Claude Code in one line:
+
+```sh
+claude mcp add budiff -- budiff mcp
+```
+
+Or in any MCP-capable client's config:
 
 ```json
 {
