@@ -130,6 +130,51 @@ public static class GitRepositoryReader
         }, new ChangeSet(scope, target, Array.Empty<ChangedFile>()));
     }
 
+    // Blame for the BASE side of a diff (the left side is what blame describes;
+    // working-tree lines on the right have no commit yet). Indexed by 0-based
+    // line; entries the blame does not cover stay null. Empty when the base ref
+    // is not a commit (e.g. the empty tree) or the file is not tracked there.
+    public static IReadOnlyList<BlameLineInfo?> LoadBlame(GitRepositoryScope scope, string path, string baseRef)
+    {
+        return WithRepo<IReadOnlyList<BlameLineInfo?>>(scope.RepositoryRoot, repo =>
+        {
+            var commit = ResolveCommit(repo, baseRef);
+            if (commit is null)
+            {
+                return Array.Empty<BlameLineInfo?>();
+            }
+
+            var lines = new List<BlameLineInfo?>();
+            foreach (var hunk in repo.Blame(path.Replace('\\', '/'), new BlameOptions { StartingAt = commit }))
+            {
+                var start = hunk.FinalStartLineNumber;
+                var end = start + hunk.LineCount;
+                while (lines.Count < end)
+                {
+                    lines.Add(null);
+                }
+
+                var c = hunk.FinalCommit;
+                if (c is null)
+                {
+                    continue;
+                }
+
+                var info = new BlameLineInfo(
+                    c.Sha.Length >= 7 ? c.Sha[..7] : c.Sha,
+                    c.Author?.Name ?? string.Empty,
+                    c.Author?.When ?? default,
+                    c.MessageShort ?? string.Empty);
+                for (var i = start; i < end; i++)
+                {
+                    lines[i] = info;
+                }
+            }
+
+            return lines;
+        }, Array.Empty<BlameLineInfo?>());
+    }
+
     public static DiffResult LoadDiff(GitRepositoryScope scope, ChangedFile file, DiffTarget target)
     {
         return WithRepo(scope.RepositoryRoot, repo =>

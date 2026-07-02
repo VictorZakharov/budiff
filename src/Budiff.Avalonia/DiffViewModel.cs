@@ -25,6 +25,7 @@ public sealed partial class DiffViewModel : ObservableObject
     private IBrush _removedBackground = Brush("#33E05252");
     private IBrush _defaultSyntaxBrush = Brush("#D4D4D4");
     private bool _collapseUnchanged = true;
+    private IReadOnlyList<BlameEntry?>? _blameLines;
     private int _tokenizeGen;
     private int _loadGen;
     private DispatcherTimer? _loadingTimer;
@@ -57,6 +58,20 @@ public sealed partial class DiffViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _isHighlighting;
+
+    // Blame gutter: ShowBlame is the user's toggle; BlameCramped is set by the
+    // view when the pane is under half the window's width. The column shows
+    // only when both agree - a cramped pane hides blame even if toggled on,
+    // and it comes back when the pane grows again.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsBlameVisible))]
+    private bool _showBlame = true;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsBlameVisible))]
+    private bool _blameCramped;
+
+    public bool IsBlameVisible => ShowBlame && !BlameCramped;
 
     [ObservableProperty]
     private bool _isPlaceholder;
@@ -139,11 +154,26 @@ public sealed partial class DiffViewModel : ObservableObject
         });
     }
 
+    // Blame arrives asynchronously (indexed by OLD-side line, 1-based line n at
+    // index n-1); null clears it, e.g. when a new diff starts loading.
+    public void SetBlame(IReadOnlyList<BlameEntry?>? lines)
+    {
+        _blameLines = lines;
+        foreach (var vm in Rows)
+        {
+            vm.Blame = BlameFor(vm.Source?.OldNo);
+        }
+    }
+
+    private BlameEntry? BlameFor(int? oldNo)
+        => _blameLines is { } blame && oldNo is { } n && n >= 1 && n <= blame.Count ? blame[n - 1] : null;
+
     public void SetPlaceholder(string text)
     {
         _tokenizeGen++;
         IsHighlighting = false;
         _all = Array.Empty<DiffRow>();
+        _blameLines = null;
         _oldRuns = Array.Empty<DiffRun[]>();
         _newRuns = Array.Empty<DiffRun[]>();
         _expandedGaps.Clear();
@@ -469,6 +499,7 @@ public sealed partial class DiffViewModel : ObservableObject
             NewText = row.NewText,
             OldRuns = RunsFor(_oldRuns, row.OldNo),
             NewRuns = RunsFor(_newRuns, row.NewNo),
+            Blame = BlameFor(row.OldNo),
             Kind = row.Kind,
             OldBackground = oldBg,
             NewBackground = newBg,

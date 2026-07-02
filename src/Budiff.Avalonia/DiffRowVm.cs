@@ -29,6 +29,10 @@ public sealed partial class DiffRowVm : ObservableObject
     [ObservableProperty]
     private IReadOnlyList<DiffRun>? _newRuns;
 
+    // Blame for the OLD side's line; arrives asynchronously after the diff.
+    [ObservableProperty]
+    private BlameEntry? _blame;
+
     public DiffKind Kind { get; init; }
 
     public IBrush OldBackground { get; init; } = Brushes.Transparent;

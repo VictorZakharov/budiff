@@ -50,7 +50,28 @@ public partial class DiffView : UserControl
     public DiffView()
     {
         InitializeComponent();
-        DataContextChanged += (_, _) => ApplyThemeToViewModel();
+        DataContextChanged += (_, _) =>
+        {
+            ApplyThemeToViewModel();
+            UpdateBlameCramped();
+        };
+        SizeChanged += (_, _) => UpdateBlameCramped();
+    }
+
+    // Blame needs real estate: it hides while the pane is under half the
+    // window's width (regardless of the toggle) and returns when it grows.
+    private void UpdateBlameCramped()
+    {
+        if (DataContext is not DiffViewModel model)
+        {
+            return;
+        }
+
+        // 0.42, not exactly 0.5: the default docked split gives the diff a hair
+        // under half the window (640/1440) and should still count as "half the
+        // screen" - only a deliberately shrunken pane hides blame.
+        var windowWidth = (VisualRoot as Window)?.ClientSize.Width ?? 0;
+        model.BlameCramped = windowWidth > 0 && Bounds.Width < windowWidth * 0.42;
     }
 
     public IBrush AddedLineBackground

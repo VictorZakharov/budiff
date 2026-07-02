@@ -26,6 +26,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private bool _gitRoot;
     private GitRepositoryScope? _scope;
     private ChangedFile? _openDiffFile;
+    private int _blameGen;
 
     // Sentinel base option: resolves to the same boundary commit the windowed
     // churn diffs from, so the drill-in shows what the Added/Removed columns
@@ -140,6 +141,51 @@ public sealed partial class MainWindowViewModel : ObservableObject
         var target = CurrentTarget();
         Diff.Subtitle = DescribeTarget(target);
         Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(scope, file, target));
+        BeginLoadBlame(scope, file, target);
+    }
+
+    // Blame describes the diff's BASE side; loaded off-thread after the diff so
+    // the rows never wait on it. The generation guard drops a stale result when
+    // the user has already moved to another file or base.
+    private void BeginLoadBlame(GitRepositoryScope scope, ChangedFile file, DiffTarget target)
+    {
+        var gen = ++_blameGen;
+        Diff.SetBlame(null);
+        _ = Task.Run(() =>
+        {
+            var blame = GitRepositoryReader.LoadBlame(scope, file.OldPath ?? file.Path, target.BaseRef);
+            var entries = new BlameEntry?[blame.Count];
+            for (var i = 0; i < blame.Count; i++)
+            {
+                if (blame[i] is { } line)
+                {
+                    entries[i] = new BlameEntry(
+                        $"{line.Author} {Age(line.When)}",
+                        line.ShortSha,
+                        line.Author,
+                        line.When.ToLocalTime().ToString("yyyy-MM-dd HH:mm"),
+                        line.Message);
+                }
+            }
+
+            global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                if (gen == _blameGen)
+                {
+                    Diff.SetBlame(entries);
+                }
+            });
+        });
+    }
+
+    private static string Age(DateTimeOffset when)
+    {
+        var span = DateTimeOffset.Now - when;
+        return span.TotalDays >= 365 ? $"{(int)(span.TotalDays / 365)}y"
+            : span.TotalDays >= 30 ? $"{(int)(span.TotalDays / 30)}mo"
+            : span.TotalDays >= 1 ? $"{(int)span.TotalDays}d"
+            : span.TotalHours >= 1 ? $"{(int)span.TotalHours}h"
+            : "now";
     }
 
     [RelayCommand]
@@ -317,6 +363,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _openDiffFile = file;
         IsDiffOpen = true;
         Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(_scope, file, target));
+        BeginLoadBlame(_scope, file, target);
     }
 
     private Task OpenAnalysisFileAsync(string fullPath, string relativePath)
@@ -335,6 +382,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _openDiffFile = file;
         IsDiffOpen = true;
         Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(_scope, file, target));
+        BeginLoadBlame(_scope, file, target);
         return Task.CompletedTask;
     }
 

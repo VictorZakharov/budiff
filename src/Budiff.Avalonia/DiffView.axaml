@@ -24,6 +24,7 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <TextBlock Text="Diff"
                            FontWeight="SemiBold"
@@ -49,6 +50,12 @@
                            VerticalAlignment="Center"
                            IsVisible="{Binding IsHighlighting}" />
                 <CheckBox Grid.Column="4"
+                          IsChecked="{Binding ShowBlame}"
+                          VerticalAlignment="Center"
+                          Content="Blame"
+                          FontSize="12.5"
+                          Foreground="{Binding TextBrush, ElementName=Root}" />
+                <CheckBox Grid.Column="5"
                           IsChecked="{Binding CollapseUnchanged}"
                           VerticalAlignment="Center"
                           Content="Collapse unchanged"
@@ -102,15 +109,39 @@
                                                 Background="{Binding OldBackground}"
                                                 BorderBrush="{Binding DiffBorderBrush, ElementName=Root}"
                                                 BorderThickness="0,0,1,0">
-                                            <Grid ColumnDefinitions="46,*">
+                                            <Grid ColumnDefinitions="Auto,46,*">
+                                                <!-- Blame gutter (#46): who last touched the OLD side's
+                                                     line; hover for the commit's details. -->
                                                 <TextBlock Grid.Column="0"
+                                                           Width="120"
+                                                           Text="{Binding Blame.Label}"
+                                                           IsVisible="{Binding $parent[ItemsControl].DataContext.IsBlameVisible}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           Padding="8,0,4,0"
+                                                           FontSize="11"
+                                                           VerticalAlignment="Center"
+                                                           Foreground="{Binding MutedTextBrush, ElementName=Root}">
+                                                    <ToolTip.Tip>
+                                                        <StackPanel Spacing="3" MaxWidth="440">
+                                                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                                                <TextBlock Text="{Binding Blame.Sha}"
+                                                                           FontFamily="Cascadia Code,Consolas,monospace"
+                                                                           Foreground="#61AFEF" />
+                                                                <TextBlock Text="{Binding Blame.Author}" FontWeight="SemiBold" />
+                                                                <TextBlock Text="{Binding Blame.Date}" Foreground="#9DA0A8" />
+                                                            </StackPanel>
+                                                            <TextBlock Text="{Binding Blame.Message}" TextWrapping="Wrap" />
+                                                        </StackPanel>
+                                                    </ToolTip.Tip>
+                                                </TextBlock>
+                                                <TextBlock Grid.Column="1"
                                                            Text="{Binding OldNo}"
                                                            TextAlignment="Right"
                                                            Padding="0,0,8,0"
                                                            FontFamily="Cascadia Code,Consolas,monospace"
                                                            FontSize="12.5"
                                                            Foreground="{Binding MutedTextBrush, ElementName=Root}" />
-                                                <ScrollViewer Grid.Column="1"
+                                                <ScrollViewer Grid.Column="2"
                                                               HorizontalScrollBarVisibility="Hidden"
                                                               VerticalScrollBarVisibility="Disabled"
                                                               Offset="{Binding $parent[ItemsControl].DataContext.HorizontalScroll, Converter={x:Static local:HScrollOffsetConverter.Instance}}">

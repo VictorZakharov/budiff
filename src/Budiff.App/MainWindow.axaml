@@ -437,6 +437,7 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <Button Classes="diffTool"
                                 Command="{Binding ToggleTreeCommand}"
@@ -471,19 +472,26 @@
                                   Foreground="{DynamicResource BudiffTextBrush}"
                                   ToolTip.Tip="Include uncommitted working-tree changes. Off = compare to the last commit, as if your changes were not made yet." />
                         <CheckBox Grid.Column="6"
+                                  IsChecked="{Binding Diff.ShowBlame, Mode=TwoWay}"
+                                  Content="Blame"
+                                  FontSize="12"
+                                  VerticalAlignment="Center"
+                                  Foreground="{DynamicResource BudiffTextBrush}"
+                                  ToolTip.Tip="Show who last touched each line (hides automatically while the pane is under half the window)." />
+                        <CheckBox Grid.Column="7"
                                   IsChecked="{Binding Diff.CollapseUnchanged, Mode=TwoWay}"
                                   Content="Collapse unchanged"
                                   FontSize="12"
                                   VerticalAlignment="Center"
                                   Foreground="{DynamicResource BudiffTextBrush}" />
 
-                        <Button Grid.Column="7" Classes="diffTool"
+                        <Button Grid.Column="8" Classes="diffTool"
                                 Click="OnFloatDiff"
                                 ToolTip.Tip="Open diff in its own window">
                             <materialIcons:MaterialIcon Kind="OpenInNew" Width="16" Height="16"
                                                         Foreground="{DynamicResource BudiffMutedTextBrush}" />
                         </Button>
-                        <Button Grid.Column="8" Classes="diffTool"
+                        <Button Grid.Column="9" Classes="diffTool"
                                 Command="{Binding CloseDiffCommand}"
                                 ToolTip.Tip="Close diff">
                             <materialIcons:MaterialIcon Kind="Close" Width="16" Height="16"
