@@ -17,8 +17,8 @@ internal static class JsonRenderer
     public static void RenderList(ChangeSet changeSet, TextWriter output)
         => output.WriteLine(SerializeList(changeSet));
 
-    public static void RenderDiff(ChangeSet changeSet, ChangedFile file, DiffResult diff, TextWriter output)
-        => output.WriteLine(SerializeDiff(changeSet, file, diff));
+    public static void RenderDiff(ChangeSet changeSet, ChangedFile file, DiffResult diff, TextWriter output, int? contextLines = null)
+        => output.WriteLine(SerializeDiff(changeSet, file, diff, contextLines));
 
     public static string SerializeList(ChangeSet changeSet)
     {
@@ -26,9 +26,13 @@ internal static class JsonRenderer
         return JsonSerializer.Serialize(dto, JsonContext.JsonChangeListDto);
     }
 
-    public static string SerializeDiff(ChangeSet changeSet, ChangedFile file, DiffResult diff)
+    // contextLines: null = every row; a value folds unchanged runs longer
+    // than 2*context+1 into "Gap" rows (oldNo/newNo = first hidden line,
+    // hiddenLines = count) so machine consumers do not pay for a whole
+    // unchanged file. Re-request with a larger context (or null) to widen.
+    public static string SerializeDiff(ChangeSet changeSet, ChangedFile file, DiffResult diff, int? contextLines = null)
     {
-        var dto = JsonFileDiffDto.From(changeSet, file, diff);
+        var dto = JsonFileDiffDto.From(changeSet, file, diff, contextLines);
         return JsonSerializer.Serialize(dto, JsonContext.JsonFileDiffDto);
     }
 }
@@ -56,9 +60,10 @@ internal sealed record JsonFileDiffDto(
     JsonTargetDto Target,
     JsonChangedFileDto File,
     string? Placeholder,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? ContextLines,
     IReadOnlyList<JsonDiffRowDto>? Rows)
 {
-    public static JsonFileDiffDto From(ChangeSet changeSet, ChangedFile file, DiffResult diff)
+    public static JsonFileDiffDto From(ChangeSet changeSet, ChangedFile file, DiffResult diff, int? contextLines = null)
         => new(
             "budiff.fileDiff",
             changeSet.Scope.RepositoryRoot,
@@ -66,7 +71,41 @@ internal sealed record JsonFileDiffDto(
             JsonTargetDto.From(changeSet.Target),
             JsonChangedFileDto.From(file),
             diff.Rows is null ? diff.Placeholder ?? "Nothing to show." : null,
-            diff.Rows?.Select(JsonDiffRowDto.From).ToArray());
+            contextLines,
+            BuildRows(diff.Rows, contextLines));
+
+    private static IReadOnlyList<JsonDiffRowDto>? BuildRows(IReadOnlyList<DiffRow>? rows, int? contextLines)
+    {
+        if (rows is null)
+        {
+            return null;
+        }
+
+        if (contextLines is null)
+        {
+            return rows.Select(JsonDiffRowDto.From).ToArray();
+        }
+
+        var plan = DiffRowCollapser.Build(rows, collapseUnchanged: true, contextLines.Value, Array.Empty<int>());
+        var result = new List<JsonDiffRowDto>(plan.Count);
+        var nextHidden = 0;
+        foreach (var item in plan)
+        {
+            if (item.IsGap)
+            {
+                var first = rows[nextHidden];
+                result.Add(JsonDiffRowDto.Gap(first.OldNo, first.NewNo, item.Hidden));
+                nextHidden += item.Hidden;
+            }
+            else
+            {
+                result.Add(JsonDiffRowDto.From(rows[item.Index]));
+                nextHidden = item.Index + 1;
+            }
+        }
+
+        return result;
+    }
 }
 
 internal sealed record JsonScopeDto(
@@ -120,6 +159,7 @@ internal sealed record JsonDiffRowDto(
     int? NewNo,
     string? NewText,
     string Kind,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? HiddenLines,
     IReadOnlyList<JsonInlineSegmentDto>? OldInline,
     IReadOnlyList<JsonInlineSegmentDto>? NewInline)
 {
@@ -135,9 +175,15 @@ internal sealed record JsonDiffRowDto(
             row.NewNo,
             row.NewText,
             row.Kind.ToString(),
+            null,
             inline?.Old.Select(JsonInlineSegmentDto.From).ToArray(),
             inline?.New.Select(JsonInlineSegmentDto.From).ToArray());
     }
+
+    // A collapsed run of unchanged rows: oldNo/newNo point at the first
+    // hidden line on each side, hiddenLines counts them.
+    public static JsonDiffRowDto Gap(int? oldNo, int? newNo, int hiddenLines)
+        => new(oldNo, null, newNo, null, "Gap", hiddenLines, null, null);
 }
 
 internal sealed record JsonInlineSegmentDto(string Text, string Kind)

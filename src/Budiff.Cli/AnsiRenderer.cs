@@ -53,6 +53,7 @@ internal static class AnsiRenderer
         output.WriteLine("  --days <n>      Bird's-eye analysis window in days (default 30; 0 = all time)");
         output.WriteLine("  --stdin         Read a unified diff from stdin and render it side-by-side");
         output.WriteLine("  --json          Write structured JSON instead of ANSI text");
+        output.WriteLine("  --context <n>   With --json <file>: fold unchanged runs into Gap rows, keep n context lines");
         output.WriteLine("  -h, --help      Show help");
         output.WriteLine();
         output.WriteLine("MCP:");

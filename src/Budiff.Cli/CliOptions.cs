@@ -9,6 +9,7 @@ internal sealed record CliOptions(
     string? FilePath,
     bool Json,
     int? Days,
+    int? ContextLines,
     string? Error)
 {
     public static CliOptions Parse(string[] args)
@@ -24,6 +25,7 @@ internal sealed record CliOptions(
         string? error = null;
         var json = false;
         int? daysOption = null;
+        int? contextLines = null;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -92,6 +94,17 @@ internal sealed record CliOptions(
                     }
 
                     break;
+                case "--context":
+                    if (++i >= args.Length || !int.TryParse(args[i], out var context) || context < 0)
+                    {
+                        error = "--context requires a non-negative number of unchanged lines to keep around changes.";
+                    }
+                    else
+                    {
+                        contextLines = context;
+                    }
+
+                    break;
                 default:
                     if (arg.StartsWith("-", StringComparison.Ordinal))
                     {
@@ -145,6 +158,11 @@ internal sealed record CliOptions(
             error = "--stdin cannot be combined with a file path.";
         }
 
-        return new CliOptions(gitRoot, openGui, mcp, stdin, showHelp, baseRef, headRef, filePath, json, daysOption, error);
+        if (contextLines is not null && !json)
+        {
+            error = "--context requires --json.";
+        }
+
+        return new CliOptions(gitRoot, openGui, mcp, stdin, showHelp, baseRef, headRef, filePath, json, daysOption, contextLines, error);
     }
 }

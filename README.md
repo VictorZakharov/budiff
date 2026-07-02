@@ -68,8 +68,8 @@ The stdin mode is a pure unified-diff transform; it does not need repository acc
 
 Agents work the same way humans do here: list what changed, then drill into just the files that matter - far cheaper than paging whole diffs into context.
 
-- `budiff --json` (and `budiff <file> --json`) emit the change listing / a single file diff as structured JSON.
-- `budiff mcp` runs a stdio MCP server exposing `list_changes`, `get_file_diff`, and `repo_overview`.
+- `budiff --json` (and `budiff <file> --json`) emit the change listing / a single file diff as structured JSON. Add `--context 3` to fold long unchanged runs into `Gap` rows (first hidden line numbers + a `hiddenLines` count) instead of paying for the whole file.
+- `budiff mcp` runs a stdio MCP server exposing `list_changes`, `get_file_diff`, and `repo_overview`. `get_file_diff` collapses to 3 context lines by default; pass `contextLines` to widen it, or `null` for the full file.
 
 Register with Claude Code in one line:
 

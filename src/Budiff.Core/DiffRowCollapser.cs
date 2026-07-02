@@ -1,11 +1,12 @@
 using System.Collections.Generic;
-using Budiff;
 
-namespace Budiff.Avalonia;
+namespace Budiff;
 
 // The collapse-unchanged display plan, separated from row materialization so
 // the context/gap math is directly unit-testable: each item is either the
 // index of a visible source row or a gap standing in for Hidden unchanged rows.
+// Lives in Core (not the Avalonia package) because the CLI/MCP JSON output
+// collapses with the same plan.
 public static class DiffRowCollapser
 {
     public readonly record struct Item(int Index, int GapRunStart, int Hidden)
