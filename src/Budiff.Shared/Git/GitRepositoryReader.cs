@@ -163,6 +163,7 @@ public static class GitRepositoryReader
                 var info = new BlameLineInfo(
                     c.Sha.Length >= 7 ? c.Sha[..7] : c.Sha,
                     c.Author?.Name ?? string.Empty,
+                    c.Author?.Email ?? string.Empty,
                     c.Author?.When ?? default,
                     c.MessageShort ?? string.Empty);
                 for (var i = start; i < end; i++)

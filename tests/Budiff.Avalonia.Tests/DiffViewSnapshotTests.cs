@@ -66,6 +66,11 @@ public sealed class DiffViewSnapshotTests
         Assert.Contains(model.Rows, row => row.Kind == DiffKind.Modified);
         Assert.Contains(model.Rows, row => row.Kind == DiffKind.Added);
 
+        // Blame visible in this capture: the funnel must sit between the code
+        // halves (offset by the blame column), not at the row's center.
+        var ada = new BlameEntry("Ada Lovelace 10d", "abc1234", "Ada Lovelace", "ada@example.com", "2026-06-22 10:00", "Scaffold the sample");
+        model.SetBlame(new[] { ada, ada, ada, ada });
+
         var window = new Window
         {
             Width = 920,

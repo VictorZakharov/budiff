@@ -25,6 +25,7 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <TextBlock Text="Diff"
                            FontWeight="SemiBold"
@@ -61,6 +62,9 @@
                           Content="Collapse unchanged"
                           FontSize="12.5"
                           Foreground="{Binding TextBrush, ElementName=Root}" />
+                <ContentPresenter Grid.Column="6"
+                                  Content="{Binding HeaderExtra, ElementName=Root}"
+                                  VerticalAlignment="Center" />
             </Grid>
         </Border>
 
@@ -104,44 +108,46 @@
                                                    Foreground="{Binding MutedTextBrush, ElementName=Root}" />
                                     </Border>
 
-                                    <Grid IsVisible="{Binding !IsGap}" Height="18" ColumnDefinitions="*,18,*">
-                                        <Border Grid.Column="0"
+                                    <Grid IsVisible="{Binding !IsGap}" Height="18" ColumnDefinitions="Auto,*,18,*">
+                                        <!-- Blame gutter (#46): who last touched the OLD side's line;
+                                             hover for the commit's details. Its own OUTER column, so
+                                             showing it costs BOTH code halves equally. -->
+                                        <TextBlock Grid.Column="0"
+                                                   Width="120"
+                                                   Text="{Binding Blame.Label}"
+                                                   IsVisible="{Binding $parent[ItemsControl].DataContext.IsBlameVisible}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Padding="8,0,4,0"
+                                                   FontSize="11"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{Binding MutedTextBrush, ElementName=Root}">
+                                            <ToolTip.Tip>
+                                                <StackPanel Spacing="3" MaxWidth="440">
+                                                    <StackPanel Orientation="Horizontal" Spacing="10">
+                                                        <TextBlock Text="{Binding Blame.Sha}"
+                                                                   FontFamily="Cascadia Code,Consolas,monospace"
+                                                                   Foreground="#61AFEF" />
+                                                        <TextBlock Text="{Binding Blame.Author}" FontWeight="SemiBold" />
+                                                        <TextBlock Text="{Binding Blame.Email}" Foreground="#9DA0A8" />
+                                                        <TextBlock Text="{Binding Blame.Date}" Foreground="#9DA0A8" />
+                                                    </StackPanel>
+                                                    <TextBlock Text="{Binding Blame.Message}" TextWrapping="Wrap" />
+                                                </StackPanel>
+                                            </ToolTip.Tip>
+                                        </TextBlock>
+                                        <Border Grid.Column="1"
                                                 Background="{Binding OldBackground}"
                                                 BorderBrush="{Binding DiffBorderBrush, ElementName=Root}"
                                                 BorderThickness="0,0,1,0">
-                                            <Grid ColumnDefinitions="Auto,46,*">
-                                                <!-- Blame gutter (#46): who last touched the OLD side's
-                                                     line; hover for the commit's details. -->
+                                            <Grid ColumnDefinitions="46,*">
                                                 <TextBlock Grid.Column="0"
-                                                           Width="120"
-                                                           Text="{Binding Blame.Label}"
-                                                           IsVisible="{Binding $parent[ItemsControl].DataContext.IsBlameVisible}"
-                                                           TextTrimming="CharacterEllipsis"
-                                                           Padding="8,0,4,0"
-                                                           FontSize="11"
-                                                           VerticalAlignment="Center"
-                                                           Foreground="{Binding MutedTextBrush, ElementName=Root}">
-                                                    <ToolTip.Tip>
-                                                        <StackPanel Spacing="3" MaxWidth="440">
-                                                            <StackPanel Orientation="Horizontal" Spacing="10">
-                                                                <TextBlock Text="{Binding Blame.Sha}"
-                                                                           FontFamily="Cascadia Code,Consolas,monospace"
-                                                                           Foreground="#61AFEF" />
-                                                                <TextBlock Text="{Binding Blame.Author}" FontWeight="SemiBold" />
-                                                                <TextBlock Text="{Binding Blame.Date}" Foreground="#9DA0A8" />
-                                                            </StackPanel>
-                                                            <TextBlock Text="{Binding Blame.Message}" TextWrapping="Wrap" />
-                                                        </StackPanel>
-                                                    </ToolTip.Tip>
-                                                </TextBlock>
-                                                <TextBlock Grid.Column="1"
                                                            Text="{Binding OldNo}"
                                                            TextAlignment="Right"
                                                            Padding="0,0,8,0"
                                                            FontFamily="Cascadia Code,Consolas,monospace"
                                                            FontSize="12.5"
                                                            Foreground="{Binding MutedTextBrush, ElementName=Root}" />
-                                                <ScrollViewer Grid.Column="2"
+                                                <ScrollViewer Grid.Column="1"
                                                               HorizontalScrollBarVisibility="Hidden"
                                                               VerticalScrollBarVisibility="Disabled"
                                                               Offset="{Binding $parent[ItemsControl].DataContext.HorizontalScroll, Converter={x:Static local:HScrollOffsetConverter.Instance}}">
@@ -155,7 +161,7 @@
                                             </Grid>
                                         </Border>
 
-                                        <Border Grid.Column="2" Background="{Binding NewBackground}">
+                                        <Border Grid.Column="3" Background="{Binding NewBackground}">
                                             <Grid ColumnDefinitions="46,*">
                                                 <TextBlock Grid.Column="0"
                                                            Text="{Binding NewNo}"
@@ -185,6 +191,7 @@
 
                     <local:DiffFunnelGutter Rows="{Binding Rows}"
                                             ItemsHost="{Binding #RowsHost}"
+                                            BlameWidth="{Binding BlameGutterWidth}"
                                             AddedBrush="{Binding FunnelAddedBrush, ElementName=Root}"
                                             RemovedBrush="{Binding FunnelRemovedBrush, ElementName=Root}"
                                             ModifiedBrush="{Binding FunnelModifiedBrush, ElementName=Root}"

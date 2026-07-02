@@ -65,13 +65,20 @@ public sealed partial class DiffViewModel : ObservableObject
     // and it comes back when the pane grows again.
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsBlameVisible))]
+    [NotifyPropertyChangedFor(nameof(BlameGutterWidth))]
     private bool _showBlame = true;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsBlameVisible))]
+    [NotifyPropertyChangedFor(nameof(BlameGutterWidth))]
     private bool _blameCramped;
 
     public bool IsBlameVisible => ShowBlame && !BlameCramped;
+
+    // The funnel gutter offsets its center by this (the blame column sits left
+    // of both code halves). Keep in sync with the column's Width in the row
+    // template.
+    public double BlameGutterWidth => IsBlameVisible ? 120 : 0;
 
     [ObservableProperty]
     private bool _isPlaceholder;

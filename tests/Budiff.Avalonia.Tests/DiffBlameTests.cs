@@ -12,8 +12,8 @@ public sealed class DiffBlameTests
         var model = new DiffViewModel();
         model.SetDiff(LineDiff.Compute("one\ntwo\nthree\n", "one\ntwo CHANGED\nthree\n"));
 
-        var ada = new BlameEntry("Ada 10d", "abc1234", "Ada", "2026-06-22 10:00", "add");
-        var grace = new BlameEntry("Grace 2d", "def5678", "Grace", "2026-06-30 10:00", "change");
+        var ada = new BlameEntry("Ada 10d", "abc1234", "Ada", "ada@example.com", "2026-06-22 10:00", "add");
+        var grace = new BlameEntry("Grace 2d", "def5678", "Grace", "grace@example.com", "2026-06-30 10:00", "change");
         model.SetBlame(new[] { ada, grace, ada });
 
         var byOldNo = model.Rows.Where(r => r.OldNo is not null).ToDictionary(r => r.OldNo!);

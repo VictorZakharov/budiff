@@ -163,6 +163,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
                         $"{line.Author} {Age(line.When)}",
                         line.ShortSha,
                         line.Author,
+                        line.Email,
                         line.When.ToLocalTime().ToString("yyyy-MM-dd HH:mm"),
                         line.Message);
                 }

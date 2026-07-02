@@ -46,6 +46,18 @@ public sealed class NarrowLayoutTests
         UiSnapshot.Capture(window, "narrow-diff");
 
         Assert.True(vm.ShowDiffPane);
+
+        // Blame auto-hide: at 900 the diff (~475px) is at least half the window,
+        // so blame may show; growing the window (diff column width stays fixed)
+        // drops it under half and must hide blame even though it stays toggled.
+        Assert.True(vm.Diff.ShowBlame);
+        Assert.False(vm.Diff.BlameCramped);
+        window.Width = 1400;
+        UiSnapshot.Pump();
+        UiSnapshot.Pump();
+        Assert.True(vm.Diff.BlameCramped);
+        Assert.False(vm.Diff.IsBlameVisible);
+        Assert.True(vm.Diff.ShowBlame);
         window.Close();
     }
 

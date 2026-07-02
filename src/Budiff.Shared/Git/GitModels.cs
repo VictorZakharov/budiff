@@ -19,7 +19,7 @@ public sealed record DiffTarget(string BaseRef, string? HeadRef, bool HeadIsWork
 public sealed record GitReferenceOption(string Id, string Display, bool IsWorkingTree = false);
 
 // One blamed line: the commit that last touched it on the blamed revision.
-public sealed record BlameLineInfo(string ShortSha, string Author, System.DateTimeOffset When, string Message);
+public sealed record BlameLineInfo(string ShortSha, string Author, string Email, System.DateTimeOffset When, string Message);
 
 public sealed record ChangedFile(
     string Path,

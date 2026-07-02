@@ -47,6 +47,11 @@ public partial class DiffView : UserControl
     public static readonly StyledProperty<bool> ShowHeaderProperty =
         AvaloniaProperty.Register<DiffView, bool>(nameof(ShowHeader), true);
 
+    // Host-provided control appended to the built-in header row (e.g. the
+    // floating window's "Dock back" button).
+    public static readonly StyledProperty<object?> HeaderExtraProperty =
+        AvaloniaProperty.Register<DiffView, object?>(nameof(HeaderExtra));
+
     public DiffView()
     {
         InitializeComponent();
@@ -55,11 +60,17 @@ public partial class DiffView : UserControl
             ApplyThemeToViewModel();
             UpdateBlameCramped();
         };
-        SizeChanged += (_, _) => UpdateBlameCramped();
+
+        // LayoutUpdated (not just SizeChanged): a fixed-width docked pane gets
+        // NO SizeChanged when only the window resizes, yet "half the window"
+        // changes. The check is a couple of comparisons - cheap per pass.
+        LayoutUpdated += (_, _) => UpdateBlameCramped();
     }
 
     // Blame needs real estate: it hides while the pane is under half the
     // window's width (regardless of the toggle) and returns when it grows.
+    // NOTE: VisualRoot is a TopLevelHost on Avalonia 12, NOT the Window -
+    // resolve the containing top-level explicitly.
     private void UpdateBlameCramped()
     {
         if (DataContext is not DiffViewModel model)
@@ -67,11 +78,8 @@ public partial class DiffView : UserControl
             return;
         }
 
-        // 0.42, not exactly 0.5: the default docked split gives the diff a hair
-        // under half the window (640/1440) and should still count as "half the
-        // screen" - only a deliberately shrunken pane hides blame.
-        var windowWidth = (VisualRoot as Window)?.ClientSize.Width ?? 0;
-        model.BlameCramped = windowWidth > 0 && Bounds.Width < windowWidth * 0.42;
+        var windowWidth = TopLevel.GetTopLevel(this)?.ClientSize.Width ?? 0;
+        model.BlameCramped = windowWidth > 0 && Bounds.Width < windowWidth / 2;
     }
 
     public IBrush AddedLineBackground
@@ -144,6 +152,12 @@ public partial class DiffView : UserControl
     {
         get => GetValue(ShowHeaderProperty);
         set => SetValue(ShowHeaderProperty, value);
+    }
+
+    public object? HeaderExtra
+    {
+        get => GetValue(HeaderExtraProperty);
+        set => SetValue(HeaderExtraProperty, value);
     }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)

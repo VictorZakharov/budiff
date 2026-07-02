@@ -24,6 +24,7 @@ public sealed class GitBlameTests : IDisposable
         Assert.Equal(3, blame.Count);
         Assert.Equal("Ada Lovelace", blame[0]!.Author);
         Assert.Equal("Grace Hopper", blame[1]!.Author);
+        Assert.Equal("test@example.com", blame[1]!.Email);
         Assert.Equal("change line two", blame[1]!.Message);
         Assert.Equal("Ada Lovelace", blame[2]!.Author);
         Assert.Equal(7, blame[1]!.ShortSha.Length);
