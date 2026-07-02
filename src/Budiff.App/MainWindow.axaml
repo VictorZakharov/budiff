@@ -23,6 +23,12 @@
              inside the name cell instead (Depth on the row VM). -->
         <Style Selector="TreeView#AnalysisTree TreeViewItem">
             <Setter Property="Padding" Value="0" />
+            <!-- The Fluent theme's TreeViewItem MinHeight is taller than the
+                 24px row content, leaving a dead un-highlighted band between
+                 rows (hover/selection looked like disconnected stripes).
+                 Zeroing it makes rows contiguous so the highlight rolls from
+                 one row to the next. -->
+            <Setter Property="MinHeight" Value="0" />
             <Setter Property="Template">
                 <ControlTemplate>
                     <StackPanel>
