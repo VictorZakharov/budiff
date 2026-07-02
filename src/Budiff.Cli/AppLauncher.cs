@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 
 internal static class AppLauncher
 {
@@ -90,39 +91,136 @@ internal static class AppLauncher
             return 0;
         }
 
-        var spinner = new[] { '|', '/', '-', '\\' };
-        var animate = !Console.IsOutputRedirected;
-        var stopwatch = Stopwatch.StartNew();
-        var frame = 0;
-        while (stopwatch.ElapsedMilliseconds < WindowWaitTimeoutMs)
+        var ready = false;
+        string? failure = null;
+        var spinner = Console.IsOutputRedirected ? null : new ConsoleSpinner(output);
+        try
         {
-            process.Refresh();
-            if (process.HasExited)
+            var stopwatch = Stopwatch.StartNew();
+            while (stopwatch.ElapsedMilliseconds < WindowWaitTimeoutMs)
             {
-                output.WriteLine();
-                Console.Error.WriteLine($"Budiff.App exited before showing a window (exit code {process.ExitCode}).");
-                return 1;
-            }
+                process.Refresh();
+                if (process.HasExited)
+                {
+                    failure = $"Budiff.App exited before showing a window (exit code {process.ExitCode}).";
+                    break;
+                }
 
-            if (process.MainWindowHandle != IntPtr.Zero)
-            {
-                output.WriteLine("ready.");
-                return 0;
-            }
+                if (process.MainWindowHandle != IntPtr.Zero)
+                {
+                    ready = true;
+                    break;
+                }
 
-            if (animate)
-            {
-                output.Write(spinner[frame++ % spinner.Length]);
-                output.Write('\b');
+                spinner?.Advance();
+                Thread.Sleep(80);
             }
-
-            Thread.Sleep(80);
+        }
+        finally
+        {
+            spinner?.Dispose();
         }
 
-        // No window within the timeout; the app may still be coming up, so
-        // hand the prompt back without failing the launch.
-        output.WriteLine();
+        if (failure is not null)
+        {
+            output.WriteLine();
+            Console.Error.WriteLine(failure);
+            return 1;
+        }
+
+        // On timeout the app may still be coming up, so hand the prompt back
+        // without failing the launch.
+        output.WriteLine(ready ? "ready." : string.Empty);
         return 0;
+    }
+
+    // In-place console spinner. Hides the cursor while spinning - rewriting
+    // the frame cell with a visible cursor flickers it back and forth - and
+    // restores it on Dispose and on Ctrl+C. Uses braille frames where the
+    // terminal is known to render them; classic conhost fonts often lack the
+    // glyphs, so it falls back to ASCII there.
+    private sealed class ConsoleSpinner : IDisposable
+    {
+        private static readonly string Esc = ((char)27).ToString();
+        private static readonly string[] BrailleFrames =
+            { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" };
+        private static readonly string[] AsciiFrames = { "|", "/", "-", "\\" };
+
+        private readonly string[] _frames;
+        private readonly Encoding? _previousEncoding;
+        private readonly ConsoleCancelEventHandler _onCancel;
+        private int _frame;
+        private bool _drawn;
+
+        public ConsoleSpinner(TextWriter output)
+        {
+            var fancyTerminal = Environment.GetEnvironmentVariable("WT_SESSION") is { Length: > 0 }
+                || Environment.GetEnvironmentVariable("TERM_PROGRAM") == "vscode";
+            if (fancyTerminal)
+            {
+                // Braille frames need UTF-8 console output; the setter can
+                // throw on exotic hosts, in which case stay ASCII.
+                try
+                {
+                    _previousEncoding = Console.OutputEncoding;
+                    Console.OutputEncoding = Encoding.UTF8;
+                    _frames = BrailleFrames;
+                }
+                catch (Exception)
+                {
+                    _previousEncoding = null;
+                    _frames = AsciiFrames;
+                }
+            }
+            else
+            {
+                _frames = AsciiFrames;
+            }
+
+            output.Write(Esc + "[?25l");
+            output.Flush();
+            // A Ctrl+C mid-spin would otherwise leave the console with a
+            // hidden cursor (and a switched codepage) after we are gone.
+            _onCancel = (_, _) => Restore();
+            Console.CancelKeyPress += _onCancel;
+        }
+
+        public void Advance()
+        {
+            // Write through Console.Out, not the writer captured before the
+            // encoding switch - the old writer still encodes with the old
+            // codepage and would mangle the braille glyphs.
+            Console.Out.Write(Esc + "[36m" + _frames[_frame++ % _frames.Length] + Esc + "[0m\b");
+            _drawn = true;
+        }
+
+        public void Dispose()
+        {
+            Console.CancelKeyPress -= _onCancel;
+            if (_drawn)
+            {
+                Console.Out.Write(" \b");
+            }
+
+            Restore();
+        }
+
+        private void Restore()
+        {
+            Console.Out.Write(Esc + "[?25h");
+            Console.Out.Flush();
+            if (_previousEncoding is not null)
+            {
+                try
+                {
+                    Console.OutputEncoding = _previousEncoding;
+                }
+                catch (Exception)
+                {
+                    // Leaving UTF-8 behind is harmless compared to throwing here.
+                }
+            }
+        }
     }
 
     private static Process? TryStart(string executable, string startPath, bool gitRoot)
