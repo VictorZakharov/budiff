@@ -555,31 +555,13 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             ComputeMatches(row, ref matches);
         }
 
+        // Expansion rides along in pass 2 (which already visits every row)
+        // instead of a third full traversal per keystroke.
         var narrow = searching && matches <= SearchExpandThreshold;
+        var applyExpansion = searching || _lastWasSearching;
         foreach (var row in Roots)
         {
-            ApplySearchToRow(row, ancestorMatched: false, filter: narrow);
-        }
-
-        if (searching)
-        {
-            foreach (var row in Roots.SelectMany(r => r.SelfAndDescendants()))
-            {
-                if (!row.IsFile)
-                {
-                    row.IsExpanded = narrow ? row.HasDescendantMatch : _expanded.Contains(row.RelativePath);
-                }
-            }
-        }
-        else if (_lastWasSearching)
-        {
-            foreach (var row in Roots.SelectMany(r => r.SelfAndDescendants()))
-            {
-                if (!row.IsFile)
-                {
-                    row.IsExpanded = _expanded.Contains(row.RelativePath);
-                }
-            }
+            ApplySearchToRow(row, ancestorMatched: false, filter: narrow, applyExpansion);
         }
 
         _lastWasSearching = searching;
@@ -605,15 +587,22 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         return index >= 0 || descendantMatch;
     }
 
-    // Pass 2: highlight always; hide non-matching rows only in filter (narrow) mode.
-    private void ApplySearchToRow(CodeAnalysisRow row, bool ancestorMatched, bool filter)
+    // Pass 2: highlight always; hide non-matching rows only in filter (narrow)
+    // mode; while searching (or when a search just ended) also set expansion -
+    // match paths in narrow mode, the captured user expansion otherwise.
+    private void ApplySearchToRow(CodeAnalysisRow row, bool ancestorMatched, bool filter, bool applyExpansion)
     {
         var matched = row.MatchIndex >= 0;
         row.SetNameHighlight(row.MatchIndex, _query.Length);
         row.IsSearchVisible = !filter || matched || row.HasDescendantMatch || ancestorMatched;
+        if (applyExpansion && !row.IsFile)
+        {
+            row.IsExpanded = _searching && filter ? row.HasDescendantMatch : _expanded.Contains(row.RelativePath);
+        }
+
         foreach (var child in row.Children)
         {
-            ApplySearchToRow(child, ancestorMatched || matched, filter);
+            ApplySearchToRow(child, ancestorMatched || matched, filter, applyExpansion);
         }
     }
 

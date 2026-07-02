@@ -545,7 +545,7 @@ internal static class AnsiRenderer
         var total = 0;
         foreach (var chunk in runs)
         {
-            total += ExpandTabs(chunk.Text).Length;
+            total += ExpandedLength(chunk.Text);
         }
 
         var budget = total <= contentWidth ? int.MaxValue : contentWidth - 1;
@@ -664,6 +664,21 @@ internal static class AnsiRenderer
 
     private static string ExpandTabs(string text) => text.Replace("\t", "    ", StringComparison.Ordinal);
 
+    // Width of the text once tabs are expanded, without allocating the copy.
+    private static int ExpandedLength(string text)
+    {
+        var length = text.Length;
+        foreach (var ch in text)
+        {
+            if (ch == '\t')
+            {
+                length += 3;
+            }
+        }
+
+        return length;
+    }
+
     // BufferWidth throws when stdout is not redirected yet no real console is
     // attached (PTY-less hosts); fall back to a sane default instead of dying.
     private static int ConsoleWidthOrDefault()
@@ -688,7 +703,7 @@ internal static class AnsiRenderer
     {
         var no = lineNo?.ToString().PadLeft(5) ?? "     ";
         var contentWidth = Math.Max(8, paneWidth - 7);
-        var safeText = (text ?? string.Empty).Replace("\t", "    ", StringComparison.Ordinal);
+        var safeText = ExpandTabs(text ?? string.Empty);
         var prefix = Dim(no + " ");
 
         if (kind == DiffKind.Modified && inlineRuns is not null)
@@ -710,18 +725,18 @@ internal static class AnsiRenderer
 
     private static string ColorInline(IReadOnlyList<InlineSegment> runs, bool oldSide)
     {
-        var text = string.Empty;
+        var builder = new System.Text.StringBuilder();
         foreach (var run in runs)
         {
-            text += run.Kind switch
+            builder.Append(run.Kind switch
             {
                 InlineChangeKind.Added => Green(run.Text),
                 InlineChangeKind.Removed => Red(run.Text),
                 _ => run.Text,
-            };
+            });
         }
 
-        return text.Length == 0 ? (oldSide ? Red("-") : Green("+")) : text;
+        return builder.Length == 0 ? (oldSide ? Red("-") : Green("+")) : builder.ToString();
     }
 
     private static IEnumerable<(DiffRow? Row, string? GapText, int Index)> CollapseRows(IReadOnlyList<DiffRow> rows)

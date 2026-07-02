@@ -89,6 +89,7 @@ public sealed class DiffFunnelGutter : Control
                 newRows.CollectionChanged += OnRowsChanged;
             }
 
+            _blocksDirty = true;
             InvalidateVisual();
         }
         else if (change.Property == ItemsHostProperty)
@@ -114,9 +115,26 @@ public sealed class DiffFunnelGutter : Control
         }
     }
 
-    private void OnRowsChanged(object? sender, NotifyCollectionChangedEventArgs e) => InvalidateVisual();
+    private void OnRowsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        _blocksDirty = true;
+        InvalidateVisual();
+    }
 
     private void OnHostLayoutUpdated(object? sender, EventArgs e) => InvalidateVisual();
+
+    // One contiguous run of changed rows: everything Render needs that depends
+    // only on the rows themselves, so scrolling repaints don't re-scan them.
+    private readonly record struct ChangeBlock(
+        int Start,
+        int LeftFirst,
+        int LeftLast,
+        int RightFirst,
+        int RightLast,
+        DiffKind Kind);
+
+    private readonly List<ChangeBlock> _blocks = new();
+    private bool _blocksDirty = true;
 
     public override void Render(DrawingContext context)
     {
@@ -125,13 +143,9 @@ public sealed class DiffFunnelGutter : Control
             return;
         }
 
-        var rows = new List<DiffRowVm>();
-        foreach (var item in Rows)
+        if (_blocksDirty)
         {
-            if (item is DiffRowVm row)
-            {
-                rows.Add(row);
-            }
+            RebuildBlocks();
         }
 
         var gutterLeft = BlameWidth + (Bounds.Width - BlameWidth - GutterWidth) / 2;
@@ -172,6 +186,52 @@ public sealed class DiffFunnelGutter : Control
             }
 
             hostTop = f.Top - f.Index * pitch;
+        }
+
+        foreach (var block in _blocks)
+        {
+            var blockTop = hostTop + block.Start * pitch;
+            var leftTop = block.LeftFirst >= 0 ? hostTop + block.LeftFirst * pitch : blockTop;
+            var leftBottom = block.LeftLast >= 0 ? hostTop + (block.LeftLast + 1) * pitch : blockTop;
+            var rightTop = block.RightFirst >= 0 ? hostTop + block.RightFirst * pitch : blockTop;
+            var rightBottom = block.RightLast >= 0 ? hostTop + (block.RightLast + 1) * pitch : blockTop;
+
+            var brush = block.Kind switch
+            {
+                DiffKind.Modified => ModifiedBrush,
+                DiffKind.Added => AddedBrush,
+                _ => RemovedBrush,
+            };
+            var geometry = new StreamGeometry();
+            using (var stream = geometry.Open())
+            {
+                stream.BeginFigure(new Point(gutterLeft, leftTop), true);
+                stream.CubicBezierTo(new Point(midX, leftTop), new Point(midX, rightTop), new Point(gutterRight, rightTop));
+                stream.LineTo(new Point(gutterRight, rightBottom));
+                stream.CubicBezierTo(new Point(midX, rightBottom), new Point(midX, leftBottom), new Point(gutterLeft, leftBottom));
+                stream.EndFigure(true);
+            }
+
+            context.DrawGeometry(brush, null, geometry);
+        }
+    }
+
+    private void RebuildBlocks()
+    {
+        _blocks.Clear();
+        _blocksDirty = false;
+        if (Rows is null)
+        {
+            return;
+        }
+
+        var rows = new List<DiffRowVm>();
+        foreach (var item in Rows)
+        {
+            if (item is DiffRowVm row)
+            {
+                rows.Add(row);
+            }
         }
 
         var i = 0;
@@ -217,24 +277,8 @@ public sealed class DiffFunnelGutter : Control
                 j++;
             }
 
-            var blockTop = hostTop + i * pitch;
-            var leftTop = leftFirst >= 0 ? hostTop + leftFirst * pitch : blockTop;
-            var leftBottom = leftLast >= 0 ? hostTop + (leftLast + 1) * pitch : blockTop;
-            var rightTop = rightFirst >= 0 ? hostTop + rightFirst * pitch : blockTop;
-            var rightBottom = rightLast >= 0 ? hostTop + (rightLast + 1) * pitch : blockTop;
-
-            var brush = modified || (added && removed) ? ModifiedBrush : added ? AddedBrush : RemovedBrush;
-            var geometry = new StreamGeometry();
-            using (var stream = geometry.Open())
-            {
-                stream.BeginFigure(new Point(gutterLeft, leftTop), true);
-                stream.CubicBezierTo(new Point(midX, leftTop), new Point(midX, rightTop), new Point(gutterRight, rightTop));
-                stream.LineTo(new Point(gutterRight, rightBottom));
-                stream.CubicBezierTo(new Point(midX, rightBottom), new Point(midX, leftBottom), new Point(gutterLeft, leftBottom));
-                stream.EndFigure(true);
-            }
-
-            context.DrawGeometry(brush, null, geometry);
+            var kind = modified || (added && removed) ? DiffKind.Modified : added ? DiffKind.Added : DiffKind.Removed;
+            _blocks.Add(new ChangeBlock(i, leftFirst, leftLast, rightFirst, rightLast, kind));
             i = j;
         }
     }
