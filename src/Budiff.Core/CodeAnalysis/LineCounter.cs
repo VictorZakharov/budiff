@@ -13,22 +13,6 @@ public readonly record struct LineCounts(int Code, int Blank, int Comment)
 
 public static class LineCounter
 {
-    private const int BinarySniffBytes = 8000;
-
-    public static bool LooksBinary(ReadOnlySpan<byte> bytes)
-    {
-        var n = Math.Min(bytes.Length, BinarySniffBytes);
-        for (var i = 0; i < n; i++)
-        {
-            if (bytes[i] == 0)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     public static LineCounts Count(string text, CommentSyntax syntax)
         => Count(SplitLines(text), syntax);
 

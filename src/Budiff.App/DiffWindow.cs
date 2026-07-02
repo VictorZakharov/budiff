@@ -3,7 +3,6 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Data;
 using Avalonia.Media;
-using Avalonia.Media.Immutable;
 using Budiff.Avalonia;
 
 namespace Budiff.App;
@@ -19,7 +18,7 @@ public sealed class DiffWindow : Window
         Height = 720;
         MinWidth = 480;
         MinHeight = 320;
-        Background = new ImmutableSolidColorBrush(Color.Parse("#1E1F22"));
+        Background = HexBrush.Parse("#1E1F22");
         Bind(TitleProperty, new Binding(nameof(DiffViewModel.Title))
         {
             Source = diff,
@@ -35,7 +34,7 @@ public sealed class DiffWindow : Window
                 Kind = Material.Icons.MaterialIconKind.DockWindow,
                 Width = 16,
                 Height = 16,
-                Foreground = new ImmutableSolidColorBrush(Color.Parse("#9DA0A8")),
+                Foreground = HexBrush.Parse("#9DA0A8"),
             },
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),

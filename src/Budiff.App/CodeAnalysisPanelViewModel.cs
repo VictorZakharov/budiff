@@ -20,26 +20,26 @@ public sealed record GroupingOption(string Label, AnalysisGrouping Value);
 
 public sealed record PeriodOption(string Label, int? Days, bool IsCustom = false);
 
-public sealed partial class ExtensionFilterItem : ObservableObject
+// Common shape of one include/exclude filter entry (extension, author); the
+// panel wires all filter lists through the same subscribe/set-all helpers.
+public abstract partial class FilterItem : ObservableObject
 {
     [ObservableProperty]
     private bool _included = true;
-
-    public required string Extension { get; init; }
-
-    public required string Display { get; init; }
 
     public required string Summary { get; init; }
 }
 
-public sealed partial class AuthorFilterItem : ObservableObject
+public sealed class ExtensionFilterItem : FilterItem
 {
-    [ObservableProperty]
-    private bool _included = true;
+    public required string Extension { get; init; }
 
+    public required string Display { get; init; }
+}
+
+public sealed class AuthorFilterItem : FilterItem
+{
     public required string Author { get; init; }
-
-    public required string Summary { get; init; }
 }
 
 public sealed partial class CodeAnalysisRow : ObservableObject
@@ -438,18 +438,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
                 ? $"{s.FileCount:N0} files - {s.Lines:N0} lines - {s.Percent:0.0}%"
                 : $"{s.FileCount:N0} files - {s.Lines:N0} lines",
         }).ToList();
-        foreach (var item in extensionItems)
-        {
-            item.PropertyChanged += (_, e) =>
-            {
-                if (e.PropertyName == nameof(ExtensionFilterItem.Included))
-                {
-                    UpdateExtensionToggleState();
-                    Rebuild();
-                }
-            };
-        }
-
+        WireFilterItems(extensionItems, UpdateExtensionToggleState);
         Extensions = new ObservableCollection<ExtensionFilterItem>(extensionItems);
         UpdateExtensionToggleState();
 
@@ -458,20 +447,24 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             Author = a.Author,
             Summary = a.Percent >= 0.05 ? $"{a.Commits:N0} commits - {a.Percent:0.0}%" : $"{a.Commits:N0} commits",
         }).ToList();
-        foreach (var item in authorItems)
+        WireFilterItems(authorItems, UpdateAuthorToggleState);
+        Authors = new ObservableCollection<AuthorFilterItem>(authorItems);
+        UpdateAuthorToggleState();
+    }
+
+    private void WireFilterItems(IEnumerable<FilterItem> items, Action updateToggle)
+    {
+        foreach (var item in items)
         {
             item.PropertyChanged += (_, e) =>
             {
-                if (e.PropertyName == nameof(AuthorFilterItem.Included))
+                if (e.PropertyName == nameof(FilterItem.Included))
                 {
-                    UpdateAuthorToggleState();
+                    updateToggle();
                     Rebuild();
                 }
             };
         }
-
-        Authors = new ObservableCollection<AuthorFilterItem>(authorItems);
-        UpdateAuthorToggleState();
     }
 
     private void Rebuild()
@@ -675,29 +668,20 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         SummaryCode = SummaryBlank = SummaryComment = SummaryTail = string.Empty;
     }
 
-    private void SetAllExtensions(bool included)
+    private void SetAllExtensions(bool included) => SetAllFilterItems(Extensions, included, UpdateExtensionToggleState);
+
+    private void SetAllAuthors(bool included) => SetAllFilterItems(Authors, included, UpdateAuthorToggleState);
+
+    private void SetAllFilterItems(IEnumerable<FilterItem> items, bool included, Action updateToggle)
     {
         _suspendRebuild = true;
-        foreach (var item in Extensions)
+        foreach (var item in items)
         {
             item.Included = included;
         }
 
         _suspendRebuild = false;
-        UpdateExtensionToggleState();
-        Rebuild();
-    }
-
-    private void SetAllAuthors(bool included)
-    {
-        _suspendRebuild = true;
-        foreach (var item in Authors)
-        {
-            item.Included = included;
-        }
-
-        _suspendRebuild = false;
-        UpdateAuthorToggleState();
+        updateToggle();
         Rebuild();
     }
 

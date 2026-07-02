@@ -58,20 +58,7 @@ public static class GitRepositoryReader
                 new("HEAD", "HEAD"),
             };
 
-            var currentBranch = repo.Head?.FriendlyName;
-            foreach (var branch in repo.Branches
-                         .Where(b => !b.FriendlyName.EndsWith("/HEAD", StringComparison.Ordinal))
-                         .OrderBy(b => b.IsRemote)
-                         .ThenBy(b => b.FriendlyName, StringComparer.OrdinalIgnoreCase))
-            {
-                var label = !branch.IsRemote && branch.FriendlyName == currentBranch
-                    ? branch.FriendlyName + " (current)"
-                    : branch.FriendlyName;
-                if (options.All(o => !string.Equals(o.Id, branch.FriendlyName, StringComparison.OrdinalIgnoreCase)))
-                {
-                    options.Add(new GitReferenceOption(branch.FriendlyName, label));
-                }
-            }
+            AddBranchOptions(repo, options);
 
             foreach (var commit in repo.Commits.Take(50))
             {
@@ -90,24 +77,29 @@ public static class GitRepositoryReader
         return WithRepo(repositoryRoot, repo =>
         {
             var options = new List<GitReferenceOption> { new("HEAD", "HEAD") };
-
-            var currentBranch = repo.Head?.FriendlyName;
-            foreach (var branch in repo.Branches
-                         .Where(b => !b.FriendlyName.EndsWith("/HEAD", StringComparison.Ordinal))
-                         .OrderBy(b => b.IsRemote)
-                         .ThenBy(b => b.FriendlyName, StringComparer.OrdinalIgnoreCase))
-            {
-                var label = !branch.IsRemote && branch.FriendlyName == currentBranch
-                    ? branch.FriendlyName + " (current)"
-                    : branch.FriendlyName;
-                if (options.All(o => !string.Equals(o.Id, branch.FriendlyName, StringComparison.OrdinalIgnoreCase)))
-                {
-                    options.Add(new GitReferenceOption(branch.FriendlyName, label));
-                }
-            }
-
+            AddBranchOptions(repo, options);
             return (IReadOnlyList<GitReferenceOption>)options;
         }, Array.Empty<GitReferenceOption>());
+    }
+
+    // Local branches first (current one labeled), then remotes, skipping the
+    // symbolic */HEAD entries and anything already in the list.
+    private static void AddBranchOptions(Repository repo, List<GitReferenceOption> options)
+    {
+        var currentBranch = repo.Head?.FriendlyName;
+        foreach (var branch in repo.Branches
+                     .Where(b => !b.FriendlyName.EndsWith("/HEAD", StringComparison.Ordinal))
+                     .OrderBy(b => b.IsRemote)
+                     .ThenBy(b => b.FriendlyName, StringComparer.OrdinalIgnoreCase))
+        {
+            var label = !branch.IsRemote && branch.FriendlyName == currentBranch
+                ? branch.FriendlyName + " (current)"
+                : branch.FriendlyName;
+            if (options.All(o => !string.Equals(o.Id, branch.FriendlyName, StringComparison.OrdinalIgnoreCase)))
+            {
+                options.Add(new GitReferenceOption(branch.FriendlyName, label));
+            }
+        }
     }
 
     public static ChangeSet ListChanges(GitRepositoryScope scope, DiffTarget target)
@@ -408,7 +400,7 @@ public static class GitRepositoryReader
         return rel == "." ? string.Empty : NormalizeRepoPath(rel);
     }
 
-    private static string NormalizeRepoPath(string path) => path.Replace('\\', '/').TrimStart('/');
+    private static string NormalizeRepoPath(string path) => RepoPaths.Normalize(path);
 
     private static string NormalizeFullPath(string path) => Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 

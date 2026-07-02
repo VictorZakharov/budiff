@@ -420,7 +420,7 @@ internal static class AnsiRenderer
             Blue("removed".PadLeft(8)),
             Blue("commits".PadLeft(8)),
             Blue("authors".PadLeft(8))));
-        foreach (var row in Flatten(root.Children, depth: 0).Take(200))
+        foreach (var row in AnalysisNode.Flatten(root.Children).Take(200))
         {
             var name = row.Depth == 0 ? row.Node.Name : new string(' ', Math.Min(20, row.Depth * 2)) + row.Node.Name;
             output.Write(TruncatePlain(name, 42).PadRight(42));
@@ -809,18 +809,6 @@ internal static class AnsiRenderer
         }
 
         return width <= 1 ? text[..width] : text[..(width - 1)] + ">";
-    }
-
-    private static IEnumerable<(AnalysisNode Node, int Depth)> Flatten(IEnumerable<AnalysisNode> nodes, int depth)
-    {
-        foreach (var node in nodes)
-        {
-            yield return (node, depth);
-            foreach (var child in Flatten(node.Children, depth + 1))
-            {
-                yield return child;
-            }
-        }
     }
 
     private static string PadAnsi(string text, int width)

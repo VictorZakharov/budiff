@@ -38,8 +38,8 @@ public sealed class CodeAnalysisTests
     [Fact]
     public void LooksBinary_flags_a_nul_byte()
     {
-        Assert.True(LineCounter.LooksBinary(new byte[] { 1, 2, 0, 3 }));
-        Assert.False(LineCounter.LooksBinary(new byte[] { 65, 66, 67 }));
+        Assert.True(TextBytes.LooksBinary(new byte[] { 1, 2, 0, 3 }));
+        Assert.False(TextBytes.LooksBinary(new byte[] { 65, 66, 67 }));
     }
 
     [Fact]

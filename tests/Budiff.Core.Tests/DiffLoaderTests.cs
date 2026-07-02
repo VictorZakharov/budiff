@@ -20,8 +20,8 @@ public sealed class DiffLoaderTests
     [Fact]
     public void LooksBinary_UsesNullByteSniff()
     {
-        Assert.True(DiffLoader.LooksBinary(new byte[] { 1, 2, 0, 4 }));
-        Assert.False(DiffLoader.LooksBinary(Encoding.UTF8.GetBytes("plain text")));
+        Assert.True(TextBytes.LooksBinary(new byte[] { 1, 2, 0, 4 }));
+        Assert.False(TextBytes.LooksBinary(Encoding.UTF8.GetBytes("plain text")));
     }
 
     [Fact]

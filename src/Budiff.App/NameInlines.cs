@@ -3,7 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Media;
-using Avalonia.Media.Immutable;
+using Budiff.Avalonia;
 using InlineRun = Avalonia.Controls.Documents.Run;
 
 namespace Budiff.App;
@@ -16,8 +16,8 @@ public sealed record NameRun(string Text, bool IsMatch);
 // highlight causes zero layout shift).
 public static class NameInlines
 {
-    private static readonly IBrush MatchBackground = new ImmutableSolidColorBrush(Color.Parse("#FFD166"));
-    private static readonly IBrush MatchForeground = new ImmutableSolidColorBrush(Color.Parse("#202020"));
+    private static readonly IBrush MatchBackground = HexBrush.Parse("#FFD166");
+    private static readonly IBrush MatchForeground = HexBrush.Parse("#202020");
 
     public static readonly AttachedProperty<IReadOnlyList<NameRun>?> RunsProperty =
         AvaloniaProperty.RegisterAttached<TextBlock, IReadOnlyList<NameRun>?>("Runs", typeof(NameInlines));

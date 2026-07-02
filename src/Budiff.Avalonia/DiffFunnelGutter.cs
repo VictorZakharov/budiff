@@ -283,5 +283,5 @@ public sealed class DiffFunnelGutter : Control
         }
     }
 
-    private static IBrush Brush(string hex) => new ImmutableSolidColorBrush(Color.Parse(hex));
+    private static IBrush Brush(string hex) => HexBrush.Parse(hex);
 }

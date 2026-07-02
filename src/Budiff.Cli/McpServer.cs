@@ -294,7 +294,7 @@ internal sealed class McpServer
                 root.Removed,
                 root.CommitCount,
                 root.AuthorCount),
-            Flatten(root.Children, depth: 0)
+            AnalysisNode.Flatten(root.Children)
                 .Take(maxRows)
                 .Select(row => McpRepoOverviewRowDto.From(row.Node, row.Depth))
                 .ToArray());
@@ -568,25 +568,15 @@ internal sealed class McpServer
 
     private static string NormalizeRepoPath(string path)
     {
-        var normalized = path.Replace('\\', '/').Trim();
+        // User-supplied tool input: also shed whitespace and "./" prefixes
+        // before the shared repo-path normalization.
+        var normalized = path.Trim();
         while (normalized.StartsWith("./", StringComparison.Ordinal))
         {
             normalized = normalized[2..];
         }
 
-        return normalized.TrimStart('/');
-    }
-
-    private static IEnumerable<(AnalysisNode Node, int Depth)> Flatten(IEnumerable<AnalysisNode> nodes, int depth)
-    {
-        foreach (var node in nodes)
-        {
-            yield return (node, depth);
-            foreach (var child in Flatten(node.Children, depth + 1))
-            {
-                yield return child;
-            }
-        }
+        return RepoPaths.Normalize(normalized);
     }
 
     private static string Version()

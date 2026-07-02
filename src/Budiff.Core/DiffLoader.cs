@@ -7,7 +7,6 @@ namespace Budiff;
 public static class DiffLoader
 {
     public const long MaxInlineDiffBytes = 1024 * 1024;
-    private const int BinarySniffBytes = 8000;
 
     public static DiffResult Build(BlobInfo old, BlobInfo @new)
     {
@@ -40,36 +39,14 @@ public static class DiffLoader
             }
 
             var bytes = File.ReadAllBytes(path);
-            return LooksBinary(bytes)
+            return TextBytes.LooksBinary(bytes)
                 ? new BlobInfo(string.Empty, bytes.Length, IsBinary: true)
-                : new BlobInfo(DecodeText(bytes), bytes.Length, IsBinary: false);
+                : new BlobInfo(TextBytes.DecodeUtf8(bytes), bytes.Length, IsBinary: false);
         }
         catch
         {
             return BlobInfo.Empty;
         }
-    }
-
-    public static bool LooksBinary(ReadOnlySpan<byte> bytes)
-    {
-        var n = Math.Min(bytes.Length, BinarySniffBytes);
-        for (var i = 0; i < n; i++)
-        {
-            if (bytes[i] == 0)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    public static string DecodeText(byte[] bytes)
-    {
-        var utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: false);
-        return bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF
-            ? utf8.GetString(bytes, 3, bytes.Length - 3)
-            : utf8.GetString(bytes);
     }
 
     private static string BinaryMessage(BlobInfo old, BlobInfo @new)

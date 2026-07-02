@@ -596,5 +596,5 @@ public sealed partial class DiffViewModel : ObservableObject
     private static IReadOnlyList<DiffRun>? RunsFor(DiffRun[][] runs, int? lineNo)
         => lineNo is { } n && n >= 1 && n <= runs.Length ? runs[n - 1] : null;
 
-    private static IBrush Brush(string hex) => new ImmutableSolidColorBrush(Color.Parse(hex));
+    private static IBrush Brush(string hex) => HexBrush.Parse(hex);
 }
