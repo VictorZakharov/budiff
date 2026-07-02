@@ -9,6 +9,7 @@
              narrow pane can never paint over the neighbors (a StackPanel here
              used to overflow across the checkbox). -->
         <Border DockPanel.Dock="Top"
+                IsVisible="{Binding ShowHeader, ElementName=Root}"
                 Background="{Binding ToolbarBrush, ElementName=Root}"
                 BorderBrush="{Binding DiffBorderBrush, ElementName=Root}"
                 BorderThickness="0,0,0,1"

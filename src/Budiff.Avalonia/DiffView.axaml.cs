@@ -42,6 +42,11 @@ public partial class DiffView : UserControl
     public static readonly StyledProperty<IBrush> DefaultSyntaxBrushProperty =
         AvaloniaProperty.Register<DiffView, IBrush>(nameof(DefaultSyntaxBrush), Brush("#D4D4D4"));
 
+    // Hosts that render their own chrome (e.g. the docked pane's compact
+    // toolbar) can hide the control's built-in header row.
+    public static readonly StyledProperty<bool> ShowHeaderProperty =
+        AvaloniaProperty.Register<DiffView, bool>(nameof(ShowHeader), true);
+
     public DiffView()
     {
         InitializeComponent();
@@ -112,6 +117,12 @@ public partial class DiffView : UserControl
     {
         get => GetValue(DefaultSyntaxBrushProperty);
         set => SetValue(DefaultSyntaxBrushProperty, value);
+    }
+
+    public bool ShowHeader
+    {
+        get => GetValue(ShowHeaderProperty);
+        set => SetValue(ShowHeaderProperty, value);
     }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)

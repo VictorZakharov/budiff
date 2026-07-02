@@ -161,7 +161,7 @@ public sealed partial class MainWindow : Window
         {
             if (_floatWindow is null)
             {
-                _floatWindow = new DiffWindow(_viewModel.Diff);
+                _floatWindow = new DiffWindow(_viewModel.Diff, dockBack: () => _viewModel.IsDiffFloating = false);
                 _floatWindow.Closed += OnFloatWindowClosed;
                 _floatWindow.Show(this);
             }

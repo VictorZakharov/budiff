@@ -421,15 +421,19 @@
                         BorderThickness="0,0,0,1"
                         Padding="4,2"
                         ClipToBounds="True">
-                    <!-- The combo sits in a heavily-weighted star column capped at 170:
-                         full size while there is room, then it shrinks (to 90) before
-                         anything can overlap in a narrow pane. -->
+                    <!-- ONE compact control row (#47): chevron, Diff <file>, Base,
+                         Working tree, Collapse unchanged, float, close. The title and
+                         the combo sit in shrinkable star columns (title keeps a 110px
+                         floor, combo caps at 170 / floors at 90) so nothing overlaps
+                         in a narrow pane. -->
                     <Grid ColumnSpacing="6" MinHeight="26">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" MinWidth="110" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="1000*" MaxWidth="170" MinWidth="90" />
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
@@ -440,11 +444,16 @@
                             <materialIcons:MaterialIcon Kind="{Binding TreeToggleIcon}" Width="16" Height="16"
                                                         Foreground="{DynamicResource BudiffMutedTextBrush}" />
                         </Button>
+                        <TextBlock Grid.Column="1" Text="Diff" FontWeight="SemiBold" FontSize="12"
+                                   Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="2" Text="{Binding Diff.Title}" FontWeight="SemiBold" FontSize="12"
+                                   HorizontalAlignment="Left" TextTrimming="CharacterEllipsis"
+                                   Foreground="{DynamicResource BudiffTextBrush}" VerticalAlignment="Center" />
 
                         <!-- Comparison controls live with the diff: base branch only;
                              head is the working tree (or HEAD when the toggle is off). -->
-                        <TextBlock Grid.Column="2" Text="Base" FontSize="12" Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
-                        <ComboBox Grid.Column="3" FontSize="12"
+                        <TextBlock Grid.Column="3" Text="Base" FontSize="12" Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
+                        <ComboBox Grid.Column="4" FontSize="12"
                                   HorizontalAlignment="Stretch"
                                   ItemsSource="{Binding BaseRefs}"
                                   SelectedItem="{Binding SelectedBaseRef, Mode=TwoWay}">
@@ -454,21 +463,27 @@
                                 </DataTemplate>
                             </ComboBox.ItemTemplate>
                         </ComboBox>
-                        <CheckBox Grid.Column="4"
+                        <CheckBox Grid.Column="5"
                                   IsChecked="{Binding IncludeWorkingTree, Mode=TwoWay}"
                                   Content="Working tree"
                                   FontSize="12"
                                   VerticalAlignment="Center"
                                   Foreground="{DynamicResource BudiffTextBrush}"
                                   ToolTip.Tip="Include uncommitted working-tree changes. Off = compare to the last commit, as if your changes were not made yet." />
+                        <CheckBox Grid.Column="6"
+                                  IsChecked="{Binding Diff.CollapseUnchanged, Mode=TwoWay}"
+                                  Content="Collapse unchanged"
+                                  FontSize="12"
+                                  VerticalAlignment="Center"
+                                  Foreground="{DynamicResource BudiffTextBrush}" />
 
-                        <Button Grid.Column="5" Classes="diffTool"
+                        <Button Grid.Column="7" Classes="diffTool"
                                 Click="OnFloatDiff"
                                 ToolTip.Tip="Open diff in its own window">
                             <materialIcons:MaterialIcon Kind="OpenInNew" Width="16" Height="16"
                                                         Foreground="{DynamicResource BudiffMutedTextBrush}" />
                         </Button>
-                        <Button Grid.Column="6" Classes="diffTool"
+                        <Button Grid.Column="8" Classes="diffTool"
                                 Command="{Binding CloseDiffCommand}"
                                 ToolTip.Tip="Close diff">
                             <materialIcons:MaterialIcon Kind="Close" Width="16" Height="16"
@@ -476,7 +491,21 @@
                         </Button>
                     </Grid>
                 </Border>
-                <budiff:DiffView DataContext="{Binding Diff}" />
+
+                <!-- Thin comparison strip: just what is being compared. -->
+                <Border DockPanel.Dock="Top"
+                        Background="{DynamicResource BudiffToolbarBrush}"
+                        BorderBrush="{DynamicResource BudiffBorderBrush}"
+                        BorderThickness="0,0,0,1"
+                        Padding="10,1"
+                        ClipToBounds="True">
+                    <TextBlock Text="{Binding Diff.Subtitle}"
+                               FontSize="11"
+                               FontFamily="Cascadia Code,Consolas,monospace"
+                               TextTrimming="CharacterEllipsis"
+                               Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                </Border>
+                <budiff:DiffView DataContext="{Binding Diff}" ShowHeader="False" />
             </DockPanel>
         </Grid>
     </Grid>
