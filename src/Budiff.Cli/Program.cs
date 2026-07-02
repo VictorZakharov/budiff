@@ -43,6 +43,9 @@ internal static class BudiffCli
 
         if (options.OpenGui)
         {
+            // The GUI takes a moment to paint its first window; say something
+            // immediately so the launch does not look like a silent failure.
+            output.WriteLine("Opening budiff GUI...");
             return AppLauncher.Launch(options);
         }
 
