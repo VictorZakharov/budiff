@@ -31,15 +31,20 @@ public sealed class CodeAnalysisSearchTests
         => vm.Roots.SelectMany(r => r.SelfAndDescendants()).Single(r => !r.IsFile && r.Name == name);
 
     [Fact]
-    public void BroadQuery_DoesNotExpandTheTree()
+    public void BroadQuery_HighlightsOnly_NoExpandNoFilter()
     {
         var vm = MakeLoadedViewModel();
 
-        // 80 matches > threshold: filtering/highlighting happens, expansion does not.
+        // 80 matches > threshold: highlight in place, but neither expand the tree
+        // nor hide anything - both would force a layout pass over every realized
+        // row on the very first keystroke.
         vm.SearchText = "item";
 
-        Assert.True(vm.Roots.SelectMany(r => r.SelfAndDescendants()).Count(r => r.IsFile && r.IsSearchVisible) > CodeAnalysisPanelViewModel.SearchExpandThreshold);
+        Assert.True(vm.Roots.SelectMany(r => r.SelfAndDescendants()).All(r => r.IsSearchVisible));
         Assert.False(Folder(vm, "pack").IsExpanded);
+
+        var match = vm.Roots.SelectMany(r => r.SelfAndDescendants()).First(r => r.Name == "item00.cs");
+        Assert.Contains(match.NameRuns!, r => r.IsMatch);
     }
 
     [Fact]
