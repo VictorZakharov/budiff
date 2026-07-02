@@ -374,44 +374,6 @@ internal static class AnsiRenderer
         output.WriteLine("  budiff mcp      Run a stdio MCP server for AI coding agents");
     }
 
-    public static void RenderList(ChangeSet changeSet, TextWriter output)
-    {
-        output.WriteLine($"{Bold("budiff")} {changeSet.Target.Display}");
-        output.WriteLine($"repo: {changeSet.Scope.RepositoryRoot}");
-        output.WriteLine($"scope: {(changeSet.Scope.ScopePrefix.Length == 0 ? "." : changeSet.Scope.ScopePrefix)}");
-        if (changeSet.Scope.Branch is { Length: > 0 } branch)
-        {
-            output.WriteLine($"branch: {branch}");
-        }
-
-        output.WriteLine();
-
-        if (changeSet.Files.Count == 0)
-        {
-            output.WriteLine("No changes in scope.");
-            return;
-        }
-
-        output.WriteLine($"{Dim("st"),-3} {Green("+"),5} {Red("-"),5} {"auth",5} {"comm",5}  path");
-        foreach (var file in changeSet.Files)
-        {
-            output.Write(file.StateText.PadRight(3));
-            output.Write(" ");
-            output.Write(Green(file.Churn.Added.ToString().PadLeft(5)));
-            output.Write(" ");
-            output.Write(Red(file.Churn.Removed.ToString().PadLeft(5)));
-            output.Write(" ");
-            output.Write(file.AuthorCount.ToString().PadLeft(5));
-            output.Write(" ");
-            output.Write(file.CommitCount.ToString().PadLeft(5));
-            output.Write("  ");
-            output.WriteLine(file.Path);
-        }
-
-        output.WriteLine();
-        output.WriteLine(Dim("Run `budiff <file>` to print the side-by-side diff."));
-    }
-
     public static void RenderAnalysis(CodeAnalysisSnapshot snapshot, TextWriter output, IReadOnlyList<string> headerLines, int? sinceDays)
     {
         var historical = sinceDays.HasValue;

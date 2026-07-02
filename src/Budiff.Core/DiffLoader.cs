@@ -24,9 +24,6 @@ public static class DiffLoader
         return DiffResult.FromRows(LineDiff.Compute(old.Text, @new.Text));
     }
 
-    public static DiffResult BuildAgainstWorking(string baseText, string? workingPath)
-        => Build(new BlobInfo(baseText, Encoding.UTF8.GetByteCount(baseText), IsBinary: false), ReadWorkingFile(workingPath));
-
     public static BlobInfo ReadWorkingFile(string? path)
     {
         try
