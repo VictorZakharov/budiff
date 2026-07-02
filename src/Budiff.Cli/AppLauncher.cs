@@ -16,12 +16,22 @@ internal static class AppLauncher
             return 0;
         }
 
-        // The GUI ships inside the tool package under gui/ (see Budiff.Cli.csproj);
-        // a bare exe next to the CLI covers hand-assembled layouts.
+        // The GUI ships inside the tool package under gui/win-x64/ as a
+        // RID-specific ReadyToRun publish (see Budiff.Cli.csproj), so only
+        // probe it on Windows - its native deps are win-x64 only. The bare
+        // gui/ and exe-next-to-CLI probes cover hand-assembled layouts.
         var baseDir = AppContext.BaseDirectory;
         foreach (var name in new[] { "Budiff.App.exe", "Budiff.App" })
         {
-            foreach (var path in new[] { Path.Combine(baseDir, "gui", name), Path.Combine(baseDir, name) })
+            var candidates = new List<string>();
+            if (OperatingSystem.IsWindows())
+            {
+                candidates.Add(Path.Combine(baseDir, "gui", "win-x64", name));
+            }
+
+            candidates.Add(Path.Combine(baseDir, "gui", name));
+            candidates.Add(Path.Combine(baseDir, name));
+            foreach (var path in candidates)
             {
                 if (File.Exists(path) && TryStart(path, start, options.GitRoot))
                 {
@@ -30,8 +40,9 @@ internal static class AppLauncher
             }
         }
 
-        // No apphost for this OS in the package (it is produced on the packing
-        // machine) - run the assembly through the dotnet host instead.
+        // A portable (RID-less) gui/ layout has no apphost for this OS - run
+        // the assembly through the dotnet host instead. The shipped package is
+        // win-x64 only, so this serves hand-assembled portable layouts.
         var bundledDll = Path.Combine(baseDir, "gui", "Budiff.App.dll");
         if (File.Exists(bundledDll) && TryStartDll(bundledDll, start, options.GitRoot))
         {
