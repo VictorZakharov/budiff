@@ -4,6 +4,10 @@
     <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
     <Description>Standalone Avalonia GUI for budiff.</Description>
     <IsPackable>false</IsPackable>
+    <!-- The tool package ships this app as a win-x64 ReadyToRun publish (see
+         the PublishGuiForPack target in Budiff.Cli.csproj); restore must
+         produce the RID-specific target for that inner publish to work. -->
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
   </PropertyGroup>
 
   <ItemGroup>

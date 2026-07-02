@@ -43,7 +43,7 @@ internal static class BudiffCli
 
         if (options.OpenGui)
         {
-            return AppLauncher.Launch(options);
+            return AppLauncher.Launch(options, output);
         }
 
         // --days 0 = all time; default window is 30 days.
