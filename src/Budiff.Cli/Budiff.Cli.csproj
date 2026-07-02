@@ -24,10 +24,11 @@
 
   <!-- Ship the GUI inside the tool package so `budiff -i` works from any folder:
        publish Budiff.App and pack the publish output under tools/<tfm>/any/gui/win-x64/,
-       where AppLauncher probes for it (Windows only). The publish is RID-specific
-       ReadyToRun: it halves GUI time-to-window (~1.2s -> ~0.7s) AND shrinks the
-       payload 4x (a portable publish carries native runtimes for every OS/arch,
-       600 MB vs 159 MB). Non-Windows GUI packaging is tracked in issue #57. -->
+       where AppLauncher probes for it (Windows only). The publish is NativeAOT:
+       time-to-window ~0.55s (vs ~0.7s ReadyToRun, ~1.2s portable IL) and the
+       payload is ~57 MB (vs 159 MB R2R, 600 MB portable). Needs the VC++ tools
+       (link.exe) on the packing machine; CI's windows-latest has them.
+       Non-Windows GUI packaging is tracked in issue #57. -->
   <Target Name="PublishGuiForPack" BeforeTargets="_GetPackageFiles">
     <PropertyGroup>
       <GuiPublishDir>$(MSBuildProjectDirectory)\obj\gui-publish\</GuiPublishDir>
@@ -35,11 +36,16 @@
     <!-- Publish does not clean its output dir, so files from a previous pack
          (e.g. a differently-shaped publish) would silently ride along. -->
     <RemoveDir Directories="$(GuiPublishDir)" />
+    <!-- RemoveProperties: CI packs with the no-build flag, but that must not
+         leak into this inner publish; AOT native codegen happens during it. -->
     <MSBuild Projects="..\Budiff.App\Budiff.App.csproj"
              Targets="Publish"
-             Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=false;PublishReadyToRun=true;PublishDir=$(GuiPublishDir)" />
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=true;PublishDir=$(GuiPublishDir)"
+             RemoveProperties="NoBuild" />
     <ItemGroup>
+      <!-- NativeAOT emits huge symbol files (80+ MB); never ship them. -->
       <None Include="$(GuiPublishDir)**\*"
+            Exclude="$(GuiPublishDir)**\*.pdb"
             Pack="true"
             PackagePath="tools/$(TargetFramework)/any/gui/win-x64/%(RecursiveDir)" />
     </ItemGroup>

@@ -4,10 +4,15 @@
     <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
     <Description>Standalone Avalonia GUI for budiff.</Description>
     <IsPackable>false</IsPackable>
-    <!-- The tool package ships this app as a win-x64 ReadyToRun publish (see
-         the PublishGuiForPack target in Budiff.Cli.csproj); restore must
-         produce the RID-specific target for that inner publish to work. -->
+    <!-- The tool package ships this app as a win-x64 NativeAOT publish (see
+         the PublishGuiForPack target in Budiff.Cli.csproj). PublishAot must
+         live HERE, not in that target's inner-MSBuild properties: restore
+         only pulls the ILCompiler package when the project itself declares
+         AOT, otherwise the flag is silently ignored and publish falls back
+         to a plain (huge, slow) self-contained layout. Only publish is
+         affected - build, test, and the dev-fallback exe stay JIT. -->
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <PublishAot>true</PublishAot>
   </PropertyGroup>
 
   <ItemGroup>
@@ -32,5 +37,17 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Budiff.Avalonia.Tests" />
+  </ItemGroup>
+
+  <!-- The app binds with reflection bindings (CompiledBindings off), so AOT
+       trimming must not strip view-model members the XAML resolves at
+       runtime - root all budiff assemblies. Without these roots the AOT app
+       launches but every binding is dead (title stuck at "Window", empty
+       tree). -->
+  <ItemGroup>
+    <TrimmerRootAssembly Include="Budiff.App" />
+    <TrimmerRootAssembly Include="Budiff.Avalonia" />
+    <TrimmerRootAssembly Include="Budiff.Core" />
+    <TrimmerRootAssembly Include="Budiff.Avalonia.TextMate" />
   </ItemGroup>
 </Project>
