@@ -109,6 +109,17 @@ public sealed partial class CodeAnalysisRow : ObservableObject
 
     public required string RelativePath { get; init; }
 
+    // Tree level; the row template indents INSIDE the name cell (the
+    // TreeViewItem chrome is retemplated away so every row grid spans the
+    // full pane width and stays column-aligned with the header).
+    public int Depth { get; init; }
+
+    public double IndentWidth => Depth * 16;
+
+    public MaterialIconKind ExpandIcon => IsExpanded ? MaterialIconKind.ChevronDown : MaterialIconKind.ChevronRight;
+
+    partial void OnIsExpandedChanged(bool value) => OnPropertyChanged(nameof(ExpandIcon));
+
     public string? FullPath { get; init; }
 
     public bool IsFile { get; init; }
@@ -477,7 +488,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             allTime: !Historical,
             includedAuthors: authorFilter);
 
-        Roots = new ObservableCollection<CodeAnalysisRow>(root.Children.Select(BuildRow));
+        Roots = new ObservableCollection<CodeAnalysisRow>(root.Children.Select(n => BuildRow(n, depth: 0)));
         SetSummary(root);
         ApplySearch();
     }
@@ -593,11 +604,12 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         }
     }
 
-    private CodeAnalysisRow BuildRow(AnalysisNode node)
+    private CodeAnalysisRow BuildRow(AnalysisNode node, int depth)
     {
         var showGit = _history is not null;
         var row = new CodeAnalysisRow
         {
+            Depth = depth,
             Name = node.Name,
             RelativePath = node.RelativePath,
             IsFile = node.IsFile,
@@ -619,7 +631,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
         foreach (var child in node.Children)
         {
-            row.Children.Add(BuildRow(child));
+            row.Children.Add(BuildRow(child, depth + 1));
         }
 
         return row;

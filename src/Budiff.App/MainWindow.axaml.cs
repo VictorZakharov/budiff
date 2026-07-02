@@ -220,6 +220,14 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void OnToggleExpand(object? sender, RoutedEventArgs e)
+    {
+        if (FindAnalysisRow(sender) is { IsFile: false } row)
+        {
+            row.IsExpanded = !row.IsExpanded;
+        }
+    }
+
     private async void OnAnalysisRowDoubleTapped(object? sender, TappedEventArgs e)
     {
         if (FindAnalysisRow(e.Source) is { IsFile: true } row)

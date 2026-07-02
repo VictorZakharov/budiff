@@ -16,6 +16,44 @@
             <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
             <Setter Property="IsVisible" Value="{Binding IsSearchVisible}" />
         </Style>
+        <!-- Chromeless tree items: no built-in toggle/indent, so EVERY row grid
+             spans the full pane width and its columns land exactly where the
+             header's do at any width (the default chrome shifted rows right
+             once the name column hit its minimum). Indent + chevron are drawn
+             inside the name cell instead (Depth on the row VM). -->
+        <Style Selector="TreeView#AnalysisTree TreeViewItem">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <StackPanel>
+                        <Border Name="PART_LayoutRoot"
+                                Background="Transparent"
+                                Focusable="True">
+                            <ContentPresenter Name="PART_HeaderPresenter"
+                                              Content="{TemplateBinding Header}"
+                                              ContentTemplate="{TemplateBinding HeaderTemplate}"
+                                              HorizontalContentAlignment="Stretch" />
+                        </Border>
+                        <ItemsPresenter Name="PART_ItemsPresenter"
+                                        IsVisible="{TemplateBinding IsExpanded}"
+                                        ItemsPanel="{TemplateBinding ItemsPanel}" />
+                    </StackPanel>
+                </ControlTemplate>
+            </Setter>
+        </Style>
+        <Style Selector="TreeView#AnalysisTree TreeViewItem:pointerover /template/ Border#PART_LayoutRoot">
+            <Setter Property="Background" Value="#14FFFFFF" />
+        </Style>
+        <Style Selector="TreeView#AnalysisTree TreeViewItem:selected /template/ Border#PART_LayoutRoot">
+            <Setter Property="Background" Value="#2D5A9E" />
+        </Style>
+        <Style Selector="Button.chevron">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Width" Value="18" />
+            <Setter Property="Height" Value="18" />
+        </Style>
         <Style Selector="TextBlock.num">
             <Setter Property="HorizontalAlignment" Value="Right" />
             <Setter Property="VerticalAlignment" Value="Center" />
@@ -357,6 +395,7 @@
                               Background="Transparent"
                               BorderThickness="0"
                               ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                              ScrollViewer.AllowAutoHide="True"
                               Padding="6,0,18,0">
                         <TreeView.ItemTemplate>
                             <TreeDataTemplate ItemsSource="{Binding Children}">
@@ -374,12 +413,20 @@
                                         <ColumnDefinition Width="60" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <!-- Auto,* (not a StackPanel) so the name TRIMS when the
-                                         cell is tight instead of pushing the row wider. -->
-                                    <Grid Grid.Column="0" ColumnDefinitions="Auto,*" VerticalAlignment="Center">
-                                        <materialIcons:MaterialIcon Kind="{Binding Icon}" Width="15" Height="15"
+                                    <!-- Auto,Auto,Auto,* (not a StackPanel) so the name TRIMS
+                                         when the cell is tight instead of pushing the row wider.
+                                         Indent + chevron live here (chromeless TreeViewItem). -->
+                                    <Grid Grid.Column="0" ColumnDefinitions="Auto,Auto,Auto,*" VerticalAlignment="Center">
+                                        <Border Width="{Binding IndentWidth}" />
+                                        <Panel Grid.Column="1" Width="18">
+                                            <Button Classes="chevron" Click="OnToggleExpand" IsVisible="{Binding !IsFile}">
+                                                <materialIcons:MaterialIcon Kind="{Binding ExpandIcon}" Width="14" Height="14"
+                                                                            Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                                            </Button>
+                                        </Panel>
+                                        <materialIcons:MaterialIcon Grid.Column="2" Kind="{Binding Icon}" Width="15" Height="15"
                                                                     Foreground="{DynamicResource BudiffMutedTextBrush}" />
-                                        <TextBlock Grid.Column="1" app:NameInlines.Runs="{Binding NameRuns}" Padding="2,0" Margin="6,0,0,0"
+                                        <TextBlock Grid.Column="3" app:NameInlines.Runs="{Binding NameRuns}" Padding="2,0" Margin="6,0,0,0"
                                                    HorizontalAlignment="Left"
                                                    VerticalAlignment="Center"
                                                    Foreground="{DynamicResource BudiffTextBrush}"
