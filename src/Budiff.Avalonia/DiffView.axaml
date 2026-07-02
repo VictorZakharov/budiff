@@ -71,6 +71,15 @@
                           VerticalScrollBarVisibility="Auto">
                 <Grid>
                     <ItemsControl x:Name="RowsHost" ItemsSource="{Binding Rows}">
+                        <!-- Virtualized: only the viewport's rows get containers, so a
+                             Collapse-unchanged toggle or a big diff open realizes ~40
+                             rows instead of one per line (which froze the UI). All
+                             rows are a fixed 18px - DiffFunnelGutter relies on that. -->
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VirtualizingStackPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <Panel>

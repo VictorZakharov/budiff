@@ -35,7 +35,7 @@ public sealed partial class DiffViewModel : ObservableObject
         Placeholder = "No diff selected.";
     }
 
-    public ObservableCollection<DiffRowVm> Rows { get; } = new();
+    public BulkObservableCollection<DiffRowVm> Rows { get; } = new();
 
     public ISyntaxHighlighter? SyntaxHighlighter { get; set; }
 
@@ -389,7 +389,9 @@ public sealed partial class DiffViewModel : ObservableObject
 
     private void Rebuild()
     {
-        Rows.Clear();
+        // Built as a list and swapped in with ONE reset: per-row Add events made
+        // the items host (and the gutter) process thousands of changes per toggle.
+        var rows = new List<DiffRowVm>(_all.Count);
         var n = _all.Count;
         var i = 0;
         while (i < n)
@@ -409,13 +411,13 @@ public sealed partial class DiffViewModel : ObservableObject
                     var trail = j == n ? 0 : ContextLines;
                     for (var k = i; k < i + lead; k++)
                     {
-                        Rows.Add(Content(_all[k]));
+                        rows.Add(Content(_all[k]));
                     }
 
                     var hidden = runLen - lead - trail;
                     if (hidden > 0)
                     {
-                        Rows.Add(new DiffRowVm
+                        rows.Add(new DiffRowVm
                         {
                             IsGap = true,
                             GapRunStart = i,
@@ -425,14 +427,14 @@ public sealed partial class DiffViewModel : ObservableObject
 
                     for (var k = j - trail; k < j; k++)
                     {
-                        Rows.Add(Content(_all[k]));
+                        rows.Add(Content(_all[k]));
                     }
                 }
                 else
                 {
                     for (var k = i; k < j; k++)
                     {
-                        Rows.Add(Content(_all[k]));
+                        rows.Add(Content(_all[k]));
                     }
                 }
 
@@ -440,10 +442,12 @@ public sealed partial class DiffViewModel : ObservableObject
             }
             else
             {
-                Rows.Add(Content(_all[i]));
+                rows.Add(Content(_all[i]));
                 i++;
             }
         }
+
+        Rows.ReplaceAll(rows);
     }
 
     private DiffRowVm Content(DiffRow row)

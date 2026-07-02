@@ -13,6 +13,11 @@ public sealed class DiffFunnelGutter : Control
 {
     private const double GutterWidth = 18;
 
+    // Every diff row (content and gap) renders at this fixed height; geometry is
+    // pure index math so it works with a VIRTUALIZED items host, where off-screen
+    // rows have no container to measure.
+    private const double RowHeight = 18;
+
     public static readonly StyledProperty<IEnumerable?> RowsProperty =
         AvaloniaProperty.Register<DiffFunnelGutter, IEnumerable?>(nameof(Rows));
 
@@ -120,6 +125,7 @@ public sealed class DiffFunnelGutter : Control
         var gutterLeft = (Bounds.Width - GutterWidth) / 2;
         var gutterRight = (Bounds.Width + GutterWidth) / 2;
         var midX = Bounds.Width / 2;
+        var hostTop = host.TranslatePoint(new Point(0, 0), this)?.Y ?? 0;
 
         var i = 0;
         while (i < rows.Count)
@@ -164,11 +170,11 @@ public sealed class DiffFunnelGutter : Control
                 j++;
             }
 
-            var blockTop = RowTop(host, i);
-            var leftTop = leftFirst >= 0 ? RowTop(host, leftFirst) : blockTop;
-            var leftBottom = leftLast >= 0 ? RowBottom(host, leftLast) : blockTop;
-            var rightTop = rightFirst >= 0 ? RowTop(host, rightFirst) : blockTop;
-            var rightBottom = rightLast >= 0 ? RowBottom(host, rightLast) : blockTop;
+            var blockTop = hostTop + i * RowHeight;
+            var leftTop = leftFirst >= 0 ? hostTop + leftFirst * RowHeight : blockTop;
+            var leftBottom = leftLast >= 0 ? hostTop + (leftLast + 1) * RowHeight : blockTop;
+            var rightTop = rightFirst >= 0 ? hostTop + rightFirst * RowHeight : blockTop;
+            var rightBottom = rightLast >= 0 ? hostTop + (rightLast + 1) * RowHeight : blockTop;
 
             var brush = modified || (added && removed) ? ModifiedBrush : added ? AddedBrush : RemovedBrush;
             var geometry = new StreamGeometry();
@@ -184,27 +190,6 @@ public sealed class DiffFunnelGutter : Control
             context.DrawGeometry(brush, null, geometry);
             i = j;
         }
-    }
-
-    private double RowTop(ItemsControl host, int index)
-    {
-        if (host.ContainerFromIndex(index) is Control container)
-        {
-            return container.TranslatePoint(new Point(0, 0), this)?.Y ?? 0;
-        }
-
-        return 0;
-    }
-
-    private double RowBottom(ItemsControl host, int index)
-    {
-        if (host.ContainerFromIndex(index) is Control container)
-        {
-            var top = container.TranslatePoint(new Point(0, 0), this)?.Y ?? 0;
-            return top + container.Bounds.Height;
-        }
-
-        return 0;
     }
 
     private static IBrush Brush(string hex) => new ImmutableSolidColorBrush(Color.Parse(hex));
