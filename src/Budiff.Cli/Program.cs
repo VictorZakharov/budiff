@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text;
 using Budiff;
 using Budiff.CodeAnalysis;
 using Budiff.Git;
@@ -38,6 +39,19 @@ internal static class BudiffCli
 
         if (options.Mcp)
         {
+            // MCP stdio must be UTF-8: clients spawn the server with redirected
+            // pipes, which on Windows otherwise default to the OEM codepage and
+            // mangle non-ASCII tool results. Wrap the raw streams (BOM-less)
+            // instead of switching Console.OutputEncoding - no console codepage
+            // side effect to restore. Only the real console streams are
+            // rewrapped; tests inject in-memory readers/writers.
+            if (ReferenceEquals(input, Console.In) && ReferenceEquals(output, Console.Out))
+            {
+                using var utf8Input = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false));
+                using var utf8Output = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true };
+                return new McpServer(utf8Input, utf8Output, errorOutput, cwd).Run();
+            }
+
             return new McpServer(input, output, errorOutput, cwd).Run();
         }
 
@@ -45,6 +59,18 @@ internal static class BudiffCli
         {
             return AppLauncher.Launch(options, output);
         }
+
+        // --json feeds machines; when stdout is a pipe hand them UTF-8 bytes
+        // (matching the MCP server) instead of the OEM codepage. Interactive
+        // terminal output keeps the console's own encoding.
+        StreamWriter? utf8Json = null;
+        if (options.Json && ReferenceEquals(output, Console.Out) && Console.IsOutputRedirected)
+        {
+            utf8Json = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true };
+            output = utf8Json;
+        }
+
+        using var _ = utf8Json;
 
         // --days 0 = all time; default window is 30 days.
         int? sinceDays = options.Days == 0 ? null : (options.Days ?? 30);
@@ -110,7 +136,7 @@ internal static class BudiffCli
         var diff = GitRepositoryReader.LoadDiff(scope, file, target);
         if (options.Json)
         {
-            JsonRenderer.RenderDiff(changeSet, file, diff, output);
+            JsonRenderer.RenderDiff(changeSet, file, diff, output, options.ContextLines);
         }
         else
         {

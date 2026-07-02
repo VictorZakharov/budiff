@@ -100,6 +100,51 @@ public sealed class McpServerTests
     }
 
     [Fact]
+    public void GetFileDiff_CollapsesUnchangedRunsByDefault()
+    {
+        using var repo = TempRepo.Create();
+        var lines = Enumerable.Range(1, 21).Select(i => "line" + i);
+        repo.Write("big.txt", string.Join('\n', lines) + "\n");
+        repo.Commit("initial", "Alice");
+        repo.Write("big.txt", "changed\n" + string.Join('\n', lines.Skip(1)) + "\n");
+
+        var collapsed = ToolCall(1, "get_file_diff", $$"""
+            {
+              "root": {{JsonSerializer.Serialize(repo.Root)}},
+              "path": "big.txt",
+              "gitRoot": true
+            }
+            """);
+
+        var response = Assert.Single(Run(collapsed, repo.Root));
+        using var doc = JsonDocument.Parse(ToolText(response));
+
+        // 22 source rows (the trailing newline adds an empty final row):
+        // Modified(1) + 3 context + one gap standing in for the other 18.
+        Assert.Equal(3, doc.RootElement.GetProperty("contextLines").GetInt32());
+        var rows = doc.RootElement.GetProperty("rows").EnumerateArray().ToArray();
+        Assert.Equal(5, rows.Length);
+        var gap = Assert.Single(rows, r => r.GetProperty("kind").GetString() == "Gap");
+        Assert.Equal(18, gap.GetProperty("hiddenLines").GetInt32());
+
+        var full = ToolCall(2, "get_file_diff", $$"""
+            {
+              "root": {{JsonSerializer.Serialize(repo.Root)}},
+              "path": "big.txt",
+              "gitRoot": true,
+              "contextLines": null
+            }
+            """);
+
+        var fullResponse = Assert.Single(Run(full, repo.Root));
+        using var fullDoc = JsonDocument.Parse(ToolText(fullResponse));
+        Assert.Equal(22, fullDoc.RootElement.GetProperty("rows").GetArrayLength());
+        Assert.DoesNotContain(
+            fullDoc.RootElement.GetProperty("rows").EnumerateArray(),
+            r => r.GetProperty("kind").GetString() == "Gap");
+    }
+
+    [Fact]
     public void RepoOverview_ReturnsCodeAnalysisSummary()
     {
         using var repo = TempRepo.Create();

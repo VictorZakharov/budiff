@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using Budiff;
 using Budiff.Git;
@@ -52,6 +54,73 @@ public sealed class JsonRendererTests
             s.GetProperty("kind").GetString() == "Removed" && s.GetProperty("text").GetString() == "1");
         Assert.Contains(row.GetProperty("newInline").EnumerateArray(), s =>
             s.GetProperty("kind").GetString() == "Added" && s.GetProperty("text").GetString() == "2");
+    }
+
+    [Fact]
+    public void Parse_ContextRequiresJson()
+    {
+        Assert.Equal("--context requires --json.", CliOptions.Parse(new[] { "--context", "3", "App.cs" }).Error);
+        Assert.NotNull(CliOptions.Parse(new[] { "--context", "-1", "--json", "App.cs" }).Error);
+        Assert.NotNull(CliOptions.Parse(new[] { "--json", "App.cs", "--context" }).Error);
+
+        var options = CliOptions.Parse(new[] { "--json", "--context", "0", "App.cs" });
+        Assert.Equal(0, options.ContextLines);
+        Assert.Null(options.Error);
+    }
+
+    [Fact]
+    public void RenderDiff_WithoutContext_KeepsEveryRowAndOmitsGapFields()
+    {
+        var output = new StringWriter();
+
+        JsonRenderer.RenderDiff(MakeChangeSet(), MakeFile(), MakeLongDiff(), output);
+
+        using var doc = JsonDocument.Parse(output.ToString());
+        var root = doc.RootElement;
+        Assert.False(root.TryGetProperty("contextLines", out _));
+        var rows = root.GetProperty("rows");
+        Assert.Equal(21, rows.GetArrayLength());
+        foreach (var row in rows.EnumerateArray())
+        {
+            Assert.False(row.TryGetProperty("hiddenLines", out _));
+        }
+    }
+
+    [Fact]
+    public void RenderDiff_WithContext_FoldsUnchangedRunsIntoGapRows()
+    {
+        var output = new StringWriter();
+
+        // Rows: Modified(1) + 20 Unchanged. Trailing run keeps 3 lead context,
+        // no trail context -> exactly: modified + 3 unchanged + 1 gap of 17.
+        JsonRenderer.RenderDiff(MakeChangeSet(), MakeFile(), MakeLongDiff(), output, contextLines: 3);
+
+        using var doc = JsonDocument.Parse(output.ToString());
+        var root = doc.RootElement;
+        Assert.Equal(3, root.GetProperty("contextLines").GetInt32());
+        var rows = root.GetProperty("rows").EnumerateArray().ToArray();
+        Assert.Equal(5, rows.Length);
+        Assert.Equal("Modified", rows[0].GetProperty("kind").GetString());
+        Assert.Equal(new[] { "Unchanged", "Unchanged", "Unchanged" }, rows[1..4].Select(r => r.GetProperty("kind").GetString()));
+
+        var gap = rows[4];
+        Assert.Equal("Gap", gap.GetProperty("kind").GetString());
+        Assert.Equal(17, gap.GetProperty("hiddenLines").GetInt32());
+        // First hidden line on both sides: 1 modified + 3 visible context -> line 5.
+        Assert.Equal(5, gap.GetProperty("oldNo").GetInt32());
+        Assert.Equal(5, gap.GetProperty("newNo").GetInt32());
+        Assert.Equal(JsonValueKind.Null, gap.GetProperty("oldText").ValueKind);
+    }
+
+    private static DiffResult MakeLongDiff()
+    {
+        var rows = new List<DiffRow> { new(1, "count = 1;", 1, "count = 2;", DiffKind.Modified) };
+        for (var i = 2; i <= 21; i++)
+        {
+            rows.Add(new DiffRow(i, "line" + i, i, "line" + i, DiffKind.Unchanged));
+        }
+
+        return DiffResult.FromRows(rows);
     }
 
     private static ChangeSet MakeChangeSet()

@@ -166,7 +166,7 @@ internal sealed class McpServer
                 Tool(
                     "get_file_diff",
                     "Get File Diff",
-                    "Return budiff's structured side-by-side diff model for one changed file.",
+                    "Return budiff's structured side-by-side diff model for one changed file. Long unchanged runs collapse into Gap rows by default; widen contextLines (or set it null) to see more.",
                     new JsonObject
                     {
                         ["path"] = Schema("string", "Changed file path, either repository-relative, scope-relative, or absolute."),
@@ -174,6 +174,7 @@ internal sealed class McpServer
                         ["gitRoot"] = Schema("boolean", "When true, widen scope to the repository root before matching the file."),
                         ["baseRef"] = Schema("string", "Base git ref for comparison. Defaults to HEAD."),
                         ["headRef"] = NullableStringSchema("Head git ref. Omit or set null to compare against the working tree."),
+                        ["contextLines"] = NullableIntegerSchema("Unchanged lines kept around changes; longer unchanged runs fold into rows with kind \"Gap\" (oldNo/newNo = first hidden line, hiddenLines = count). Omit for 3; set null for the full file."),
                     },
                     "path"),
                 Tool(
@@ -259,7 +260,31 @@ internal sealed class McpServer
         }
 
         var diff = GitRepositoryReader.LoadDiff(scope, file, target);
-        return JsonRenderer.SerializeDiff(changes, file, diff);
+        return JsonRenderer.SerializeDiff(changes, file, diff, ContextLines(arguments));
+    }
+
+    // Agents are the only consumers here, so collapse by default: an omitted
+    // contextLines means 3, explicit null means the full file (the CLI's
+    // --json keeps full output as ITS default for backward compatibility).
+    private static int? ContextLines(JsonElement arguments)
+    {
+        if (arguments.ValueKind == JsonValueKind.Object
+            && arguments.TryGetProperty("contextLines", out var context))
+        {
+            if (context.ValueKind == JsonValueKind.Null)
+            {
+                return null;
+            }
+
+            if (context.ValueKind == JsonValueKind.Number && context.TryGetInt32(out var value) && value >= 0)
+            {
+                return value;
+            }
+
+            throw new ToolException("contextLines must be a non-negative integer or null.");
+        }
+
+        return 3;
     }
 
     private string RepoOverview(JsonElement arguments)
