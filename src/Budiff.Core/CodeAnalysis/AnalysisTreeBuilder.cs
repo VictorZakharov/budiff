@@ -48,15 +48,37 @@ public static class AnalysisTreeBuilder
     private static readonly string[] ProjectExtensions = { ".csproj", ".fsproj", ".vbproj", ".esproj", ".pyproj" };
 
     public static IReadOnlyList<ExtensionStat> ExtensionStats(ScanResult scan)
+        => ExtensionStats(scan, history: null, allTime: true);
+
+    public static IReadOnlyList<ExtensionStat> ExtensionStats(
+        ScanResult scan,
+        HistoryResult? history,
+        bool allTime)
     {
-        var groups = scan.Files
+        // All time describes the current source snapshot. A bounded period
+        // describes only files touched in that window and their net churn.
+        var contributions = history is null || allTime
+            ? scan.Files.Select(f => (f.Extension, Lines: (long)f.Lines.Total))
+            : scan.Files
+                .Where(f => history.ByPath.ContainsKey(f.RelativePath))
+                .Select(f =>
+                {
+                    var item = history.ByPath[f.RelativePath];
+                    return (f.Extension, Lines: item.Added + item.Removed);
+                });
+
+        var groups = contributions
             .GroupBy(f => f.Extension)
-            .Select(g => (Ext: g.Key, Count: g.Count(), Lines: g.Sum(f => f.Lines.Total)))
+            .Select(g => (Ext: g.Key, Count: g.Count(), Lines: g.Sum(f => f.Lines)))
             .ToList();
-        var total = groups.Sum(g => (long)g.Lines);
+        var total = groups.Sum(g => g.Lines);
 
         return groups
-            .Select(g => new ExtensionStat(g.Ext, g.Count, g.Lines, total > 0 ? g.Lines * 100.0 / total : 0))
+            .Select(g => new ExtensionStat(
+                g.Ext,
+                g.Count,
+                (int)Math.Min(g.Lines, int.MaxValue),
+                total > 0 ? g.Lines * 100.0 / total : 0))
             .OrderByDescending(e => e.Lines)
             .ThenBy(e => e.Display, StringComparer.OrdinalIgnoreCase)
             .ToList();

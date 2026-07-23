@@ -122,6 +122,46 @@ public sealed class CodeAnalysisTests
     }
 
     [Fact]
+    public void Extension_stats_for_window_use_touched_files_and_changed_lines()
+    {
+        var history = new HistoryResult();
+        Touch(history, 0, "Alice", "src/App/Main.cs", 10, 5);
+        Touch(history, 1, "Bob", "README.md", 3, 2);
+
+        var stats = AnalysisTreeBuilder.ExtensionStats(Sample(), history, allTime: false);
+
+        Assert.Collection(
+            stats,
+            item =>
+            {
+                Assert.Equal(".cs", item.Extension);
+                Assert.Equal(1, item.FileCount);
+                Assert.Equal(15, item.Lines);
+                Assert.Equal(75, item.Percent);
+            },
+            item =>
+            {
+                Assert.Equal(".md", item.Extension);
+                Assert.Equal(1, item.FileCount);
+                Assert.Equal(5, item.Lines);
+                Assert.Equal(25, item.Percent);
+            });
+    }
+
+    [Fact]
+    public void Extension_stats_for_all_time_keep_snapshot_line_totals()
+    {
+        var history = new HistoryResult();
+        Touch(history, 0, "Alice", "src/App/Main.cs", 10, 5);
+
+        var stats = AnalysisTreeBuilder.ExtensionStats(Sample(), history, allTime: true);
+        var csharp = stats.Single(item => item.Extension == ".cs");
+
+        Assert.Equal(2, csharp.FileCount);
+        Assert.Equal(150, csharp.Lines);
+    }
+
+    [Fact]
     public void Sorting_by_added_orders_by_churn_not_snapshot()
     {
         var history = new HistoryResult();
