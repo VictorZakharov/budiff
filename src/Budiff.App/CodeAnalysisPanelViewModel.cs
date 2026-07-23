@@ -426,15 +426,24 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     [RelayCommand]
     private void SelectNoneAuthors() => SetAllAuthors(false);
 
-    private void LoadFilters(ScanResult scan, HistoryResult? history)
+    private void LoadFilters(ScanResult scan, HistoryResult? history, bool preserveSelection = false)
     {
-        var extensionItems = AnalysisTreeBuilder.ExtensionStats(scan).Select(s => new ExtensionFilterItem
+        var excludedExtensions = preserveSelection
+            ? Extensions.Where(e => !e.Included).Select(e => e.Extension).ToHashSet(StringComparer.Ordinal)
+            : new HashSet<string>(StringComparer.Ordinal);
+        var excludedAuthors = preserveSelection
+            ? Authors.Where(a => !a.Included).Select(a => a.Author).ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var periodAware = history is not null && Historical;
+        var lineLabel = periodAware ? "changed lines" : "lines";
+        var extensionItems = AnalysisTreeBuilder.ExtensionStats(scan, history, allTime: !periodAware).Select(s => new ExtensionFilterItem
         {
             Extension = s.Extension,
             Display = s.Display,
+            Included = !excludedExtensions.Contains(s.Extension),
             Summary = s.Percent >= 0.05
-                ? $"{s.FileCount:N0} files - {s.Lines:N0} lines - {s.Percent:0.0}%"
-                : $"{s.FileCount:N0} files - {s.Lines:N0} lines",
+                ? $"{s.FileCount:N0} files - {s.Lines:N0} {lineLabel} - {s.Percent:0.0}%"
+                : $"{s.FileCount:N0} files - {s.Lines:N0} {lineLabel}",
         }).ToList();
         WireFilterItems(extensionItems, UpdateExtensionToggleState);
         Extensions = new ObservableCollection<ExtensionFilterItem>(extensionItems);
@@ -443,6 +452,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         var authorItems = AnalysisTreeBuilder.AuthorStats(history).Select(a => new AuthorFilterItem
         {
             Author = a.Author,
+            Included = !excludedAuthors.Contains(a.Author),
             Summary = a.Percent >= 0.05 ? $"{a.Commits:N0} commits - {a.Percent:0.0}%" : $"{a.Commits:N0} commits",
         }).ToList();
         WireFilterItems(authorItems, UpdateAuthorToggleState);
@@ -717,6 +727,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             RecordTiming(sw.ElapsedMilliseconds, _history?.CommitCount ?? 0);
             _appliedPeriod = SelectedPeriod;
             _appliedDays = days;
+            LoadFilters(_scan, _history, preserveSelection: true);
         }
         catch (Exception ex)
         {
