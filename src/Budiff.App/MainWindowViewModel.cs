@@ -233,20 +233,22 @@ public sealed partial class MainWindowViewModel : ObservableObject
         {
             _scope = GitRepositoryReader.Open(startPath, gitRoot);
         }
-        catch
+        catch (Exception ex)
         {
-            // Not a git repository: fall back to the plain folder analysis. The
-            // analysis panel already handles GitAvailable=false (no churn columns).
+            // No usable git repository: fall back to the plain folder analysis.
+            // The analysis panel already handles GitAvailable=false (no churn
+            // columns), and a drill-in shows the file as-is. Surface git's own
+            // reason - "not owned by current user" is not "not a repository".
             _scope = null;
             BaseRefs.Clear();
             var folderName = Path.GetFileName(Path.TrimEndingDirectorySeparator(startPath));
             RepoTitle = string.IsNullOrEmpty(folderName) ? startPath : folderName;
             WindowTitle = "budiff - " + RepoTitle;
-            ScopeTitle = "folder - not a git repository";
+            ScopeTitle = "folder - no git";
             IsGitRootScope = true;
             CloseDiff();
-            StatusText = "Folder analysis only (no git repository).";
-            Diff.SetPlaceholder("Not a git repository - diffs unavailable.");
+            StatusText = "Folder analysis only: " + ex.Message;
+            Diff.SetPlaceholder("Select a file in the bird's-eye to view it.");
             await Analysis.LoadAsync(startPath);
             return;
         }
@@ -264,6 +266,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         if (_scope is null)
         {
+            // Folder mode: re-run the whole load, which also re-detects git.
+            await LoadAsync(_startPath, _gitRoot);
             return;
         }
 
@@ -353,8 +357,21 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private Task OpenAnalysisFileAsync(string fullPath, string relativePath)
     {
+        Diff.Extension = Path.GetExtension(relativePath);
+        Diff.IsFileView = _scope is null;
         if (_scope is null)
         {
+            // No git: nothing to compare against - show the file as it is now.
+            _openDiffFile = null;
+            _blameGen++;
+            _blamePath = null;
+            Diff.SetBlame(null);
+            Diff.Title = relativePath.Replace('\\', '/');
+            Diff.Subtitle = "current file - no git";
+            IsDiffOpen = true;
+            Diff.BeginLoad(() => File.Exists(fullPath)
+                ? DiffLoader.BuildView(DiffLoader.ReadWorkingFile(fullPath))
+                : DiffResult.Message("File not found."));
             return Task.CompletedTask;
         }
 
@@ -363,7 +380,6 @@ public sealed partial class MainWindowViewModel : ObservableObject
         var file = new ChangedFile(repoPath, null, fullPath, Budiff.GitFileState.Modified, new DiffChurn(0, 0), 0, 0, IsBinary: false);
         Diff.Title = repoPath;
         Diff.Subtitle = DescribeTarget(target);
-        Diff.Extension = Path.GetExtension(relativePath);
         _openDiffFile = file;
         IsDiffOpen = true;
         Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(_scope, file, target));

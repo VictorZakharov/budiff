@@ -74,7 +74,19 @@ public sealed partial class DiffViewModel : ObservableObject
 
     partial void OnBlameCrampedChanged(bool value) => ShowBlame = !value;
 
-    public bool IsBlameVisible => ShowBlame;
+    // A plain file view (nothing to compare against - e.g. a folder outside
+    // git): one full-width pane, nothing collapsed, no blame. Set before
+    // loading; it applies to the rows that load next.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsBlameVisible))]
+    [NotifyPropertyChangedFor(nameof(BlameGutterWidth))]
+    [NotifyPropertyChangedFor(nameof(ShowDiffOptions))]
+    private bool _isFileView;
+
+    // The Blame / Collapse unchanged toggles mean nothing in a file view.
+    public bool ShowDiffOptions => !IsFileView;
+
+    public bool IsBlameVisible => ShowBlame && !IsFileView;
 
     // The funnel gutter offsets its center by this (the blame column sits left
     // of both code halves). Keep in sync with the column's Width in the row
@@ -248,7 +260,7 @@ public sealed partial class DiffViewModel : ObservableObject
             allRemoved &= row.Kind == DiffKind.Removed;
         }
 
-        IsSinglePane = anyChange && (allAdded || allRemoved);
+        IsSinglePane = IsFileView || (anyChange && (allAdded || allRemoved));
 
         var maxLen = 0;
         foreach (var row in rows)
@@ -498,7 +510,7 @@ public sealed partial class DiffViewModel : ObservableObject
         // Built as a list and swapped in with ONE reset: per-row Add events made
         // the items host (and the gutter) process thousands of changes per toggle.
         // The collapse/gap shape itself lives in DiffRowCollapser.
-        var plan = DiffRowCollapser.Build(_all, _collapseUnchanged, ContextLines, _expandedGaps);
+        var plan = DiffRowCollapser.Build(_all, _collapseUnchanged && !IsFileView, ContextLines, _expandedGaps);
         var rows = new List<DiffRowVm>(plan.Count);
         foreach (var item in plan)
         {

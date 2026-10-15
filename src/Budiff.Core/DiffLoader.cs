@@ -23,6 +23,38 @@ public static class DiffLoader
         return DiffResult.FromRows(LineDiff.Compute(old.Text, @new.Text));
     }
 
+    // A plain file view with nothing to compare against (the folder is not a
+    // git repository): every line is an Unchanged row numbered on both sides,
+    // so the diff renderer shows the file as-is. The trailing newline does not
+    // get a blank row of its own.
+    public static DiffResult BuildView(BlobInfo file)
+    {
+        if (file.IsBinary)
+        {
+            return DiffResult.Message($"Binary file not shown ({FormatSize(file.Bytes)}).");
+        }
+
+        if (file.Bytes > MaxInlineDiffBytes)
+        {
+            return DiffResult.Message($"File too large to show inline ({FormatSize(file.Bytes)}; limit {FormatSize(MaxInlineDiffBytes)}).");
+        }
+
+        if (file.Text.Length == 0)
+        {
+            return DiffResult.Message("Empty file.");
+        }
+
+        var lines = LineDiff.SplitLines(file.Text);
+        var count = lines.Length > 1 && lines[^1].Length == 0 ? lines.Length - 1 : lines.Length;
+        var rows = new DiffRow[count];
+        for (var i = 0; i < count; i++)
+        {
+            rows[i] = new DiffRow(i + 1, lines[i], i + 1, lines[i], DiffKind.Unchanged);
+        }
+
+        return DiffResult.FromRows(rows);
+    }
+
     public static BlobInfo ReadWorkingFile(string? path)
     {
         try
