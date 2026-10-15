@@ -14,7 +14,7 @@ public static class GitRepositoryReader
 
     public static GitRepositoryScope Open(string startPath, bool gitRoot)
     {
-        var start = Path.GetFullPath(string.IsNullOrWhiteSpace(startPath) ? Environment.CurrentDirectory : startPath);
+        var start = CanonicalPath(Path.GetFullPath(string.IsNullOrWhiteSpace(startPath) ? Environment.CurrentDirectory : startPath));
         if (File.Exists(start))
         {
             start = Path.GetDirectoryName(start) ?? start;
@@ -386,6 +386,50 @@ public static class GitRepositoryReader
         }
 
         return null;
+    }
+
+    // The path as the file system spells it - drive letter and every segment.
+    // cmd.exe keeps a typed `g:\git\repo` as the working directory verbatim,
+    // and libgit2 matches safe.directory entries case-sensitively, so a repo
+    // that needs one (e.g. on a drive owned by another SID) fails its
+    // ownership check unless libgit2 gets the canonical spelling. Only Windows
+    // needs this; elsewhere (and on any IO error) the path passes through.
+    internal static string CanonicalPath(string fullPath)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return fullPath;
+        }
+
+        try
+        {
+            var root = Path.GetPathRoot(fullPath);
+            if (string.IsNullOrEmpty(root))
+            {
+                return fullPath;
+            }
+
+            var current = root.Length >= 2 && root[1] == ':'
+                ? char.ToUpperInvariant(root[0]) + root[1..]
+                : root;
+            var segments = fullPath[root.Length..].Split(
+                new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
+                StringSplitOptions.RemoveEmptyEntries);
+            // Past the first segment that does not exist, the rest pass through.
+            var exists = true;
+            foreach (var segment in segments)
+            {
+                var actual = exists ? new DirectoryInfo(current).EnumerateFileSystemInfos(segment).FirstOrDefault() : null;
+                exists = actual is not null;
+                current = Path.Combine(current, actual?.Name ?? segment);
+            }
+
+            return current;
+        }
+        catch
+        {
+            return fullPath;
+        }
     }
 
     private static T WithRepo<T>(string repositoryRoot, Func<Repository, T> body, T fallback)
