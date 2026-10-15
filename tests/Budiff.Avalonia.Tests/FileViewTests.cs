@@ -15,17 +15,10 @@ public sealed class FileViewTests
     private const string Text = "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\n";
 
     [Fact]
-    public void FileView_ShowsEveryLineInOnePane()
+    public void FileView_ShowsEveryLineInOnePane_WithoutBlameOrDiffOptions()
     {
         var rows = DiffLoader.BuildView(new BlobInfo(Text, Text.Length, IsBinary: false)).Rows!;
 
-        // A comparison of an unchanged file folds into one gap...
-        var diff = new DiffViewModel();
-        diff.SetDiff(rows);
-        Assert.False(diff.IsSinglePane);
-        Assert.Single(diff.Rows, r => r.IsGap);
-
-        // ...while the file view shows it whole.
         var view = new DiffViewModel { IsFileView = true };
         view.SetDiff(rows);
         Assert.True(view.IsSinglePane);
@@ -34,6 +27,27 @@ public sealed class FileViewTests
         Assert.False(view.IsBlameVisible);
         Assert.Equal(0, view.BlameGutterWidth);
         Assert.False(view.ShowDiffOptions);
+    }
+
+    // Left and right identical: show the file itself, not one "N unchanged
+    // lines" gap. Blame stays available (it still says who wrote each line).
+    [Fact]
+    public void IdenticalSides_ShowTheWholeFile_EvenWithCollapseOn()
+    {
+        var diff = new DiffViewModel();
+        Assert.True(diff.CollapseUnchanged);
+        diff.SetDiff(LineDiff.Compute(Text, Text));
+
+        Assert.True(diff.IsSinglePane);
+        Assert.DoesNotContain(diff.Rows, r => r.IsGap);
+        Assert.Equal(Enumerable.Range(1, 10).Select(n => n.ToString()), diff.Rows.Take(10).Select(r => r.SingleNo));
+        Assert.True(diff.IsBlameVisible);
+        Assert.True(diff.ShowDiffOptions);
+
+        // A real change still folds the unchanged runs around it.
+        diff.SetDiff(LineDiff.Compute(Text, Text.Replace("line 10", "line ten")));
+        Assert.False(diff.IsSinglePane);
+        Assert.Contains(diff.Rows, r => r.IsGap);
     }
 
     [AvaloniaFact]
