@@ -28,6 +28,38 @@ public sealed class GitRepositoryReaderTests
         Assert.Contains(rootChanges.Files, file => file.Path == "sub/a.txt");
     }
 
+    // cmd.exe keeps a typed `g:\...` cwd verbatim; libgit2 matches
+    // safe.directory case-sensitively, so Open must hand it the on-disk spelling.
+    [Fact]
+    public void Open_UsesOnDiskSpellingForMisCasedStartPath()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Path casing only matters on Windows.");
+        using var repo = TempRepo.Create();
+        repo.Write("Sub/a.txt", "a\n");
+        repo.Commit("initial", "Alice");
+
+        var canonicalRoot = GitRepositoryReader.CanonicalPath(repo.Root);
+        var misCased = Path.Combine(canonicalRoot, "Sub").ToLowerInvariant();
+        var scope = GitRepositoryReader.Open(misCased, gitRoot: false);
+
+        Assert.Equal(canonicalRoot, scope.RepositoryRoot);
+        Assert.Equal(Path.Combine(canonicalRoot, "Sub"), scope.ScopeRoot);
+        Assert.Equal("Sub", scope.ScopePrefix);
+        Assert.True(char.IsUpper(scope.RepositoryRoot[0]));
+    }
+
+    [Fact]
+    public void CanonicalPath_PassesUnknownSegmentsThrough()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Path casing only matters on Windows.");
+        using var repo = TempRepo.Create();
+        var canonicalRoot = GitRepositoryReader.CanonicalPath(repo.Root);
+
+        Assert.Equal(
+            Path.Combine(canonicalRoot, "missing", "deeper"),
+            GitRepositoryReader.CanonicalPath(Path.Combine(canonicalRoot.ToLowerInvariant(), "missing", "deeper")));
+    }
+
     [Fact]
     public void ListChanges_MapsWorkingTreeStatesAndHistoryCounts()
     {

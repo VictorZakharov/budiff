@@ -536,8 +536,9 @@
 
                         <!-- Comparison controls live with the diff: base branch only;
                              head is the working tree (or HEAD when the toggle is off). -->
-                        <TextBlock Grid.Column="3" Text="Base" FontSize="12" Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="3" Text="Base" FontSize="12" IsVisible="{Binding Diff.ShowDiffOptions}" Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
                         <ComboBox Grid.Column="4" FontSize="12"
+                                  IsVisible="{Binding Diff.ShowDiffOptions}"
                                   HorizontalAlignment="Stretch"
                                   ItemsSource="{Binding BaseRefs}"
                                   SelectedItem="{Binding SelectedBaseRef, Mode=TwoWay}">
@@ -548,6 +549,7 @@
                             </ComboBox.ItemTemplate>
                         </ComboBox>
                         <CheckBox Grid.Column="5"
+                                  IsVisible="{Binding Diff.ShowDiffOptions}"
                                   IsChecked="{Binding IncludeWorkingTree, Mode=TwoWay}"
                                   Content="Working tree"
                                   FontSize="12"
@@ -555,6 +557,7 @@
                                   Foreground="{DynamicResource BudiffTextBrush}"
                                   ToolTip.Tip="Include uncommitted working-tree changes. Off = compare to the last commit, as if your changes were not made yet." />
                         <CheckBox Grid.Column="6"
+                                  IsVisible="{Binding Diff.ShowDiffOptions}"
                                   IsChecked="{Binding Diff.ShowBlame, Mode=TwoWay}"
                                   Content="Blame"
                                   FontSize="12"
@@ -562,6 +565,7 @@
                                   Foreground="{DynamicResource BudiffTextBrush}"
                                   ToolTip.Tip="Show who last touched each line. Auto-hides when the pane drops under half the window (the checkmark tracks it); re-check to force it on." />
                         <CheckBox Grid.Column="7"
+                                  IsVisible="{Binding Diff.ShowDiffOptions}"
                                   IsChecked="{Binding Diff.CollapseUnchanged, Mode=TwoWay}"
                                   Content="Collapse unchanged"
                                   FontSize="12"
