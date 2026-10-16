@@ -260,9 +260,7 @@ public sealed partial class PullRequestPickerViewModel : ObservableObject
             _cursor = page.EndCursor;
             HasMore = page.HasNextPage && page.EndCursor is not null;
             SelectedItem ??= Items.FirstOrDefault();
-            StatusText = Items.Count == 0
-                ? "No pull requests match."
-                : $"{Items.Count:N0} of {Math.Max(page.TotalCount, Items.Count):N0}";
+            StatusText = Status(page);
         }
         catch (Exception ex)
         {
@@ -280,6 +278,24 @@ public sealed partial class PullRequestPickerViewModel : ObservableObject
                 IsLoading = false;
             }
         }
+    }
+
+    // A scoped list has no total: it says what it is limited to instead (and
+    // keeps looking while nothing has turned up yet - the window asks for
+    // more while the list is short).
+    private string Status(PullRequestPage page)
+    {
+        var scope = _source.Scope;
+        if (scope.Length == 0 || page.TotalCount >= 0)
+        {
+            return Items.Count == 0
+                ? "No pull requests match."
+                : $"{Items.Count:N0} of {Math.Max(page.TotalCount, Items.Count):N0}";
+        }
+
+        return Items.Count == 0
+            ? HasMore ? $"Looking for pull requests touching {scope}..." : $"No pull requests touch {scope}."
+            : $"{Items.Count:N0} touching {scope}" + (HasMore ? " - more as you scroll" : string.Empty);
     }
 
     private async Task LoadMineAsync()
