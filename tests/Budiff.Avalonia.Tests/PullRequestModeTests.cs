@@ -260,6 +260,66 @@ public sealed class PullRequestModeTests
         window.Close();
     }
 
+    // Lists come without counts: the rows show at once, their +/- and file
+    // counts follow in one request for the page ("..." until then).
+    [Fact]
+    public async Task Picker_ShowsRowsFirst_ThenTheirCounts()
+    {
+        var gate = new TaskCompletionSource();
+        var source = new FakePullRequestSource(Enumerable.Range(1, 12).Select(n => Pr(n, "victor", withCounts: false))) { CountsGate = gate.Task };
+        var vm = new PullRequestPickerViewModel(source, () => FakePullRequestSource.Now);
+
+        await vm.InitializeAsync();
+        Assert.Equal(10, vm.Items.Count);
+        var first = vm.Items[0];
+        Assert.Equal((string.Empty, string.Empty, "…"), (first.Added, first.Removed, first.Files));
+        Assert.Equal(Enumerable.Range(1, 10), Assert.Single(source.CountsAsked));
+
+        gate.SetResult();
+        await WaitFor(() => first.Counts is not null);
+        Assert.Equal(("+1,000", "−13", "1 file"), (first.Added, first.Removed, first.Files));
+        Assert.Equal("10 files", vm.Items[9].Files);
+
+        // The next page asks for its own rows only.
+        await vm.LoadMoreAsync();
+        await WaitFor(() => vm.Items.All(r => r.Counts is not null));
+        Assert.Equal(new[] { 11, 12 }, source.CountsAsked[1]);
+    }
+
+    [Fact]
+    public async Task Picker_CountsFailure_LeavesTheRows()
+    {
+        var source = new FakePullRequestSource(new[] { Pr(1, "victor", withCounts: false) }) { CountsFailure = "rate limited" };
+        var vm = new PullRequestPickerViewModel(source, () => FakePullRequestSource.Now);
+
+        await vm.InitializeAsync();
+        var row = Assert.Single(vm.Items);
+        await WaitFor(() => row.CountsUnavailable);
+        Assert.Equal((string.Empty, string.Empty, string.Empty), (row.Added, row.Removed, row.Files));
+        Assert.Null(vm.ErrorText);
+    }
+
+    // Opening the Period list gets the PR source ready ("Pull request..."
+    // may be next), so the picker's first search does not wait for it.
+    [AvaloniaFact]
+    public void OpeningThePeriodList_PreparesThePullRequestSource()
+    {
+        var root = ReadmeFixture.BuildFixtureRepo("pr-prepare");
+        var window = new MainWindow(root, gitRoot: true) { Width = 1200, Height = 520 };
+        window.Show();
+        var vm = window.ViewModel;
+        WaitUntil(() => !vm.Analysis.IsScanning && vm.Analysis.Roots.Count > 0, "bird's-eye scan");
+        var source = new FakePullRequestSource(Array.Empty<PullRequestInfo>());
+        vm.Analysis.PullRequests = source;
+
+        var box = window.FindControl<RepickComboBox>("PeriodBox")!;
+        box.IsDropDownOpen = true;
+        UiSnapshot.Pump();
+        Assert.Equal(1, source.PrepareCalls);
+        box.IsDropDownOpen = false;
+        window.Close();
+    }
+
     // The real window: picking "Pull request..." again (it is already the
     // period) reopens the picker; just opening the drop-down does not.
     [AvaloniaFact]
@@ -321,7 +381,7 @@ public sealed class PullRequestModeTests
         => vm.Analysis.Roots.SelectMany(r => r.SelfAndDescendants()).Where(r => r.IsFile).ToList();
 
     // Every third title is long (like real ones) so snapshots exercise trimming.
-    private static PullRequestInfo Pr(int number, string author, string state = "OPEN")
+    private static PullRequestInfo Pr(int number, string author, string state = "OPEN", bool withCounts = true)
         => new(
             number,
             number % 3 == 0 ? $"Change {number}: detect git with a lowercase drive letter; show the file outside git or when unchanged" : $"Change {number}",
@@ -333,9 +393,9 @@ public sealed class PullRequestModeTests
             number % 3 == 0 ? "vzakharov/lowercase-drive-git-detect-" + number : "b" + number,
             "base",
             "head",
-            number * 1000,
-            number * 13,
-            number);
+            withCounts ? number * 1000 : null,
+            withCounts ? number * 13 : null,
+            withCounts ? number : null);
 
     private static async Task WaitFor(Func<bool> condition)
     {
@@ -444,5 +504,33 @@ public sealed class PullRequestModeTests
 
         public Task<PullRequestRange> ResolveAsync(PullRequestInfo pullRequest, CancellationToken ct)
             => Task.Run(() => PullRequestRanges.Resolve(Root!, pullRequest, () => null, 10_000, ct), ct);
+
+        // Counts are held until this completes, when set.
+        public Task? CountsGate { get; init; }
+
+        public string? CountsFailure { get; init; }
+
+        // The PR numbers of each counts request.
+        public List<int[]> CountsAsked { get; } = new();
+
+        public int PrepareCalls { get; private set; }
+
+        public async Task<IReadOnlyDictionary<int, PullRequestCounts>> GetCountsAsync(IReadOnlyList<PullRequestInfo> pullRequests, CancellationToken ct)
+        {
+            CountsAsked.Add(pullRequests.Select(p => p.Number).ToArray());
+            if (CountsGate is not null)
+            {
+                await CountsGate;
+            }
+
+            if (CountsFailure is not null)
+            {
+                throw new PullRequestSourceException(CountsFailure);
+            }
+
+            return pullRequests.ToDictionary(p => p.Number, p => new PullRequestCounts(p.Number * 1000, p.Number * 13, p.Number));
+        }
+
+        public void Prepare() => PrepareCalls++;
     }
 }

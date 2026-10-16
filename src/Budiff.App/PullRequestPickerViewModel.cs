@@ -25,7 +25,9 @@ public sealed record StateOption(string Label, PullRequestStateFilter Value)
     public override string ToString() => Label;
 }
 
-public sealed class PullRequestRowVm(PullRequestInfo pullRequest, DateTimeOffset now)
+// One list row. Its counts arrive after the row (see FillCountsAsync); until
+// then the files column says "..." (blank if they could not be fetched).
+public sealed partial class PullRequestRowVm(PullRequestInfo pullRequest, DateTimeOffset now) : ObservableObject
 {
     private static readonly IBrush OpenBrush = HexBrush.Parse("#2EA043");
     private static readonly IBrush DraftBrush = HexBrush.Parse("#6E7681");
@@ -50,11 +52,24 @@ public sealed class PullRequestRowVm(PullRequestInfo pullRequest, DateTimeOffset
 
     public string Meta => $"{PullRequest.Author}  ·  updated {Age(now - PullRequest.UpdatedAt)}  ·  {PullRequest.BaseRefName} ← {PullRequest.HeadRefName}";
 
-    public string Added => "+" + PullRequest.Additions.ToString("N0");
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(Added), nameof(Removed), nameof(Files))]
+    private PullRequestCounts? _counts = pullRequest.Counts;
 
-    public string Removed => "−" + PullRequest.Deletions.ToString("N0");
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(Files))]
+    private bool _countsUnavailable;
 
-    public string Files => PullRequest.ChangedFiles == 1 ? "1 file" : PullRequest.ChangedFiles.ToString("N0") + " files";
+    public string Added => Counts is { } counts ? "+" + counts.Additions.ToString("N0") : string.Empty;
+
+    public string Removed => Counts is { } counts ? "−" + counts.Deletions.ToString("N0") : string.Empty;
+
+    public string Files => Counts switch
+    {
+        { ChangedFiles: 1 } => "1 file",
+        { } counts => counts.ChangedFiles.ToString("N0") + " files",
+        _ => CountsUnavailable ? string.Empty : "…",
+    };
 
     private static string Age(TimeSpan span)
         => span.TotalDays >= 365 ? $"{(int)(span.TotalDays / 365)}y ago"
@@ -252,10 +267,15 @@ public sealed partial class PullRequestPickerViewModel : ObservableObject
 
             var now = _now();
             var known = Items.Select(i => i.PullRequest.Number).ToHashSet();
+            var added = new List<PullRequestRowVm>();
             foreach (var pr in page.Items.Where(pr => known.Add(pr.Number)))
             {
-                Items.Add(new PullRequestRowVm(pr, now));
+                var row = new PullRequestRowVm(pr, now);
+                Items.Add(row);
+                added.Add(row);
             }
+
+            _ = FillCountsAsync(added);
 
             _cursor = page.EndCursor;
             HasMore = page.HasNextPage && page.EndCursor is not null;
@@ -276,6 +296,40 @@ public sealed partial class PullRequestPickerViewModel : ObservableObject
             if (gen == _searchGen)
             {
                 IsLoading = false;
+            }
+        }
+    }
+
+    // The rows are up; their +/- and file counts follow in one request.
+    private async Task FillCountsAsync(IReadOnlyList<PullRequestRowVm> rows)
+    {
+        var missing = rows.Where(r => r.Counts is null).ToList();
+        if (missing.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var counts = await _source.GetCountsAsync(missing.Select(r => r.PullRequest).ToList(), CancellationToken.None);
+            foreach (var row in missing)
+            {
+                if (counts.TryGetValue(row.PullRequest.Number, out var found))
+                {
+                    row.Counts = found;
+                }
+                else
+                {
+                    row.CountsUnavailable = true;
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // Counts are extras; the rows stand without them.
+            foreach (var row in missing)
+            {
+                row.CountsUnavailable = true;
             }
         }
     }

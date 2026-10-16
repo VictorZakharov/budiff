@@ -44,6 +44,8 @@ public sealed partial class MainWindow : Window
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         _viewModel.Analysis.PropertyChanged += OnAnalysisPropertyChanged;
         _viewModel.Analysis.PickPullRequest = PickPullRequestAsync;
+        // "Pull request..." may be next: get the PR source ready meanwhile.
+        PeriodBox.DropDownOpened += (_, _) => _viewModel.Analysis.PullRequests?.Prepare();
         BodyGrid.SizeChanged += (_, _) => ClampDockedDiff();
         TreeArea.SizeChanged += (_, _) => FitColumns();
         BirdsEyePanel.SizeChanged += (_, _) => UpdateToolbarWrap();

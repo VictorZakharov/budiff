@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -28,10 +29,14 @@ public sealed record PullRequestInfo(
     string HeadRefName,
     string BaseRefOid,
     string HeadRefOid,
-    int Additions,
-    int Deletions,
-    int ChangedFiles)
+    int? Additions,
+    int? Deletions,
+    int? ChangedFiles)
 {
+    // Null until fetched: lists come without them (see GetCountsAsync).
+    public PullRequestCounts? Counts
+        => Additions is { } added && Deletions is { } removed && ChangedFiles is { } files ? new(added, removed, files) : null;
+
     // GitHub reports OPEN / MERGED / CLOSED; a draft is an open PR.
     public string StateLabel => State switch
     {
@@ -41,6 +46,9 @@ public sealed record PullRequestInfo(
         _ => State,
     };
 }
+
+// A PR's size as GitHub shows it: lines added / removed, files changed.
+public sealed record PullRequestCounts(int Additions, int Deletions, int ChangedFiles);
 
 public sealed record PullRequestPage(IReadOnlyList<PullRequestInfo> Items, string? EndCursor, bool HasNextPage, int TotalCount)
 {
@@ -75,12 +83,27 @@ public interface IPullRequestSource
     // The folder the list is limited to (repository path), or empty for the
     // whole repository. A scoped page has no total (TotalCount -1).
     string Scope => string.Empty;
+
+    // The +/- line and file counts of listed PRs, by number. GitHub computes
+    // them per PR, which makes a list several times slower - so lists come
+    // without them and the rows on screen ask afterwards.
+    Task<IReadOnlyDictionary<int, PullRequestCounts>> GetCountsAsync(IReadOnlyList<PullRequestInfo> pullRequests, CancellationToken ct)
+        => Task.FromResult<IReadOnlyDictionary<int, PullRequestCounts>>(new Dictionary<int, PullRequestCounts>());
+
+    // A pick may follow soon (the Period list opened): resolve, in the
+    // background, what every search waits for first.
+    void Prepare()
+    {
+    }
 }
 
 public static class PullRequestSearch
 {
+    // What a list row needs - not the counts (PullRequestCountFields).
     internal const string PullRequestFields =
-        "number title state isDraft author { login } updatedAt baseRefName headRefName baseRefOid headRefOid additions deletions changedFiles";
+        "number title state isDraft author { login } updatedAt baseRefName headRefName baseRefOid headRefOid";
+
+    internal const string PullRequestCountFields = "additions deletions changedFiles";
 
     // GitHub search syntax for one picker query, newest activity first.
     public static string BuildQuery(string repo, PullRequestQuery query)
@@ -179,6 +202,28 @@ public static class PullRequestSearch
         return result;
     }
 
+    // data.repository.p{i} { additions deletions changedFiles }, for
+    // numbers[i]; a PR GitHub did not return is left out.
+    public static IReadOnlyDictionary<int, PullRequestCounts> ParseCounts(string json, IReadOnlyList<int> numbers)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var repository = doc.RootElement.GetProperty("data").GetProperty("repository");
+        var result = new Dictionary<int, PullRequestCounts>();
+        for (var i = 0; i < numbers.Count; i++)
+        {
+            if (repository.TryGetProperty("p" + i.ToString(CultureInfo.InvariantCulture), out var pr)
+                && pr.ValueKind == JsonValueKind.Object
+                && IntOrNull(pr, "additions") is { } added
+                && IntOrNull(pr, "deletions") is { } removed
+                && IntOrNull(pr, "changedFiles") is { } files)
+            {
+                result[numbers[i]] = new PullRequestCounts(added, removed, files);
+            }
+        }
+
+        return result;
+    }
+
     // data.repository.p{i}.files { totalCount, nodes [{ path }] }, for
     // numbers[i]; null paths when GitHub listed only some of them.
     public static IReadOnlyDictionary<int, IReadOnlyList<string>?> ParseFiles(string json, IReadOnlyList<int> numbers)
@@ -240,10 +285,13 @@ public static class PullRequestSearch
             String(node, "headRefName"),
             String(node, "baseRefOid"),
             String(node, "headRefOid"),
-            Int(node, "additions"),
-            Int(node, "deletions"),
-            Int(node, "changedFiles"));
+            IntOrNull(node, "additions"),
+            IntOrNull(node, "deletions"),
+            IntOrNull(node, "changedFiles"));
     }
+
+    private static int? IntOrNull(JsonElement node, string name)
+        => node.TryGetProperty(name, out var value) && value.TryGetInt32(out var number) ? number : null;
 
     private static string String(JsonElement node, string name)
         => node.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() ?? string.Empty : string.Empty;
@@ -264,6 +312,8 @@ public sealed class GitHubCliPullRequestSource : IPullRequestSource, IPullReques
 
     private readonly string _root;
     private readonly ScopedPullRequestSearch? _scoped;
+    private readonly object _repoGate = new();
+    private readonly ConcurrentDictionary<(int Number, string Head), PullRequestCounts> _counts = new();
     private string? _repo;
     private string? _defaultBranch;
     private string? _historyRef;
@@ -278,6 +328,62 @@ public sealed class GitHubCliPullRequestSource : IPullRequestSource, IPullReques
     }
 
     public string Scope => _scoped?.Scope ?? string.Empty;
+
+    public void Prepare()
+        => _ = Task.Run(() =>
+        {
+            try
+            {
+                Repo(CancellationToken.None);
+            }
+            catch (Exception)
+            {
+                // The search that follows reports it.
+            }
+        });
+
+    // One GraphQL request for the rows: an alias per PR. Kept per head
+    // commit - a PR's counts change only when its head moves.
+    public Task<IReadOnlyDictionary<int, PullRequestCounts>> GetCountsAsync(IReadOnlyList<PullRequestInfo> pullRequests, CancellationToken ct)
+        => Task.Run<IReadOnlyDictionary<int, PullRequestCounts>>(() =>
+        {
+            var result = new Dictionary<int, PullRequestCounts>();
+            var missing = new List<PullRequestInfo>();
+            foreach (var pr in pullRequests)
+            {
+                if (_counts.TryGetValue((pr.Number, pr.HeadRefOid), out var known))
+                {
+                    result[pr.Number] = known;
+                }
+                else
+                {
+                    missing.Add(pr);
+                }
+            }
+
+            if (missing.Count > 0)
+            {
+                var body = new StringBuilder();
+                for (var i = 0; i < missing.Count; i++)
+                {
+                    body.Append('p').Append(i.ToString(CultureInfo.InvariantCulture))
+                        .Append(":pullRequest(number:").Append(missing[i].Number.ToString(CultureInfo.InvariantCulture))
+                        .Append("){").Append(PullRequestSearch.PullRequestCountFields).Append("} ");
+                }
+
+                var numbers = missing.Select(pr => pr.Number).ToList();
+                var found = PullRequestSearch.ParseCounts(RepositoryQuery(ct, body.ToString()), numbers);
+                foreach (var pr in missing)
+                {
+                    if (found.TryGetValue(pr.Number, out var counts))
+                    {
+                        result[pr.Number] = _counts[(pr.Number, pr.HeadRefOid)] = counts;
+                    }
+                }
+            }
+
+            return result;
+        }, ct);
 
     public Task<PullRequestPage> SearchAsync(PullRequestQuery query, string? after, int pageSize, CancellationToken ct)
         => Task.Run(() =>
@@ -411,18 +517,22 @@ public sealed class GitHubCliPullRequestSource : IPullRequestSource, IPullReques
     public Task<PullRequestRange> ResolveAsync(PullRequestInfo pullRequest, CancellationToken ct)
         => Task.Run(() => PullRequestRanges.Resolve(_root, pullRequest, () => Repo(ct), FetchTimeoutMs, ct), ct);
 
-    // owner/name and its default branch, in one call.
+    // owner/name and its default branch, in one call (once - a search
+    // arriving while Prepare is resolving it waits for that answer).
     private string Repo(CancellationToken ct)
     {
-        if (_repo is null)
+        lock (_repoGate)
         {
-            var line = Gh(ct, "repo", "view", "--json", "nameWithOwner,defaultBranchRef", "-q", ".nameWithOwner + \" \" + .defaultBranchRef.name").Trim();
-            var space = line.IndexOf(' ');
-            _defaultBranch = space > 0 ? line[(space + 1)..].Trim() : null;
-            _repo = space > 0 ? line[..space] : line;
-        }
+            if (_repo is null)
+            {
+                var line = Gh(ct, "repo", "view", "--json", "nameWithOwner,defaultBranchRef", "-q", ".nameWithOwner + \" \" + .defaultBranchRef.name").Trim();
+                var space = line.IndexOf(' ');
+                _defaultBranch = space > 0 ? line[(space + 1)..].Trim() : null;
+                _repo = space > 0 ? line[..space] : line;
+            }
 
-        return _repo;
+            return _repo;
+        }
     }
 
     private static (string Owner, string Name) Split(string repo)
