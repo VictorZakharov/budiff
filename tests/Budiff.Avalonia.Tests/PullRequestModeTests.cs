@@ -318,12 +318,14 @@ public sealed class PullRequestModeTests
         box.IsDropDownOpen = false;
         Assert.Empty(elsewhere.Queries);
 
+        // The picker's list, and the recent PRs typing filters (see
+        // Picker_Typing_FindsRecentPullRequests).
         var github = new FakePullRequestSource(new[] { Pr(1, "victor") }) { CanSearchAhead = true };
         vm.Analysis.PullRequests = github;
         box.IsDropDownOpen = true;
         UiSnapshot.Pump();
         box.IsDropDownOpen = false;
-        Assert.Equal(PullRequestPickerViewModel.DefaultQuery, Assert.Single(github.Queries));
+        Assert.Equal(new[] { PullRequestPickerViewModel.DefaultQuery, new PullRequestQuery(null, PullRequestStateFilter.All, string.Empty) }, github.Queries);
         window.Close();
     }
 
@@ -342,7 +344,7 @@ public sealed class PullRequestModeTests
         await opening;
 
         Assert.Equal(new[] { 1, 2 }, vm.Items.Select(r => r.PullRequest.Number));
-        Assert.Single(source.Queries);
+        Assert.Equal(2, source.Queries.Count);
     }
 
     // Opening again shows the last list at once while it asks again; the
@@ -386,6 +388,120 @@ public sealed class PullRequestModeTests
         await opening;
         Assert.Equal(new[] { 0, 1, 2 }, changed.Items.Select(r => r.PullRequest.Number));
         Assert.Equal(2, changed.SelectedItem!.PullRequest.Number);
+    }
+
+    // Typing narrows the PRs already seen at once, before GitHub is asked;
+    // its answer (it matches more than titles) then fills in, keeping the
+    // rows already there and the selection.
+    [Fact]
+    public async Task Picker_Typing_NarrowsTheSeenPullRequestsAtOnce_ThenGitHubsAnswer()
+    {
+        var source = new FakePullRequestSource(new[] { Pr(1, "victor"), Pr(2, "victor"), Pr(3, "victor"), Pr(4, "victor") });
+        var vm = new PullRequestPickerViewModel(source);
+        await vm.InitializeAsync();
+        var gate = new TaskCompletionSource();
+        source.SearchGate = gate.Task;
+
+        vm.SearchText = "LOWERCASE drive";
+        Assert.Equal(new[] { 3 }, vm.Items.Select(r => r.PullRequest.Number));
+        Assert.Same(vm.Items[0], vm.SelectedItem);
+        Assert.True(vm.IsLoading);
+        Assert.Equal("Searching...", vm.StatusText);
+        Assert.Single(source.Queries);
+        var shown = vm.Items[0];
+
+        source.Replace(new[] { Pr(1, "victor"), Pr(2, "victor"), Pr(3, "victor"), Pr(6, "victor") });
+        vm.SearchText = "lowercase";
+        var searching = vm.SearchNowAsync();
+        Assert.Equal(new[] { 3 }, vm.Items.Select(r => r.PullRequest.Number));
+        gate.SetResult();
+        await searching;
+        Assert.Equal(new[] { 3, 6 }, vm.Items.Select(r => r.PullRequest.Number));
+        Assert.Same(shown, vm.Items[0]);
+        Assert.Same(shown, vm.SelectedItem);
+        Assert.False(vm.IsLoading);
+
+        // A number: the seen PR at once.
+        source.SearchGate = new TaskCompletionSource().Task;
+        vm.SearchText = "#2";
+        Assert.Equal(new[] { 2 }, vm.Items.Select(r => r.PullRequest.Number));
+    }
+
+    // For a GitHub repository listed whole, typing also finds the recent PRs
+    // no list showed: the picker fetched them in the background.
+    [Fact]
+    public async Task Picker_Typing_FindsRecentPullRequests()
+    {
+        var source = new FakePullRequestSource(new[] { Pr(1, "victor"), Pr(2, "victor"), Pr(4, "ada"), Pr(5, "grace") }) { CanSearchAhead = true };
+        var vm = new PullRequestPickerViewModel(source);
+        await vm.InitializeAsync();
+        Assert.Equal(new[] { 1, 2 }, vm.Items.Select(r => r.PullRequest.Number));
+        Assert.Equal(2, source.Queries.Count);
+        source.SearchGate = new TaskCompletionSource().Task;
+
+        vm.AuthorText = "anyone";
+        Assert.Equal(new[] { 1, 2, 4, 5 }, vm.Items.Select(r => r.PullRequest.Number));
+        vm.SearchText = "change 4";
+        Assert.Equal(new[] { 4 }, vm.Items.Select(r => r.PullRequest.Number));
+
+        // Once per source, for a while.
+        await new PullRequestPickerViewModel(source).InitializeAsync();
+        Assert.Single(source.Queries, q => q.Author is null && q.Text.Length == 0);
+    }
+
+    // What a local filter cannot answer - search qualifiers, an author not
+    // known yet - waits for GitHub, as before.
+    [Fact]
+    public async Task Picker_Typing_LeavesQualifiersAndUnknownAuthorsToGitHub()
+    {
+        var source = new FakePullRequestSource(new[] { Pr(1, "victor"), Pr(2, "victor") });
+        var vm = new PullRequestPickerViewModel(source);
+        await vm.InitializeAsync();
+        var gate = new TaskCompletionSource();
+        source.SearchGate = gate.Task;
+
+        vm.SearchText = "label:bug";
+        Assert.Equal(new[] { 1, 2 }, vm.Items.Select(r => r.PullRequest.Number));
+        var searching = vm.SearchNowAsync();
+        Assert.Empty(vm.Items);
+        Assert.Equal("Searching...", vm.StatusText);
+        gate.SetResult();
+        await searching;
+
+        vm.SearchText = string.Empty;
+        await vm.SearchNowAsync();
+        vm.AuthorText = "vic";
+        Assert.Equal(new[] { 1, 2 }, vm.Items.Select(r => r.PullRequest.Number));
+        vm.AuthorText = "anyone";
+        Assert.Equal(new[] { 1, 2 }, vm.Items.Select(r => r.PullRequest.Number));
+        Assert.True(vm.IsLoading);
+    }
+
+    // A later query stops the search still out for an earlier one (its gh
+    // is killed), and the earlier answer never shows.
+    [Fact]
+    public async Task Picker_LaterQuery_StopsTheEarlierSearch()
+    {
+        var source = new FakePullRequestSource(new[] { Pr(1, "victor"), Pr(3, "victor") });
+        var vm = new PullRequestPickerViewModel(source);
+        await vm.InitializeAsync();
+        var gate = new TaskCompletionSource();
+        source.SearchGate = gate.Task;
+
+        vm.SearchText = "change";
+        var first = vm.SearchNowAsync();
+        vm.SearchText = "lowercase";
+        var second = vm.SearchNowAsync();
+        Assert.True(source.Tokens[^2].IsCancellationRequested);
+        Assert.False(source.Tokens[^1].IsCancellationRequested);
+
+        gate.SetResult();
+        await Task.WhenAll(first, second);
+        Assert.Equal(new[] { 3 }, vm.Items.Select(r => r.PullRequest.Number));
+        Assert.Null(vm.ErrorText);
+
+        vm.StopSearching();
+        Assert.True(source.Tokens[^1].IsCancellationRequested);
     }
 
     // The real window: picking "Pull request..." again (it is already the
@@ -509,6 +625,9 @@ public sealed class PullRequestModeTests
 
         public List<PullRequestQuery> Queries { get; } = new();
 
+        // The token each search came with.
+        public List<CancellationToken> Tokens { get; } = new();
+
         public string? Failure { get; init; }
 
         public string? Root { get; init; }
@@ -516,6 +635,7 @@ public sealed class PullRequestModeTests
         public Task<PullRequestPage> SearchAsync(PullRequestQuery query, string? after, int pageSize, CancellationToken ct)
         {
             Queries.Add(query);
+            Tokens.Add(ct);
             return SearchGate is { } gate ? AfterAsync(gate, () => Answer(query, after, pageSize)) : Answer(query, after, pageSize);
         }
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -127,6 +128,23 @@ public sealed class ScopedPullRequestTests
     [InlineData("C:/src/engine", null)]
     public void GitHubRemote_ParsesGitHubUrls(string url, string? repo)
         => Assert.Equal(repo, GitHubRemote.ParseUrl(url));
+
+    // A cancelled run stops the tool rather than waiting it out - a search
+    // superseded by the next keystroke, say.
+    [Fact]
+    public async Task ToolProcess_Cancelled_StopsTheTool()
+    {
+        var (tool, args) = OperatingSystem.IsWindows()
+            ? ("powershell", new[] { "-NoProfile", "-Command", "Start-Sleep 30" })
+            : ("sleep", new[] { "30" });
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+        var clock = Stopwatch.StartNew();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Task.Run(
+            () => ToolProcess.TryRun(tool, Environment.CurrentDirectory, 60_000, cts.Token, args, out _, out _),
+            CancellationToken.None));
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(10), $"took {clock.Elapsed}");
+    }
 
     [Fact]
     public void GitHubRemote_FollowsGh()

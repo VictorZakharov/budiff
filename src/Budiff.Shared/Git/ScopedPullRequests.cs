@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -54,10 +55,13 @@ public sealed class ScopedPullRequestSearch
     private readonly string _root;
     private readonly string _prefix;
     private readonly IPullRequestApi _api;
-    private readonly Dictionary<string, IReadOnlyList<PullRequestInfo>> _pullsOfCommit = new(StringComparer.Ordinal);
-    private readonly Dictionary<(int Number, string Head), bool> _touches = new();
-    private string? _canonicalPrefix;
-    private (string Tip, IReadOnlyList<string> Commits)? _history;
+
+    // Searches may overlap (one superseded while it finishes, a search
+    // ahead), so what they learn is kept in thread-safe places.
+    private readonly ConcurrentDictionary<string, IReadOnlyList<PullRequestInfo>> _pullsOfCommit = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<(int Number, string Head), bool> _touches = new();
+    private volatile string? _canonicalPrefix;
+    private volatile FolderHistory? _history;
 
     // root: anywhere in the repository; scopePrefix: the folder, from the
     // repository root ('/'-separated, any letter case).
@@ -247,9 +251,11 @@ public sealed class ScopedPullRequestSearch
         var commits = GitCli.TryRun(repo.Info.WorkingDirectory, out var log, ct, "log", "--first-parent", "--format=%H", tip.Sha, "--", CanonicalPrefix(repo))
             ? log.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             : Array.Empty<string>();
-        _history = (tip.Sha, commits);
+        _history = new FolderHistory(tip.Sha, commits);
         return commits;
     }
+
+    private sealed record FolderHistory(string Tip, IReadOnlyList<string> Commits);
 
     private IReadOnlyDictionary<string, IReadOnlyList<PullRequestInfo>> PullRequestsOf(IReadOnlyList<string> commits, CancellationToken ct)
     {

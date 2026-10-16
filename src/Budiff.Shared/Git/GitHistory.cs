@@ -499,6 +499,20 @@ internal static class ToolProcess
             // would also keep the timeout below from ever firing).
             var stdoutTask = proc.StandardOutput.ReadToEndAsync();
             var stderrTask = proc.StandardError.ReadToEndAsync();
+
+            // Cancelled: nobody wants the answer - stop the tool now rather
+            // than wait it out (a superseded search's gh, say).
+            using var cancel = ct.Register(() =>
+            {
+                try
+                {
+                    proc.Kill(entireProcessTree: true);
+                }
+                catch
+                {
+                    // It may have just exited.
+                }
+            });
             if (!proc.WaitForExit(timeoutMs))
             {
                 try
