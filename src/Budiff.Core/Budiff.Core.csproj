@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <Description>Pure diff engine and binary/size policy for budiff.</Description>
-    <PackageTags>$(PackageTags);diff-engine;native-aot</PackageTags>
+    <!-- Not published: budiff ships as one NuGet package, the tool. -->
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
 </Project>

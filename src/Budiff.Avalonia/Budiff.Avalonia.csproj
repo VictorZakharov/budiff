@@ -2,7 +2,8 @@
   <PropertyGroup>
     <Description>Avalonia side-by-side diff control for budiff.</Description>
     <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
-    <PackageTags>$(PackageTags);diff-control;ui</PackageTags>
+    <!-- Not published: budiff ships as one NuGet package, the tool. -->
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>

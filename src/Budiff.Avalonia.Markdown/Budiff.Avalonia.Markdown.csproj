@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <Description>Markdown preview (formatted, with changes marked) for Budiff.Avalonia.</Description>
-    <PackageTags>$(PackageTags);markdown;preview</PackageTags>
+    <!-- Not published: budiff ships as one NuGet package, the tool. -->
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>

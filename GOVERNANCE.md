@@ -1,6 +1,6 @@
 # Governance
 
-budiff's NuGet packages are published under the **WellScoped** identity: the WellScoped NuGet.org organization owns them. The source lives in this repository.
+budiff's NuGet package is published under the **WellScoped** identity: the WellScoped NuGet.org organization owns it. The source lives in this repository.
 
 ## Maintainers
 

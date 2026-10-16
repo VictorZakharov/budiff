@@ -1,10 +1,10 @@
 # Releasing budiff
 
-A release publishes the `budiff` tool, the libraries `Budiff.Core`, `Budiff.Avalonia`, `Budiff.Avalonia.TextMate`, and `Budiff.Avalonia.Markdown`, and a GitHub release with self-contained CLI archives for Windows (with the GUI), Linux, and macOS.
+A release publishes one NuGet package, the `budiff` tool (the CLI, with the desktop GUI for Windows inside), and a GitHub release with self-contained CLI archives for Windows (with the GUI), Linux, and macOS.
 
-The tool is several NuGet packages (.NET 10 [RID-specific tools](https://learn.microsoft.com/dotnet/core/tools/rid-specific-tools)): a small top package, `budiff`, that names one package per platform - `budiff.win-x64` and `budiff.win-arm64` (with the GUI), `budiff.linux-x64`, `budiff.linux-arm64`, `budiff.linux-musl-x64`, `budiff.linux-musl-arm64`, `budiff.osx-x64`, `budiff.osx-arm64` - and `budiff.any` for any other platform. `dotnet tool install` downloads the top package and the one for the machine. The list lives in `src/Budiff.Cli/Budiff.Cli.csproj`; one `dotnet pack` makes them all.
+The libraries (`Budiff.Core`, `Budiff.Avalonia`, `Budiff.Avalonia.TextMate`, `Budiff.Avalonia.Markdown`) are not published: their projects are not packable, and the release stops if the pack makes any package besides `budiff`. (0.1.0 also published them and one tool package per platform; those are unlisted.)
 
-Everything runs in [`.github/workflows/release.yml`](../.github/workflows/release.yml). The packages are published under the **WellScoped** NuGet.org organization through [trusted publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing): GitHub exchanges a short-lived token for the push, so no NuGet API key is stored anywhere.
+Everything runs in [`.github/workflows/release.yml`](../.github/workflows/release.yml). The package is published under the **WellScoped** NuGet.org organization through [trusted publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing): GitHub exchanges a short-lived token for the push, so no NuGet API key is stored anywhere.
 
 ## One-time setup
 
@@ -31,9 +31,9 @@ Everything runs in [`.github/workflows/release.yml`](../.github/workflows/releas
    ```
 
    A version with a suffix (`v0.2.0-preview.1`) is published as a prerelease.
-3. The **Build release packages** job packs everything, checks the package contents (every platform package the top one names), installs the packed tool (the runner gets `budiff.win-x64`, GUI included) and runs `budiff --version`, and builds the CLI archives. Pull requests that touch packaging run this job too.
-4. The **Publish to NuGet.org and GitHub** job waits for approval in the `nuget.org` environment. Approve it from the workflow run; it pushes the packages (with symbols), the top `budiff` package last so it never names a platform package NuGet.org does not have yet, and creates the GitHub release with generated notes and the archives.
-5. Once NuGet.org has indexed the packages (a few minutes), check from a clean location:
+3. The **Build release packages** job packs the tool, checks its contents (the GUI included), installs it and runs `budiff --version`, and builds the CLI archives. Pull requests that touch packaging run this job too.
+4. The **Publish to NuGet.org and GitHub** job waits for approval in the `nuget.org` environment. Approve it from the workflow run; it pushes the package (with symbols) and creates the GitHub release with generated notes and the archives.
+5. Once NuGet.org has indexed the package (a few minutes), check from a clean location:
 
    ```sh
    dotnet tool install -g budiff --version 0.1.0
