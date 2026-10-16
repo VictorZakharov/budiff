@@ -4,7 +4,7 @@
 
 budiff is a folder-scoped, read-only diff viewer. The CLI opens with a Code Analysis bird's-eye - folders or projects, line/code/blank/comment counts, file counts, period churn, commits, and authors - and prints a syntax-highlighted side-by-side diff when you drill into a file. `budiff -i` opens the desktop GUI (Windows) on the same folder.
 
-![budiff GUI diff drill-in](https://raw.githubusercontent.com/wellscoped/budiff/main/docs/gui-diff.png)
+![budiff GUI diff drill-in](https://raw.githubusercontent.com/VictorZakharov/budiff/main/docs/gui-diff.png)
 
 ## Install the tool
 
@@ -35,6 +35,6 @@ The diff engine and the Avalonia side-by-side control ship as libraries:
 
 ## More
 
-Documentation, screenshots, and issues: <https://github.com/wellscoped/budiff>.
+Documentation, screenshots, and issues: <https://github.com/VictorZakharov/budiff>.
 
 MIT licensed. The `budiff` tool package includes third-party components under their own licenses - see `THIRD-PARTY-NOTICES.md` in the package.

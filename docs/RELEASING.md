@@ -6,14 +6,13 @@ Everything runs in [`.github/workflows/release.yml`](../.github/workflows/releas
 
 ## One-time setup
 
-1. **GitHub:** the repository lives at `wellscoped/budiff`.
-2. **GitHub environment:** Settings -> Environments -> `nuget.org`:
+1. **GitHub environment:** Settings -> Environments -> `nuget.org`:
    - deployment branches and tags: tags matching `v*` only;
    - required reviewer: the lead maintainer (self-review allowed);
    - variable `NUGET_USER` = the NuGet.org user name that owns the trusted-publishing policy below (`VictorZakharov`) - not an email address and not the organization name.
-3. **NuGet.org:** signed in as that user, **Trusted Publishing** -> add a GitHub Actions policy:
+2. **NuGet.org:** signed in as that user, **Trusted Publishing** -> add a GitHub Actions policy:
    - policy owner: `WellScoped` (so new package IDs are created under the organization);
-   - repository owner `wellscoped`, repository `budiff`;
+   - repository owner `VictorZakharov`, repository `budiff`;
    - workflow file `release.yml`;
    - environment `nuget.org`.
 

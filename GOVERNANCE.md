@@ -1,6 +1,6 @@
 # Governance
 
-budiff is published under the **WellScoped** identity: the repository lives at [`github.com/wellscoped/budiff`](https://github.com/wellscoped/budiff), and the NuGet packages are owned by the WellScoped NuGet.org organization.
+budiff's NuGet packages are published under the **WellScoped** identity: the WellScoped NuGet.org organization owns them. The source lives in this repository.
 
 ## Maintainers
 
