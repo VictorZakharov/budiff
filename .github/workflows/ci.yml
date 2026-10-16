@@ -3,9 +3,11 @@ name: CI
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
     branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
   # Pull requests keep a linear history: rebased onto main, never merged into
@@ -16,7 +18,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -32,22 +34,20 @@ jobs:
             exit 1
           fi
 
-  # The release publishes linux-x64 / osx-arm64 self-contained CLIs, so build
-  # and test on Linux too. Keep the Integration filter: the runner ships Node,
-  # which defeats those tests' toolchain self-skip. The tag/pack/release steps
-  # stay in the Windows job - the packaged GUI is a win-x64 NativeAOT publish
-  # that cannot cross-compile.
+  # Packaging and publishing live in release.yml. The Integration filter
+  # stays on Linux too: the runner ships Node, which defeats those tests'
+  # toolchain self-skip.
   build-test-linux:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.x
 
@@ -65,12 +65,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.x
 
@@ -82,67 +82,3 @@ jobs:
 
       - name: Test
         run: dotnet test Budiff.slnx -c Release --no-build --filter "Category!=Integration"
-
-      - name: Set package version
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
-        run: |
-          $version = $env:GITHUB_REF_NAME -replace '^v', ''
-          "PACKAGE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
-
-      - name: Pack
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
-        run: dotnet pack Budiff.slnx -c Release --no-build -o artifacts/packages /p:Version=$env:PACKAGE_VERSION
-
-      - name: Publish self-contained CLI
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
-        run: |
-          $version = $env:PACKAGE_VERSION
-          $rids = @("win-x64", "linux-x64", "osx-arm64")
-          foreach ($rid in $rids) {
-            $out = "artifacts/cli/$rid"
-            dotnet publish src/Budiff.Cli/Budiff.Cli.csproj -c Release -r $rid --self-contained true -o $out /p:Version=$version /p:PublishSingleFile=true /p:DebugType=embedded
-            if ($rid -eq "win-x64") {
-              Compress-Archive -Path "$out/*" -DestinationPath "artifacts/budiff-$rid.zip" -Force
-            } else {
-              tar -czf "artifacts/budiff-$rid.tar.gz" -C $out .
-            }
-          }
-
-      - name: Upload artifacts
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@v4
-        with:
-          name: budiff-release-artifacts
-          path: |
-            artifacts/packages/**
-            artifacts/budiff-*.zip
-            artifacts/budiff-*.tar.gz
-
-      - name: Push NuGet packages
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-        shell: pwsh
-        run: |
-          if (-not [string]::IsNullOrWhiteSpace($env:NUGET_API_KEY)) {
-            # The top `budiff` package last: it names the per-platform ones
-            # (budiff.<rid>), so it must not go live before them.
-            $top = "budiff.$env:PACKAGE_VERSION.nupkg"
-            foreach ($package in Get-ChildItem artifacts/packages/*.nupkg | Where-Object Name -ne $top) {
-              dotnet nuget push $package.FullName --skip-duplicate --api-key $env:NUGET_API_KEY --source https://api.nuget.org/v3/index.json
-              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            }
-            dotnet nuget push "artifacts/packages/$top" --skip-duplicate --api-key $env:NUGET_API_KEY --source https://api.nuget.org/v3/index.json
-          }
-
-      - name: Attach release artifacts
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            artifacts/packages/**
-            artifacts/budiff-*.zip
-            artifacts/budiff-*.tar.gz
