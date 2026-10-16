@@ -216,10 +216,8 @@ public static class GitHistory
     }
 
     // Blame of the file as it exists in the WORKING TREE (rev = null) or at a
-    // revision - used for the diff's NEW side when the base has nothing to
-    // blame (empty-tree base / file absent there). LibGit2Sharp cannot blame
-    // the working tree, so this shells out to `git blame --porcelain`, which
-    // also marks uncommitted lines (all-zero sha). Indexed by 0-based line.
+    // revision, from `git blame --porcelain`, which marks uncommitted lines
+    // with an all-zero sha. Indexed by 0-based line. path is relative to root.
     public static IReadOnlyList<BlameLineInfo?> BlameFile(string root, string path, string? rev)
     {
         var args = new List<string> { "-c", "core.quotePath=false", "blame", "--porcelain" };
@@ -306,6 +304,11 @@ public static class GitHistory
             {
                 meta[sha] = current with { When = DateTimeOffset.FromUnixTimeSeconds(time) };
             }
+            else if (line.StartsWith("author-tz ", StringComparison.Ordinal) && TryParseZone(line[10..], out var zone))
+            {
+                // After author-time: the same moment, in the author's zone.
+                meta[sha] = current with { When = current.When.ToOffset(zone) };
+            }
             else if (line.StartsWith("summary ", StringComparison.Ordinal))
             {
                 meta[sha] = current with { Summary = line[8..] };
@@ -313,6 +316,20 @@ public static class GitHistory
         }
 
         return lines;
+    }
+
+    // "+0200" / "-0530".
+    private static bool TryParseZone(string text, out TimeSpan zone)
+    {
+        zone = default;
+        if (text.Length != 5 || (text[0] != '+' && text[0] != '-')
+            || !int.TryParse(text.AsSpan(1, 2), out var hours) || !int.TryParse(text.AsSpan(3, 2), out var minutes))
+        {
+            return false;
+        }
+
+        zone = new TimeSpan(hours, minutes, 0) * (text[0] == '-' ? -1 : 1);
+        return true;
     }
 
     private static bool IsAllZeros(string sha)
@@ -452,6 +469,15 @@ internal static class GitCli
 
     public static bool TryRun(string workingDir, out string stdout, CancellationToken ct, params string[] args)
         => ToolProcess.TryRun("git", workingDir, TimeoutMs, ct, args, out stdout, out _);
+
+    // For commands whose exit code means something (symbolic-ref: 1 =
+    // detached HEAD, 128 = not a repository).
+    public static int Run(string workingDir, out string stdout, out string stderr, params string[] args)
+        => ToolProcess.Run("git", workingDir, TimeoutMs, CancellationToken.None, args, out stdout, out stderr);
+
+    // Just the exit code (diff --quiet: 0 = same, 1 = differs).
+    public static int ExitCode(string workingDir, CancellationToken ct, params string[] args)
+        => ToolProcess.Run("git", workingDir, TimeoutMs, ct, args, out _, out _);
 }
 
 // One hardened child-process runner for the external tools budiff shells out
@@ -461,6 +487,25 @@ internal static class GitCli
 internal static class ToolProcess
 {
     public static bool TryRun(
+        string fileName,
+        string workingDir,
+        int timeoutMs,
+        CancellationToken ct,
+        IReadOnlyList<string> args,
+        out string stdout,
+        out string stderr)
+    {
+        var ok = Run(fileName, workingDir, timeoutMs, ct, args, out stdout, out stderr) == 0;
+        if (!ok)
+        {
+            stdout = string.Empty;
+        }
+
+        return ok;
+    }
+
+    // The tool's exit code, or -1 when it could not start or timed out.
+    public static int Run(
         string fileName,
         string workingDir,
         int timeoutMs,
@@ -486,12 +531,16 @@ internal static class ToolProcess
             psi.ArgumentList.Add(arg);
         }
 
+        // A viewer skips git's optional locks (status refreshing the index),
+        // so it never holds index.lock while the user runs git.
+        psi.Environment["GIT_OPTIONAL_LOCKS"] = "0";
+
         try
         {
             using var proc = Process.Start(psi);
             if (proc is null)
             {
-                return false;
+                return -1;
             }
 
             // Drain BOTH pipes off-thread: reading stdout inline would block
@@ -525,19 +574,13 @@ internal static class ToolProcess
                 }
 
                 stderr = $"{fileName} timed out after {timeoutMs / 1000}s.";
-                return false;
+                return -1;
             }
 
-            var output = stdoutTask.GetAwaiter().GetResult();
+            stdout = stdoutTask.GetAwaiter().GetResult();
             stderr = stderrTask.GetAwaiter().GetResult();
             ct.ThrowIfCancellationRequested();
-            if (proc.ExitCode != 0)
-            {
-                return false;
-            }
-
-            stdout = output;
-            return true;
+            return proc.ExitCode;
         }
         catch (OperationCanceledException)
         {
@@ -546,12 +589,12 @@ internal static class ToolProcess
         catch (Win32Exception)
         {
             stderr = $"'{fileName}' was not found on PATH.";
-            return false;
+            return -1;
         }
         catch (Exception ex)
         {
             stderr = ex.Message;
-            return false;
+            return -1;
         }
     }
 }

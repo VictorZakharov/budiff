@@ -172,6 +172,130 @@ public sealed class GitRepositoryReaderTests
         Assert.Equal(GitFileState.Renamed, file.State);
     }
 
+    // A rename staged in the working tree keeps its old path, so the diff
+    // compares the file with its old self rather than showing it all added.
+    [Fact]
+    public void ListChanges_WorkingTreeRename_ComparesWithTheOldPath()
+    {
+        using var repo = TempRepo.Create();
+        repo.Write("old.txt", "one\ntwo\nthree\nfour\n");
+        repo.Commit("initial", "Alice");
+        File.Move(Path.Combine(repo.Root, "old.txt"), Path.Combine(repo.Root, "new.txt"));
+        repo.Stage("old.txt", "new.txt");
+
+        var scope = GitRepositoryReader.Open(repo.Root, gitRoot: true);
+        var file = Assert.Single(GitRepositoryReader.ListChanges(scope, DiffTarget.WorkingTree).Files);
+        Assert.Equal(("new.txt", "old.txt", GitFileState.Renamed), (file.Path, file.OldPath, file.State));
+        Assert.Equal(0, file.Churn.Total);
+    }
+
+    // Binary is told from the start of a file, also past the inline-diff
+    // limit (only that start is read).
+    [Fact]
+    public void ListChanges_SpotsBinaryFilesBeyondTheInlineLimit()
+    {
+        using var repo = TempRepo.Create();
+        var bytes = new byte[(int)DiffLoader.MaxInlineDiffBytes + 4096];
+        bytes[10] = 0;
+        Array.Fill(bytes, (byte)'x', 11, bytes.Length - 11);
+        File.WriteAllBytes(Path.Combine(repo.Root, "blob.bin"), bytes);
+        var first = repo.Commit("initial", "Alice");
+        bytes[^1] = (byte)'y';
+        File.WriteAllBytes(Path.Combine(repo.Root, "blob.bin"), bytes);
+        var second = repo.Commit("change", "Alice");
+
+        var scope = GitRepositoryReader.Open(repo.Root, gitRoot: true);
+        var file = Assert.Single(GitRepositoryReader.ListChanges(scope, new DiffTarget(first, second, HeadIsWorkingTree: false)).Files);
+        Assert.True(file.IsBinary);
+        Assert.Contains("Binary", GitRepositoryReader.LoadDiff(scope, file, new DiffTarget(first, second, HeadIsWorkingTree: false)).Placeholder, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Branches for the pickers: local first (the current one marked), then
+    // remote ones, never the symbolic origin/HEAD; then recent commits.
+    [Fact]
+    public void ReferenceOptions_ListBranchesThenRecentCommits()
+    {
+        using var repo = TempRepo.Create();
+        repo.Write("a.txt", "a\n");
+        var tip = repo.Commit("First commit", "Alice");
+        repo.Repo.CreateBranch("zeta");
+        repo.Repo.Refs.Add("refs/remotes/origin/main", tip);
+        repo.Repo.Refs.Add("refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+        var current = repo.Repo.Head.FriendlyName;
+
+        var branches = GitRepositoryReader.GetBranchOptions(repo.Root);
+        Assert.Equal(new[] { "HEAD", current, "zeta", "origin/main" }, branches.Select(o => o.Id));
+        Assert.Equal(current + " (current)", branches[1].Display);
+
+        var all = GitRepositoryReader.GetReferenceOptions(repo.Root);
+        Assert.Equal("WORKTREE", all[0].Id);
+        Assert.Equal($"{tip[..7]} First commit", all[^1].Display);
+        Assert.Equal(current, GitRepositoryReader.Open(repo.Root, gitRoot: true).Branch);
+    }
+
+    // When git cannot read the folder, Open says why in git's own words.
+    [Fact]
+    public void Open_PassesOnGitsReason()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "budiff-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, ".git"));
+        try
+        {
+            var error = Assert.Throws<InvalidOperationException>(() => GitRepositoryReader.Open(root, gitRoot: true));
+            Assert.Contains("not a git repository", error.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ParseStatus_ReadsPorcelainV2()
+    {
+        var output = string.Join('\0',
+            "1 .M N... 100644 100644 100644 aaa bbb src/a b.cs",
+            "1 A. N... 000000 100644 100644 000 ccc added.cs",
+            "1 .A N... 000000 000000 100644 000 000 intent.cs",
+            "1 D. N... 100644 000000 000000 ddd 000 gone.cs",
+            "2 R. N... 100644 100644 100644 eee eee R100 moved.cs",
+            "was.cs",
+            "u UU N... 100644 100644 100644 100644 f1 f2 f3 both.cs",
+            "1 .M S.M. 160000 160000 160000 g1 g2 vendor/lib",
+            "? new file.txt",
+            "");
+
+        Assert.Equal(
+            new (GitFileState, string, string?)[]
+            {
+                (GitFileState.Modified, "src/a b.cs", null),
+                (GitFileState.Added, "added.cs", null),
+                (GitFileState.Added, "intent.cs", null),
+                (GitFileState.Deleted, "gone.cs", null),
+                (GitFileState.Renamed, "moved.cs", "was.cs"),
+                (GitFileState.Conflicted, "both.cs", null),
+                (GitFileState.Untracked, "new file.txt", null),
+            },
+            GitRepositoryReader.ParseStatus(output));
+    }
+
+    [Fact]
+    public void ParseNameStatus_ReadsRenamesAndCopies()
+    {
+        var output = string.Join('\0', "M", "a.cs", "R087", "old.cs", "new.cs", "C100", "src.cs", "copy.cs", "D", "gone.cs", "A", "added.cs", "");
+
+        Assert.Equal(
+            new (GitFileState, string, string?)[]
+            {
+                (GitFileState.Modified, "a.cs", null),
+                (GitFileState.Renamed, "new.cs", "old.cs"),
+                (GitFileState.Added, "copy.cs", null),
+                (GitFileState.Deleted, "gone.cs", null),
+                (GitFileState.Added, "added.cs", null),
+            },
+            GitRepositoryReader.ParseNameStatus(output));
+    }
+
     private static ChangedFile LoadTrackedChange(TempRepo repo)
     {
         var scope = GitRepositoryReader.Open(repo.Root, gitRoot: true);
@@ -209,6 +333,8 @@ public sealed class GitRepositoryReaderTests
 
         public string Root { get; }
 
+        public Repository Repo => _repo;
+
         public static TempRepo Create()
         {
             var root = Path.Combine(Path.GetTempPath(), "budiff-tests", Guid.NewGuid().ToString("N"));
@@ -238,6 +364,8 @@ public sealed class GitRepositoryReaderTests
             var sig = new Signature(author, author.ToLowerInvariant() + "@example.test", DateTimeOffset.UtcNow);
             return _repo.Commit(message, sig, sig).Sha;
         }
+
+        public void Stage(params string[] paths) => Commands.Stage(_repo, paths);
 
         public void Dispose()
         {

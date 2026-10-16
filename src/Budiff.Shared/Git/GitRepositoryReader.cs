@@ -3,12 +3,14 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using Budiff;
 using Budiff.CodeAnalysis;
-using LibGit2Sharp;
 
 namespace Budiff.Git;
 
+// Reads a repository through the `git` command: status and tree diffs in one
+// process each, file contents through GitObjects' long-running cat-file.
 public static class GitRepositoryReader
 {
     internal const int DefaultHistoryCommitLimit = 1_000;
@@ -28,8 +30,8 @@ public static class GitRepositoryReader
             throw new InvalidOperationException("This folder is not inside a git repository.");
         }
 
-        using var repo = new Repository(repoDir);
-        var root = NormalizeFullPath(repo.Info.WorkingDirectory);
+        var root = NormalizeFullPath(repoDir);
+        var branch = CurrentBranch(root);
         var scopeRoot = gitRoot ? root : NormalizeFullPath(start);
         if (!IsUnder(root, scopeRoot))
         {
@@ -37,82 +39,83 @@ public static class GitRepositoryReader
         }
 
         var prefix = ToRepoPath(root, scopeRoot);
-        string? branch = null;
-        try
-        {
-            branch = repo.Head?.FriendlyName;
-        }
-        catch
-        {
-            branch = null;
-        }
-
         return new GitRepositoryScope(root, scopeRoot, prefix, gitRoot || prefix.Length == 0, branch);
     }
 
     public static IReadOnlyList<GitReferenceOption> GetReferenceOptions(string repositoryRoot)
     {
-        return WithRepo(repositoryRoot, repo =>
+        var options = new List<GitReferenceOption>
         {
-            var options = new List<GitReferenceOption>
-            {
-                new("WORKTREE", "Working tree", IsWorkingTree: true),
-                new("HEAD", "HEAD"),
-            };
+            new("WORKTREE", "Working tree", IsWorkingTree: true),
+            new("HEAD", "HEAD"),
+        };
 
-            AddBranchOptions(repo, options);
-
-            foreach (var commit in repo.Commits.Take(50))
+        AddBranchOptions(repositoryRoot, options);
+        if (GitCli.TryRun(repositoryRoot, out var log, "log", "-n", "50", "--no-color", "--no-show-signature", "--format=%H%x1f%s", "HEAD"))
+        {
+            foreach (var line in log.Split('\n', StringSplitOptions.RemoveEmptyEntries))
             {
-                var shortSha = commit.Sha.Length >= 7 ? commit.Sha[..7] : commit.Sha;
-                options.Add(new GitReferenceOption(commit.Sha, $"{shortSha} {commit.MessageShort}"));
+                var sha = line.Split('\x1f', 2)[0];
+                var subject = line.Length > sha.Length ? line[(sha.Length + 1)..] : string.Empty;
+                options.Add(new GitReferenceOption(sha, $"{sha[..Math.Min(7, sha.Length)]} {subject}"));
             }
+        }
 
-            return (IReadOnlyList<GitReferenceOption>)options;
-        }, Array.Empty<GitReferenceOption>());
+        return options;
     }
 
     // Branches only (plus HEAD) - the diff base picker. Head is always the working
     // tree or HEAD, so no commit or working-tree entries here.
     public static IReadOnlyList<GitReferenceOption> GetBranchOptions(string repositoryRoot)
     {
-        return WithRepo(repositoryRoot, repo =>
-        {
-            var options = new List<GitReferenceOption> { new("HEAD", "HEAD") };
-            AddBranchOptions(repo, options);
-            return (IReadOnlyList<GitReferenceOption>)options;
-        }, Array.Empty<GitReferenceOption>());
+        var options = new List<GitReferenceOption> { new("HEAD", "HEAD") };
+        AddBranchOptions(repositoryRoot, options);
+        return options;
     }
 
     // Local branches first (current one labeled), then remotes, skipping the
     // symbolic */HEAD entries and anything already in the list.
-    private static void AddBranchOptions(Repository repo, List<GitReferenceOption> options)
+    private static void AddBranchOptions(string repositoryRoot, List<GitReferenceOption> options)
     {
-        var currentBranch = repo.Head?.FriendlyName;
-        foreach (var branch in repo.Branches
-                     .Where(b => !b.FriendlyName.EndsWith("/HEAD", StringComparison.Ordinal))
-                     .OrderBy(b => b.IsRemote)
-                     .ThenBy(b => b.FriendlyName, StringComparer.OrdinalIgnoreCase))
+        if (!GitCli.TryRun(repositoryRoot, out var refs, "for-each-ref", "--format=%(HEAD)%(refname)", "refs/heads", "refs/remotes"))
         {
-            var label = !branch.IsRemote && branch.FriendlyName == currentBranch
-                ? branch.FriendlyName + " (current)"
-                : branch.FriendlyName;
-            if (options.All(o => !string.Equals(o.Id, branch.FriendlyName, StringComparison.OrdinalIgnoreCase)))
+            return;
+        }
+
+        var branches = new List<(string Name, bool IsRemote, bool IsCurrent)>();
+        foreach (var line in refs.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var current = line[0] == '*';
+            var refName = line[1..].Trim();
+            var (name, isRemote) = refName.StartsWith("refs/heads/", StringComparison.Ordinal)
+                ? (refName["refs/heads/".Length..], false)
+                : (refName["refs/remotes/".Length..], true);
+            if (!name.EndsWith("/HEAD", StringComparison.Ordinal))
             {
-                options.Add(new GitReferenceOption(branch.FriendlyName, label));
+                branches.Add((name, isRemote, current));
+            }
+        }
+
+        foreach (var branch in branches.OrderBy(b => b.IsRemote).ThenBy(b => b.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            if (options.All(o => !string.Equals(o.Id, branch.Name, StringComparison.OrdinalIgnoreCase)))
+            {
+                options.Add(new GitReferenceOption(branch.Name, branch.IsCurrent ? branch.Name + " (current)" : branch.Name));
             }
         }
     }
 
     public static ChangeSet ListChanges(GitRepositoryScope scope, DiffTarget target)
     {
-        return WithRepo(scope.RepositoryRoot, repo =>
+        return WithGit(scope.RepositoryRoot, git =>
         {
+            // The history log does not depend on the changes: it runs alongside.
+            var log = Task.Run(() => ReadHistoryLog(scope.RepositoryRoot));
             var files = target.HeadIsWorkingTree
-                ? ListWorkingTreeChanges(repo, scope, target)
-                : ListTreeChanges(repo, scope, target);
+                ? ListWorkingTreeChanges(git, scope, target)
+                : ListTreeChanges(git, scope, target);
 
-            var history = LoadHistory(repo, files.Select(f => f.Path).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
+            var history = CountHistory(log.GetAwaiter().GetResult(), files.Select(f => f.Path).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
             var enriched = files
                 .Select(f => history.TryGetValue(f.Path, out var h)
                     ? f with { AuthorCount = h.Authors.Count, CommitCount = h.Commits.Count }
@@ -130,61 +133,20 @@ public static class GitRepositoryReader
     // is not a commit (e.g. the empty tree) or the file is not tracked there.
     public static IReadOnlyList<BlameLineInfo?> LoadBlame(GitRepositoryScope scope, string path, string baseRef)
     {
-        return WithRepo<IReadOnlyList<BlameLineInfo?>>(scope.RepositoryRoot, repo =>
-        {
-            var commit = ResolveCommit(repo, baseRef);
-            if (commit is null)
-            {
-                return Array.Empty<BlameLineInfo?>();
-            }
-
-            var lines = new List<BlameLineInfo?>();
-            foreach (var hunk in repo.Blame(path.Replace('\\', '/'), new BlameOptions { StartingAt = commit }))
-            {
-                var start = hunk.FinalStartLineNumber;
-                var end = start + hunk.LineCount;
-                while (lines.Count < end)
-                {
-                    lines.Add(null);
-                }
-
-                var c = hunk.FinalCommit;
-                if (c is null)
-                {
-                    continue;
-                }
-
-                var info = new BlameLineInfo(
-                    c.Sha.Length >= 7 ? c.Sha[..7] : c.Sha,
-                    c.Author?.Name ?? string.Empty,
-                    c.Author?.Email ?? string.Empty,
-                    c.Author?.When ?? default,
-                    c.MessageShort ?? string.Empty);
-                for (var i = start; i < end; i++)
-                {
-                    lines[i] = info;
-                }
-            }
-
-            return lines;
-        }, Array.Empty<BlameLineInfo?>());
+        var commit = WithGit(scope.RepositoryRoot, git => git.ResolveCommit(baseRef), null);
+        return commit is null
+            ? Array.Empty<BlameLineInfo?>()
+            : GitHistory.BlameFile(scope.RepositoryRoot, path.Replace('\\', '/'), commit);
     }
 
     public static DiffResult LoadDiff(GitRepositoryScope scope, ChangedFile file, DiffTarget target)
     {
-        return WithRepo(scope.RepositoryRoot, repo =>
+        return WithGit(scope.RepositoryRoot, git =>
         {
-            var oldBlob = ReadBlob(ResolveCommit(repo, target.BaseRef)?.Tree, (file.OldPath ?? file.Path).Replace('\\', '/'));
-            BlobInfo newBlob;
-            if (target.HeadIsWorkingTree)
-            {
-                newBlob = file.State == GitFileState.Deleted ? BlobInfo.Empty : DiffLoader.ReadWorkingFile(file.FullPath);
-            }
-            else
-            {
-                newBlob = ReadBlob(ResolveCommit(repo, target.HeadRef ?? "HEAD")?.Tree, file.Path.Replace('\\', '/'));
-            }
-
+            var oldBlob = git.ReadBlob(git.ResolveCommit(target.BaseRef), RepoPath(file.OldPath ?? file.Path));
+            var newBlob = target.HeadIsWorkingTree
+                ? file.State == GitFileState.Deleted ? BlobInfo.Empty : DiffLoader.ReadWorkingFile(file.FullPath)
+                : git.ReadBlob(git.ResolveCommit(target.HeadRef ?? "HEAD"), RepoPath(file.Path));
             return DiffLoader.Build(oldBlob, newBlob);
         }, DiffResult.Message("Could not load this diff."));
     }
@@ -193,186 +155,282 @@ public static class GitRepositoryReader
     // preview's pictures); null when absent there or bigger than maxBytes.
     public static byte[]? ReadFileAtRevision(GitRepositoryScope scope, string path, string revision, long maxBytes)
     {
-        return WithRepo<byte[]?>(scope.RepositoryRoot, repo =>
+        return WithGit<byte[]?>(scope.RepositoryRoot, git =>
         {
-            if (ResolveCommit(repo, revision)?.Tree?[path.Replace('\\', '/')]?.Target is not Blob blob || blob.Size > maxBytes)
+            if (git.ResolveCommit(revision) is not { } commit
+                || git.Info($"{commit}:{RepoPath(path)}") is not { Type: "blob" } info
+                || info.Size > maxBytes)
             {
                 return null;
             }
 
-            using var content = blob.GetContentStream();
-            using var buffer = new MemoryStream();
-            content.CopyTo(buffer);
-            return buffer.ToArray();
+            return git.Read(info.Sha)?.Bytes;
         }, null);
     }
 
     // Whether a repository path is a file at a revision.
     public static bool HasFileAtRevision(GitRepositoryScope scope, string path, string revision)
-        => WithRepo(scope.RepositoryRoot, repo => ResolveCommit(repo, revision)?.Tree?[path.Replace('\\', '/')]?.Target is Blob, false);
+        => WithGit(
+            scope.RepositoryRoot,
+            git => git.ResolveCommit(revision) is { } commit && git.Info($"{commit}:{RepoPath(path)}") is { Type: "blob" },
+            false);
 
     // Line counts for root-relative paths as they are at a revision, not on
     // disk. A path absent there (deleted by that revision) counts as an empty
     // file, so it still lists - with its removals - in the bird's-eye.
     public static IReadOnlyList<FileStat> CountAtRevision(string root, string revision, IReadOnlyList<string> paths, CancellationToken ct = default)
     {
-        // Not WithRepo: a missing revision must fail loudly, not read as "no files".
+        // Not WithGit: a missing revision must fail loudly, not read as "no files".
         var scope = Open(root, gitRoot: false);
-        using var repo = new Repository(scope.RepositoryRoot);
-        var tree = ResolveCommit(repo, revision)?.Tree
+        using var git = new GitObjects(scope.RepositoryRoot);
+        var commit = git.ResolveCommit(revision)
             ?? throw new InvalidOperationException($"Revision {revision} is not available locally.");
         var files = new List<FileStat>(paths.Count);
         foreach (var path in paths)
         {
             ct.ThrowIfCancellationRequested();
             var repoPath = scope.ScopePrefix.Length == 0 ? path : scope.ScopePrefix + "/" + path;
-            if (tree[repoPath]?.Target is not Blob blob)
+            if (git.Info($"{commit}:{repoPath}") is not { Type: "blob" } info)
             {
                 files.Add(new FileStat { RelativePath = path, Extension = Path.GetExtension(path).ToLowerInvariant() });
                 continue;
             }
 
-            if (!CodeScanner.IsCountable(blob.Size))
+            if (!CodeScanner.IsCountable(info.Size))
             {
                 files.Add(CodeScanner.Oversized(path));
                 continue;
             }
 
-            using var content = blob.GetContentStream();
-            using var buffer = new MemoryStream();
-            content.CopyTo(buffer);
-            files.Add(CodeScanner.CountBytes(path, buffer.ToArray()));
+            files.Add(CodeScanner.CountBytes(path, git.Read(info.Sha)?.Bytes ?? Array.Empty<byte>()));
         }
 
         return files;
     }
 
-    private static List<ChangedFile> ListWorkingTreeChanges(Repository repo, GitRepositoryScope scope, DiffTarget target)
+    // `git status`, limited to the folder: what changed against HEAD, the
+    // index included, untracked files listed one by one.
+    private static List<ChangedFile> ListWorkingTreeChanges(GitObjects git, GitRepositoryScope scope, DiffTarget target)
     {
-        var files = new List<ChangedFile>();
-        var statusOptions = new StatusOptions { IncludeIgnored = false, RecurseUntrackedDirs = true };
-        foreach (var entry in repo.RetrieveStatus(statusOptions))
+        var args = new List<string> { "status", "--porcelain=v2", "-z", "--untracked-files=all" };
+        if (scope.ScopePrefix.Length > 0)
         {
-            var state = Map(entry.State);
-            if (state == GitFileState.None)
-            {
-                continue;
-            }
+            args.Add("--");
+            args.Add(":(top,literal,icase)" + scope.ScopePrefix);
+        }
 
-            var path = NormalizeRepoPath(entry.FilePath);
-            if (!InScope(scope, path))
-            {
-                continue;
-            }
+        if (!GitCli.TryRun(scope.RepositoryRoot, out var output, args.ToArray()))
+        {
+            throw new InvalidOperationException("git status failed.");
+        }
 
+        var entries = ParseStatus(output).Where(e => InScope(scope, e.Path)).ToList();
+        var oldBlobs = git.ReadBlobs(git.ResolveCommit(target.BaseRef), entries.Select(e => e.OldPath ?? e.Path).ToList());
+        var files = new List<ChangedFile>();
+        for (var i = 0; i < entries.Count; i++)
+        {
+            var (state, path, oldPath) = entries[i];
             var fullPath = Path.Combine(scope.RepositoryRoot, path.Replace('/', Path.DirectorySeparatorChar));
-            var oldBlob = ReadBlob(ResolveCommit(repo, target.BaseRef)?.Tree, path);
+            var oldBlob = oldBlobs[i];
             var newBlob = state == GitFileState.Deleted ? BlobInfo.Empty : DiffLoader.ReadWorkingFile(fullPath);
             var diff = DiffLoader.Build(oldBlob, newBlob);
             var churn = diff.Rows is { } rows ? DiffMetrics.Churn(rows) : new DiffChurn(0, 0);
-            files.Add(new ChangedFile(path, null, fullPath, state, churn, 0, 0, oldBlob.IsBinary || newBlob.IsBinary));
+            files.Add(new ChangedFile(path, oldPath, fullPath, state, churn, 0, 0, oldBlob.IsBinary || newBlob.IsBinary));
         }
 
         return files;
     }
 
-    private static List<ChangedFile> ListTreeChanges(Repository repo, GitRepositoryScope scope, DiffTarget target)
+    // `git status --porcelain=v2 -z` entries: "1 XY ... path", "2 XY ...
+    // path\0origPath" (renamed in the index), "u XY ... path" (conflict),
+    // "? path" (untracked). Submodules are skipped - no file to diff.
+    internal static IEnumerable<(GitFileState State, string Path, string? OldPath)> ParseStatus(string output)
+    {
+        var records = output.Split('\0');
+        for (var i = 0; i < records.Length; i++)
+        {
+            var record = records[i];
+            if (record.Length < 2)
+            {
+                continue;
+            }
+
+            switch (record[0])
+            {
+                case '?':
+                    yield return (GitFileState.Untracked, RepoPaths.Normalize(record[2..]), null);
+                    break;
+                case 'u':
+                {
+                    var fields = record.Split(' ', 11);
+                    if (fields.Length == 11)
+                    {
+                        yield return (GitFileState.Conflicted, RepoPaths.Normalize(fields[10]), null);
+                    }
+
+                    break;
+                }
+
+                case '1':
+                case '2':
+                {
+                    var renamed = record[0] == '2';
+                    var fields = record.Split(' ', renamed ? 10 : 9);
+                    var oldPath = renamed && i + 1 < records.Length ? records[++i] : null;
+                    if (fields.Length != (renamed ? 10 : 9) || fields[2][0] == 'S')
+                    {
+                        break;
+                    }
+
+                    var state = MapStatus(fields[1]);
+                    if (state != GitFileState.None)
+                    {
+                        yield return (state, RepoPaths.Normalize(fields[^1]), oldPath is null ? null : RepoPaths.Normalize(oldPath));
+                    }
+
+                    break;
+                }
+            }
+        }
+    }
+
+    // XY: the index's change, then the working tree's ('.' = none; a
+    // working-tree 'A' is `git add -N`). An add wins, then a modification, a
+    // deletion, a rename.
+    private static GitFileState MapStatus(string xy)
+    {
+        var (index, work) = (xy[0], xy[1]);
+        return index is 'A' or 'C' || work == 'A' ? GitFileState.Added
+            : index is 'M' or 'T' || work is 'M' or 'T' ? GitFileState.Modified
+            : index == 'D' || work == 'D' ? GitFileState.Deleted
+            : index == 'R' ? GitFileState.Renamed
+            : GitFileState.None;
+    }
+
+    // Two commits' trees, renames detected. Without a base (the empty tree,
+    // an unknown ref) every file of the head counts as added.
+    private static List<ChangedFile> ListTreeChanges(GitObjects git, GitRepositoryScope scope, DiffTarget target)
     {
         var files = new List<ChangedFile>();
-        var oldCommit = ResolveCommit(repo, target.BaseRef);
-        var newCommit = ResolveCommit(repo, target.HeadRef ?? "HEAD");
+        var oldCommit = git.ResolveCommit(target.BaseRef);
+        var newCommit = git.ResolveCommit(target.HeadRef ?? "HEAD");
         if (newCommit is null)
         {
             return files;
         }
 
-        var compareOptions = new CompareOptions { Similarity = SimilarityOptions.Renames };
-        foreach (var change in repo.Diff.Compare<TreeChanges>(oldCommit?.Tree, newCommit.Tree, compareOptions))
+        IEnumerable<(GitFileState State, string Path, string? OldPath)> changes;
+        if (oldCommit is null)
         {
-            var path = NormalizeRepoPath(change.Path);
-            if (!InScope(scope, path))
+            if (!GitCli.TryRun(scope.RepositoryRoot, out var tree, "ls-tree", "-r", "-z", "--name-only", newCommit))
             {
-                continue;
+                throw new InvalidOperationException("git ls-tree failed.");
             }
 
-            var oldPath = string.IsNullOrWhiteSpace(change.OldPath) ? null : NormalizeRepoPath(change.OldPath);
+            changes = tree.Split('\0', StringSplitOptions.RemoveEmptyEntries).Select(p => (GitFileState.Added, RepoPaths.Normalize(p), (string?)null));
+        }
+        else
+        {
+            if (!GitCli.TryRun(scope.RepositoryRoot, out var diff, "diff", "--name-status", "-z", "-M", "--no-color", "--no-ext-diff", oldCommit, newCommit))
+            {
+                throw new InvalidOperationException("git diff failed.");
+            }
+
+            changes = ParseNameStatus(diff);
+        }
+
+        var inScope = changes.Where(c => InScope(scope, c.Path)).ToList();
+        var oldBlobs = git.ReadBlobs(oldCommit, inScope.Select(c => c.OldPath ?? c.Path).ToList());
+        var newBlobs = git.ReadBlobs(newCommit, inScope.Select(c => c.Path).ToList());
+        for (var i = 0; i < inScope.Count; i++)
+        {
+            var (state, path, oldPath) = inScope[i];
             var fullPath = Path.Combine(scope.RepositoryRoot, path.Replace('/', Path.DirectorySeparatorChar));
-            var oldBlob = ReadBlob(oldCommit?.Tree, (oldPath ?? path).Replace('\\', '/'));
-            var newBlob = ReadBlob(newCommit.Tree, path);
+            var oldBlob = oldBlobs[i];
+            var newBlob = newBlobs[i];
             var diff = DiffLoader.Build(oldBlob, newBlob);
             var churn = diff.Rows is { } rows ? DiffMetrics.Churn(rows) : new DiffChurn(0, 0);
-            files.Add(new ChangedFile(path, oldPath, fullPath, MapChangeKind(change.Status), churn, 0, 0, oldBlob.IsBinary || newBlob.IsBinary));
+            files.Add(new ChangedFile(path, oldPath, fullPath, state, churn, 0, 0, oldBlob.IsBinary || newBlob.IsBinary));
         }
 
         return files;
     }
 
-    private static Dictionary<string, PathHistory> LoadHistory(Repository repo, IReadOnlyCollection<string> paths)
+    // `git diff --name-status -z`: "M\0path\0", "R087\0old\0new\0".
+    internal static IEnumerable<(GitFileState State, string Path, string? OldPath)> ParseNameStatus(string output)
     {
-        var historyPaths = paths
-            .Select(NormalizeRepoPath)
-            .Where(p => p.Length > 0)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        var result = historyPaths.ToDictionary(p => p, _ => new PathHistory(), StringComparer.OrdinalIgnoreCase);
-        if (result.Count == 0)
+        var fields = output.Split('\0');
+        for (var i = 0; i + 1 < fields.Length; i++)
         {
-            return result;
-        }
-
-        var maxCommits = HistoryCommitLimit();
-        if (maxCommits <= 0)
-        {
-            return result;
-        }
-
-        var compareOptions = new CompareOptions { Similarity = SimilarityOptions.Renames };
-        var explicitPathsOptions = new ExplicitPathsOptions { ShouldFailOnUnmatchedPath = false };
-        var commitIndex = -1;
-        foreach (var commit in repo.Commits)
-        {
-            commitIndex++;
-            if (commitIndex >= maxCommits)
-            {
-                break;
-            }
-
-            Tree? parentTree = commit.Parents.FirstOrDefault()?.Tree;
-            TreeChanges changes;
-            try
-            {
-                changes = repo.Diff.Compare<TreeChanges>(
-                    parentTree,
-                    commit.Tree,
-                    historyPaths,
-                    explicitPathsOptions,
-                    compareOptions);
-            }
-            catch
+            var status = fields[i];
+            if (status.Length == 0)
             {
                 continue;
             }
 
-            var author = commit.Author?.Name ?? string.Empty;
-            foreach (var change in changes)
+            if (status[0] is 'R' or 'C' && i + 2 < fields.Length)
             {
-                var path = NormalizeRepoPath(change.Path);
-                var oldPath = string.IsNullOrWhiteSpace(change.OldPath) ? null : NormalizeRepoPath(change.OldPath);
-                var key = result.ContainsKey(path)
-                    ? path
-                    : oldPath is not null && result.ContainsKey(oldPath)
-                        ? oldPath
-                        : null;
+                var oldPath = RepoPaths.Normalize(fields[i + 1]);
+                var newPath = RepoPaths.Normalize(fields[i + 2]);
+                i += 2;
+                yield return status[0] == 'R' ? (GitFileState.Renamed, newPath, oldPath) : (GitFileState.Added, newPath, null);
+                continue;
+            }
 
-                if (key is null)
-                {
-                    continue;
-                }
+            var path = RepoPaths.Normalize(fields[++i]);
+            yield return (status[0] switch
+            {
+                'A' => GitFileState.Added,
+                'D' => GitFileState.Deleted,
+                'U' => GitFileState.Conflicted,
+                _ => GitFileState.Modified,
+            }, path, null);
+        }
+    }
 
-                result[key].Commits.Add(commitIndex);
-                if (author.Length > 0)
+    // The last N commits (BUDIFF_HISTORY_MAX_COMMITS, default 1000), each
+    // with its author and the paths it changed; null when not wanted or not
+    // readable.
+    private static string? ReadHistoryLog(string root)
+    {
+        var maxCommits = HistoryCommitLimit();
+        return maxCommits > 0
+            && GitCli.TryRun(root, out var log, "log", "-n", maxCommits.ToString(System.Globalization.CultureInfo.InvariantCulture), "--no-color", "--no-show-signature", "--no-renames", "--name-only", "-z", "--format=%x1e%aN", "HEAD")
+            ? log
+            : null;
+    }
+
+    // How many of those commits touched each path, and by how many authors.
+    // Merges count through the commits they bring in, not again themselves.
+    private static Dictionary<string, PathHistory> CountHistory(string? log, IReadOnlyCollection<string> paths)
+    {
+        var result = paths
+            .Select(RepoPaths.Normalize)
+            .Where(p => p.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(p => p, _ => new PathHistory(), StringComparer.OrdinalIgnoreCase);
+        if (result.Count == 0 || log is null)
+        {
+            return result;
+        }
+
+        // Per commit: \x1e author \0, then (unless a merge) \n and paths, each \0-ended.
+        var commitIndex = -1;
+        foreach (var commit in log.Split('\x1e', StringSplitOptions.RemoveEmptyEntries))
+        {
+            commitIndex++;
+            var fields = commit.Split('\0');
+            var author = fields[0];
+            foreach (var field in fields.Skip(1))
+            {
+                var path = RepoPaths.Normalize(field.TrimStart('\n'));
+                if (path.Length > 0 && result.TryGetValue(path, out var history))
                 {
-                    result[key].Authors.Add(author);
+                    history.Commits.Add(commitIndex);
+                    if (author.Length > 0)
+                    {
+                        history.Authors.Add(author);
+                    }
                 }
             }
         }
@@ -388,49 +446,28 @@ public static class GitRepositoryReader
             : DefaultHistoryCommitLimit;
     }
 
-    private static BlobInfo ReadBlob(Tree? tree, string path)
+    // The checked-out branch; "(no branch)" when HEAD is detached. Also the
+    // check that git runs here at all - its own message says why not (not a
+    // repository, dubious ownership, git not installed).
+    private static string? CurrentBranch(string root)
     {
-        if (tree is null || tree[path.Replace('\\', '/')]?.Target is not Blob blob)
+        var code = GitCli.Run(root, out var stdout, out var stderr, "symbolic-ref", "-q", "--short", "HEAD");
+        return code switch
         {
-            return BlobInfo.Empty;
-        }
-
-        if (blob.IsBinary)
-        {
-            return new BlobInfo(string.Empty, blob.Size, IsBinary: true);
-        }
-
-        // Oversized blobs never reach the inline diff (DiffLoader.Build shows a
-        // placeholder), so do not materialize the whole text just to discard it.
-        return blob.Size > DiffLoader.MaxInlineDiffBytes
-            ? new BlobInfo(string.Empty, blob.Size, IsBinary: false)
-            : new BlobInfo(blob.GetContentText(), blob.Size, IsBinary: false);
+            0 => stdout.Trim(),
+            1 => "(no branch)",
+            _ => throw new InvalidOperationException(GitFailure(stderr)),
+        };
     }
 
-    private static Commit? ResolveCommit(Repository repo, string refName)
+    private static string GitFailure(string stderr)
     {
-        if (string.IsNullOrWhiteSpace(refName))
-        {
-            return repo.Head?.Tip;
-        }
-
-        if (refName.Equals("HEAD", StringComparison.OrdinalIgnoreCase))
-        {
-            return repo.Head?.Tip;
-        }
-
-        if (repo.Branches[refName] is { } branch)
-        {
-            return branch.Tip;
-        }
-
-        return repo.Lookup<Commit>(refName);
+        var reason = string.Join(' ', stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Take(3));
+        return reason.Length > 0 ? reason : "git could not read this repository.";
     }
 
-    // Repository.Discover silently returns null under NativeAOT (verified
-    // empirically; its out-buffer marshaling path does not survive AOT), so
-    // walk up for a .git entry ourselves. A .git FILE (worktree / submodule
-    // pointer) also counts - new Repository(dir) resolves it natively.
+    // Walks up for a .git entry: a folder, or a FILE (worktree / submodule
+    // pointer). Its folder is the working tree's top.
     internal static string? DiscoverRepositoryRoot(string start)
     {
         var dir = new DirectoryInfo(start);
@@ -450,9 +487,9 @@ public static class GitRepositoryReader
 
     // The path as the file system spells it - drive letter and every segment.
     // cmd.exe keeps a typed `g:\git\repo` as the working directory verbatim,
-    // and libgit2 matches safe.directory entries case-sensitively, so a repo
-    // that needs one (e.g. on a drive owned by another SID) fails its
-    // ownership check unless libgit2 gets the canonical spelling. Only Windows
+    // and git matches safe.directory entries against the path it is given, so
+    // a repo that needs one (e.g. on a drive owned by another SID) fails its
+    // ownership check unless git gets the canonical spelling. Only Windows
     // needs this; elsewhere (and on any IO error) the path passes through.
     internal static string CanonicalPath(string fullPath)
     {
@@ -492,24 +529,20 @@ public static class GitRepositoryReader
         }
     }
 
-    private static T WithRepo<T>(string repositoryRoot, Func<Repository, T> body, T fallback)
+    private static T WithGit<T>(string repositoryRoot, Func<GitObjects, T> body, T fallback)
     {
         try
         {
-            var repoDir = DiscoverRepositoryRoot(repositoryRoot);
-            if (repoDir is null)
-            {
-                return fallback;
-            }
-
-            using var repo = new Repository(repoDir);
-            return body(repo);
+            using var git = new GitObjects(repositoryRoot);
+            return body(git);
         }
         catch
         {
             return fallback;
         }
     }
+
+    private static string RepoPath(string path) => path.Replace('\\', '/');
 
     private static bool InScope(GitRepositoryScope scope, string path)
     {
@@ -522,10 +555,8 @@ public static class GitRepositoryReader
     private static string ToRepoPath(string repositoryRoot, string fullPath)
     {
         var rel = Path.GetRelativePath(repositoryRoot, fullPath);
-        return rel == "." ? string.Empty : NormalizeRepoPath(rel);
+        return rel == "." ? string.Empty : RepoPaths.Normalize(rel);
     }
-
-    private static string NormalizeRepoPath(string path) => RepoPaths.Normalize(path);
 
     private static string NormalizeFullPath(string path) => Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
@@ -533,49 +564,5 @@ public static class GitRepositoryReader
     {
         var rel = Path.GetRelativePath(root, candidate);
         return rel == "." || (!rel.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(rel));
-    }
-
-    private static GitFileState MapChangeKind(ChangeKind kind) => kind switch
-    {
-        ChangeKind.Added or ChangeKind.Copied => GitFileState.Added,
-        ChangeKind.Deleted => GitFileState.Deleted,
-        ChangeKind.Renamed => GitFileState.Renamed,
-        ChangeKind.Conflicted => GitFileState.Conflicted,
-        _ => GitFileState.Modified,
-    };
-
-    private static GitFileState Map(FileStatus status)
-    {
-        if (status.HasFlag(FileStatus.Conflicted))
-        {
-            return GitFileState.Conflicted;
-        }
-
-        if (status.HasFlag(FileStatus.NewInIndex))
-        {
-            return GitFileState.Added;
-        }
-
-        if (status.HasFlag(FileStatus.NewInWorkdir))
-        {
-            return GitFileState.Untracked;
-        }
-
-        if (status.HasFlag(FileStatus.ModifiedInWorkdir) || status.HasFlag(FileStatus.ModifiedInIndex))
-        {
-            return GitFileState.Modified;
-        }
-
-        if (status.HasFlag(FileStatus.DeletedFromWorkdir) || status.HasFlag(FileStatus.DeletedFromIndex))
-        {
-            return GitFileState.Deleted;
-        }
-
-        if (status.HasFlag(FileStatus.RenamedInWorkdir) || status.HasFlag(FileStatus.RenamedInIndex))
-        {
-            return GitFileState.Renamed;
-        }
-
-        return GitFileState.None;
     }
 }
