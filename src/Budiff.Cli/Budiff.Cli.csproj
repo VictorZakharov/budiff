@@ -33,6 +33,13 @@
     <Compile Include="..\Budiff.Shared\Git\*.cs" LinkBase="Shared\Git" />
   </ItemGroup>
 
+  <!-- The tool package redistributes its dependencies (and the GUI's), so it
+       carries their notices. -->
+  <ItemGroup>
+    <None Include="..\..\THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="..\..\licenses\*.txt" Pack="true" PackagePath="licenses\" Visible="false" />
+  </ItemGroup>
+
   <!-- Ship the GUI inside the Windows tool packages so `budiff -i` works from
        any folder: win-x64 and win-arm64 (x64 emulation) carry it under
        tools/<tfm>/<rid>/gui/win-x64/, where AppLauncher probes for it. The
