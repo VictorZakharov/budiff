@@ -361,6 +361,13 @@ public partial class DiffView : UserControl
 
             _shownPreview = key;
             PreviewHost.Content = preview;
+
+            // A reused preview comes back already scrolled - no scroll event
+            // tells where, and a link followed next must remember this spot.
+            if (preview is ScrollViewer shown)
+            {
+                ReportScroll(shown, preview: true);
+            }
         }
         else
         {

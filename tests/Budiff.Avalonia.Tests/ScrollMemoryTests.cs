@@ -193,6 +193,43 @@ public sealed class ScrollMemoryTests
         Assert.Equal("README.md", vm.Diff.FileName);
     }
 
+    // The real window: README (scrolled) -> CONTRIBUTE.md -> Back -> LICENSE
+    // -> Back. The second Back must land where the first one did: the README
+    // that came back already in place still has to count as scrolled there.
+    [AvaloniaFact]
+    public async Task App_SecondBackStillReturnsToTheSpot()
+    {
+        var root = Directory.CreateTempSubdirectory("budiff-twolinks-").FullName;
+        File.WriteAllText(Path.Combine(root, "README.md"), "See [CONTRIBUTE.md](CONTRIBUTE.md) and [MIT](LICENSE).\n\n" + Paragraphs(80));
+        File.WriteAllText(Path.Combine(root, "CONTRIBUTE.md"), "# Contribute\n\n" + Paragraphs(5));
+        File.WriteAllText(Path.Combine(root, "LICENSE"), "MIT License\n\nPermission is hereby granted.\n");
+        var window = new global::Budiff.App.MainWindow(root, gitRoot: false) { Width = 1200, Height = 700 };
+        window.Show();
+        var vm = window.ViewModel;
+        vm.Diff.ShowPreview = true;
+        await vm.OpenAnalysisFileAsync(Path.Combine(root, "README.md"), "README.md");
+        PumpUntil(() => !vm.Diff.IsLoading && Preview(window) is not null);
+        var readme = Preview(window)!;
+        readme.Offset = new Vector(0, 900);
+        UiSnapshot.Pump();
+
+        foreach (var link in new[] { "CONTRIBUTE.md", "LICENSE" })
+        {
+            vm.Diff.PreviewContext!.OpenFile(link);
+            PumpUntil(() => !vm.Diff.IsLoading && vm.Diff.Title == link && Preview(window) is { } shown && shown != readme);
+            vm.Diff.GoBackCommand.Execute(null);
+            PumpUntil(() => !vm.Diff.IsLoading && Preview(window) == readme);
+            Assert.Equal(900, readme.Offset.Y, 0.5);
+            Assert.Equal(new DiffScrollSpot(true, 900), vm.Diff.ScrollSpot);
+        }
+
+        window.Close();
+    }
+
+    private static ScrollViewer? Preview(Window window)
+        => window.GetVisualDescendants().OfType<DiffView>().Where(v => v.IsEffectivelyVisible)
+            .Select(v => Host(v).Content).OfType<ScrollViewer>().FirstOrDefault();
+
     // A view on screen keeps the current preview while the next file loads -
     // the rows are still the old file's - and renders the new one on arrival.
     [AvaloniaFact]
