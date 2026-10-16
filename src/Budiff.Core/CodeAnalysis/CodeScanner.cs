@@ -125,11 +125,29 @@ public static class CodeScanner
     private static bool IsSkipped(string relativePath)
         => relativePath.Split('/').Any(segment => SkipDirs.Contains(segment));
 
+    // The same counting for content that does not live on disk (a blob at some
+    // revision, e.g. a pull request's head).
+    public static FileStat CountBytes(string relativePath, byte[] bytes)
+    {
+        if (bytes.LongLength > MaxCountBytes || TextBytes.LooksBinary(bytes))
+        {
+            return Oversized(relativePath);
+        }
+
+        var text = TextBytes.DecodeUtf8(bytes);
+        var counts = LineCounter.Count(text, CommentSyntax.For(relativePath));
+        return new FileStat { RelativePath = relativePath, Extension = Path.GetExtension(relativePath).ToLowerInvariant(), Lines = counts };
+    }
+
+    // Binary or too big to count: listed, without line columns.
+    public static FileStat Oversized(string relativePath)
+        => new() { RelativePath = relativePath, Extension = Path.GetExtension(relativePath).ToLowerInvariant(), IsBinary = true };
+
+    public static bool IsCountable(long bytes) => bytes <= MaxCountBytes;
+
     private static FileStat? CountFile(string root, string relativePath)
     {
         var fullPath = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
-        var ext = Path.GetExtension(relativePath).ToLowerInvariant();
-
         try
         {
             var info = new FileInfo(fullPath);
@@ -138,20 +156,9 @@ public static class CodeScanner
                 return null;
             }
 
-            if (info.Length > MaxCountBytes)
-            {
-                return new FileStat { RelativePath = relativePath, Extension = ext, IsBinary = true };
-            }
-
-            var bytes = File.ReadAllBytes(fullPath);
-            if (TextBytes.LooksBinary(bytes))
-            {
-                return new FileStat { RelativePath = relativePath, Extension = ext, IsBinary = true };
-            }
-
-            var text = TextBytes.DecodeUtf8(bytes);
-            var counts = LineCounter.Count(text, CommentSyntax.For(relativePath));
-            return new FileStat { RelativePath = relativePath, Extension = ext, Lines = counts };
+            return info.Length > MaxCountBytes
+                ? Oversized(relativePath)
+                : CountBytes(relativePath, File.ReadAllBytes(fullPath));
         }
         catch (OperationCanceledException)
         {

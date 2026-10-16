@@ -21,6 +21,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private bool _gitRoot;
     private GitRepositoryScope? _scope;
     private ChangedFile? _openDiffFile;
+    private DiffTarget? _openTarget;
     private int _blameGen;
     private string? _blamePath;
 
@@ -36,17 +37,35 @@ public sealed partial class MainWindowViewModel : ObservableObject
         Diff.SyntaxHighlighter = new TextMateSyntaxHighlighter();
         Analysis = new CodeAnalysisPanelViewModel(OpenAnalysisFileAsync);
         Analysis.HistoryApplied += OnHistoryApplied;
+        Diff.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(DiffViewModel.ShowDiffOptions))
+            {
+                OnPropertyChanged(nameof(ShowCompareOptions));
+            }
+        };
         _ = LoadAsync(startPath, gitRoot);
     }
 
-    // Period changed: a period-aligned diff must follow the new window.
+    // Period changed: an open diff follows when its comparison moved - a
+    // period-aligned base, or entering / leaving / switching a pull request.
     private void OnHistoryApplied()
     {
-        if (SelectedBaseRef?.Id == PeriodStartId)
+        OnPropertyChanged(nameof(ShowCompareOptions));
+        if (_scope is not null)
+        {
+            StatusText = DescribeStatus();
+        }
+
+        if (_openTarget is not null && CurrentTarget() != _openTarget)
         {
             ReloadOpenDiff();
         }
     }
+
+    // Base + Working tree: meaningless for a plain file view, and a pull
+    // request fixes both ends (its merge-base and its head).
+    public bool ShowCompareOptions => Diff.ShowDiffOptions && Analysis.AppliedPullRequest is null;
 
     public CodeAnalysisPanelViewModel Analysis { get; }
 
@@ -109,6 +128,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         IsDiffOpen = false;
         IsTreeCollapsed = false;
         _openDiffFile = null;
+        _openTarget = null;
     }
 
     // Re-runs the open diff against the current base / working-tree choice.
@@ -122,6 +142,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         var scope = _scope;
         var file = _openDiffFile;
         var target = CurrentTarget();
+        _openTarget = target;
         Diff.Subtitle = DescribeTarget(target);
         Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(scope, file, target));
         BeginLoadBlame(scope, file, target);
@@ -240,6 +261,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             // columns), and a drill-in shows the file as-is. Surface git's own
             // reason - "not owned by current user" is not "not a repository".
             _scope = null;
+            Analysis.PullRequests = null;
             BaseRefs.Clear();
             var folderName = Path.GetFileName(Path.TrimEndingDirectorySeparator(startPath));
             RepoTitle = string.IsNullOrEmpty(folderName) ? startPath : folderName;
@@ -258,6 +280,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         ScopeTitle = _scope.ScopePrefix.Length == 0 ? "repo root" : _scope.ScopePrefix;
         IsGitRootScope = _scope.IsGitRootScope;
         LoadRefs(_scope.RepositoryRoot);
+        Analysis.PullRequests = new GitHubCliPullRequestSource(_scope.ScopeRoot);
         await RefreshAsync();
     }
 
@@ -271,7 +294,6 @@ public sealed partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        var target = CurrentTarget();
         CloseDiff();
         StatusText = "Loading bird's-eye...";
         try
@@ -284,7 +306,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        StatusText = DescribeTarget(target);
+        StatusText = DescribeStatus();
         Diff.SetPlaceholder("Select a file in the bird's-eye to open its diff.");
     }
 
@@ -322,6 +344,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private DiffTarget CurrentTarget()
     {
+        if (Analysis.AppliedPullRequest is { } pr)
+        {
+            return new DiffTarget(pr.BaseSha, pr.HeadSha, HeadIsWorkingTree: false);
+        }
+
         var baseRef = SelectedBaseRef?.Id ?? "HEAD";
         if (baseRef == PeriodStartId)
         {
@@ -341,9 +368,20 @@ public sealed partial class MainWindowViewModel : ObservableObject
             : GitHistory.FindWindowBaseCommit(_scope.ScopeRoot, days.Value);
     }
 
+    // The header line: the PR being shown, else what a drill-in compares.
+    private string DescribeStatus()
+        => Analysis.AppliedPullRequest is { } pr
+            ? $"PR #{pr.PullRequest.Number} {pr.PullRequest.Title}  ({pr.PullRequest.BaseRefName} ← {pr.PullRequest.HeadRefName})"
+            : DescribeTarget(CurrentTarget());
+
     // "Period start" resolves to a raw sha; describe it instead of printing it.
     private string DescribeTarget(DiffTarget target)
     {
+        if (Analysis.AppliedPullRequest is { } pr)
+        {
+            return $"PR #{pr.PullRequest.Number}: merge-base {Short(pr.BaseSha)} vs head {Short(pr.HeadSha)}";
+        }
+
         if (SelectedBaseRef?.Id != PeriodStartId || target.BaseRef == "HEAD")
         {
             return target.Display;
@@ -363,6 +401,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         {
             // No git: nothing to compare against - show the file as it is now.
             _openDiffFile = null;
+            _openTarget = null;
             _blameGen++;
             _blamePath = null;
             Diff.SetBlame(null);
@@ -381,11 +420,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
         Diff.Title = repoPath;
         Diff.Subtitle = DescribeTarget(target);
         _openDiffFile = file;
+        _openTarget = target;
         IsDiffOpen = true;
         Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(_scope, file, target));
         BeginLoadBlame(_scope, file, target);
         return Task.CompletedTask;
     }
+
+    private static string Short(string sha) => sha.Length > 7 ? sha[..7] : sha;
 
     private static string ToRepoPath(string repositoryRoot, string fullPath)
     {

@@ -109,7 +109,8 @@ A thin desktop window around the diff control - **no Dock dependency**:
 - open a repo (or the CWD); **repo-root detection**: when launched from a subfolder, *offer* to widen to the repo root (this suggestion is GUI-only; the CLI does not do it),
 - a **Code Analysis bird's-eye** panel with grouping, period, sort, search, extension filters, and author filters,
 - selection -> the `DiffView` side-by-side pane,
-- a commit / branch picker to diff other points.
+- a commit / branch picker to diff other points,
+- a **pull request period**: the period list's "Pull request..." entry opens a picker (the user's PRs by default, 10 at a time with more on scroll; filter by author - anyone in the repo -, state, and free text / `#number` / GitHub qualifiers). The bird's-eye then shows only the files the PR changes (counted at its head, churn = the merge-base -> head net diff, commits/authors from the PR's commits) and the drill-in diffs the PR's merge-base against its head. PR data comes from the GitHub CLI (`gh`); a PR whose commits are not local is fetched from `refs/pull/N/head` without writing any ref.
 
 Reuse Burin's diff-window look and feel (see `DiffWindow` / `DiffView` under `../coderide`). This is the surface the README screenshot shows.
 
