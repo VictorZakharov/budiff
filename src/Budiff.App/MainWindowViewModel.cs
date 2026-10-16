@@ -545,6 +545,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         _openFile = (fullPath, relativePath);
         Diff.Extension = Path.GetExtension(relativePath);
+        Diff.FileName = Path.GetFileName(relativePath);
         Diff.IsFileView = _scope is null;
         if (_scope is null)
         {

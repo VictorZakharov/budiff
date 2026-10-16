@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using Budiff;
 using Markdig;
 using Markdig.Extensions.EmphasisExtras;
+using Markdig.Parsers;
 using Markdig.Syntax;
 
 namespace Budiff.Avalonia.Markdown;
@@ -47,16 +48,18 @@ public static class MarkdownBlockDiff
 
     public static IReadOnlyList<PreviewBlock> Build(DocumentPreviewRequest request)
     {
+        var plain = DocumentKind.IsPlainText(request.FileName, request.NewText.Length > 0 ? request.NewText : request.OldText);
+        IReadOnlyList<PreviewBlock> Of(string text, BlockChange change) => plain ? PlainUnits(text, change) : Units(text, change);
         switch (request.Mode)
         {
             case DocumentPreviewMode.NewOnly:
-                return Units(request.NewText, BlockChange.Unchanged);
+                return Of(request.NewText, BlockChange.Unchanged);
             case DocumentPreviewMode.OldOnly:
-                return Units(request.OldText, BlockChange.Unchanged);
+                return Of(request.OldText, BlockChange.Unchanged);
         }
 
-        var oldUnits = Units(request.OldText, BlockChange.Removed);
-        var newUnits = Units(request.NewText, BlockChange.Added);
+        var oldUnits = Of(request.OldText, BlockChange.Removed);
+        var newUnits = Of(request.NewText, BlockChange.Added);
         var rows = LineDiff.Compute(Keys(oldUnits, request.OldText), Keys(newUnits, request.NewText));
 
         var result = new List<PreviewBlock>(Math.Max(oldUnits.Count, newUnits.Count));
@@ -121,7 +124,7 @@ public static class MarkdownBlockDiff
             source = ListMarker.Replace(source, string.Empty, 1);
         }
 
-        source = block is CodeBlock
+        source = block is CodeBlock or PlainTextBlock
             ? source.Replace("\r", string.Empty, StringComparison.Ordinal).Replace('\n', '\u0001')
             : Whitespace.Replace(source, " ").Trim();
         return block.GetType().Name + ":" + source;
@@ -151,6 +154,39 @@ public static class MarkdownBlockDiff
             }
 
             units.Add(new PreviewBlock(block, block.Line, LastLine(block, lineStarts), null, 0, change));
+        }
+
+        return units;
+    }
+
+    // A plain-text document's units: its paragraphs (runs of non-blank lines).
+    public static IReadOnlyList<PreviewBlock> PlainUnits(string text, BlockChange change)
+    {
+        var units = new List<PreviewBlock>();
+        var lines = text.Split('\n');
+        var lineStart = 0;
+        var first = -1;
+        var spanStart = 0;
+        for (var i = 0; i <= lines.Length; i++)
+        {
+            var blank = i == lines.Length || lines[i].Trim().Length == 0;
+            if (!blank && first < 0)
+            {
+                first = i;
+                spanStart = lineStart;
+            }
+            else if (blank && first >= 0)
+            {
+                var spanEnd = lineStart - 2;
+                var body = text[spanStart..(spanEnd + 1)].Replace("\r", string.Empty, StringComparison.Ordinal);
+                units.Add(new PreviewBlock(new PlainTextBlock(body, spanStart, spanEnd, first), first, i - 1, null, 0, change));
+                first = -1;
+            }
+
+            if (i < lines.Length)
+            {
+                lineStart += lines[i].Length + 1;
+            }
         }
 
         return units;

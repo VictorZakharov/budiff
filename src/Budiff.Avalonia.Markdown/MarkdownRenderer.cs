@@ -146,6 +146,14 @@ internal sealed class MarkdownRenderer
         CodeBlock code => Code(code.Lines.ToString(), language: null, foreground),
         ThematicBreakBlock => new Border { Height = 1, Background = _rule, Margin = new Thickness(0, 6) },
         HtmlBlock html => Html(html.Lines.ToString()),
+        PlainTextBlock plain => new SelectableTextBlock
+        {
+            Text = plain.Text,
+            FontFamily = Mono,
+            FontSize = CodeSize,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = foreground,
+        },
         LinkReferenceDefinitionGroup => new Panel(),
         ContainerBlock container => Stack(container, foreground, depth),
         LeafBlock { Inline: { } inline } => Prose(inline, foreground, BodySize),

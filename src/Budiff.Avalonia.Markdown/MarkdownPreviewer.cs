@@ -22,11 +22,6 @@ public sealed class MarkdownPreviewer : IDocumentPreviewer
     private const int ContextBlocks = 1;
     private const double MaxReadableWidth = 1000;
 
-    private static readonly HashSet<string> Extensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".md", ".markdown", ".mdown", ".mkd",
-    };
-
     private readonly ISyntaxHighlighter? _highlighter;
     private readonly MarkdownImages _images = new();
 
@@ -39,7 +34,9 @@ public sealed class MarkdownPreviewer : IDocumentPreviewer
     // Opens a web link: the system browser (tests swap it out).
     internal Func<TopLevel, Uri, Task> OpenExternal { get; set; } = (top, uri) => top.Launcher.LaunchUriAsync(uri);
 
-    public bool CanPreview(string extension) => Extensions.Contains(extension);
+    public bool CanPreview(string extension) => DocumentKind.IsMarkdownExtension(extension) || DocumentKind.IsTextExtension(extension);
+
+    public bool CanPreviewFile(string fileName) => DocumentKind.CanPreview(fileName);
 
     public Control Render(DocumentPreviewRequest request, DocumentPreviewTheme theme)
         => new Session(this, request, theme).Build();

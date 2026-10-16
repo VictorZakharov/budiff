@@ -18,14 +18,16 @@ public enum DocumentPreviewMode
 
 // Everything a previewer needs: both sides' full text plus the line diff
 // (rows' line numbers are 1-based into OldText / NewText split on '\n'), and
-// optionally the project around the document.
+// optionally the project around the document and its file name (some
+// documents - LICENSE - are known by name, not extension).
 public sealed record DocumentPreviewRequest(
     string OldText,
     string NewText,
     IReadOnlyList<DiffRow> Rows,
     DocumentPreviewMode Mode,
     bool CollapseUnchanged,
-    DocumentPreviewContext? Context = null);
+    DocumentPreviewContext? Context = null,
+    string? FileName = null);
 
 // Which side of the diff a previewed block (and what it references) is from.
 public enum DocumentSide
@@ -61,6 +63,10 @@ public sealed record DocumentPreviewTheme(
 public interface IDocumentPreviewer
 {
     bool CanPreview(string extension);
+
+    // By file name, for documents known by name (LICENSE, NOTICE, ...);
+    // by default just the name's extension.
+    bool CanPreviewFile(string fileName) => CanPreview(System.IO.Path.GetExtension(fileName));
 
     // Called on the UI thread; returns a self-contained, scrollable view.
     Control Render(DocumentPreviewRequest request, DocumentPreviewTheme theme);

@@ -77,7 +77,8 @@ public sealed partial class DiffViewModel : ObservableObject
 
     partial void OnShowPreviewChanged(bool value) => NotifyPreviewState();
 
-    public bool CanPreview => Previewer?.CanPreview(Extension) == true;
+    public bool CanPreview => Previewer is { } previewer
+        && (FileName.Length > 0 ? previewer.CanPreviewFile(FileName) : previewer.CanPreview(Extension));
 
     public bool IsPreviewActive => ShowPreview && CanPreview && !IsPlaceholder;
 
@@ -114,7 +115,8 @@ public sealed partial class DiffViewModel : ObservableObject
             _all,
             _previewMode,
             _collapseUnchanged,
-            PreviewContext);
+            PreviewContext,
+            FileName.Length > 0 ? FileName : null);
     }
 
     private void NotifyPreviewState()
@@ -126,6 +128,8 @@ public sealed partial class DiffViewModel : ObservableObject
     }
 
     partial void OnExtensionChanged(string value) => NotifyPreviewState();
+
+    partial void OnFileNameChanged(string value) => NotifyPreviewState();
 
     partial void OnIsPlaceholderChanged(bool value) => NotifyPreviewState();
 
@@ -139,6 +143,11 @@ public sealed partial class DiffViewModel : ObservableObject
 
     [ObservableProperty]
     private string _extension = string.Empty;
+
+    // The open file's name (LICENSE, notes.md); with none, the preview goes
+    // by Extension alone.
+    [ObservableProperty]
+    private string _fileName = string.Empty;
 
     [ObservableProperty]
     private double _horizontalScroll;
