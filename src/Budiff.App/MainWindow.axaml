@@ -608,8 +608,19 @@
                             <materialIcons:MaterialIcon Kind="{Binding TreeToggleIcon}" Width="16" Height="16"
                                                         Foreground="{DynamicResource BudiffMutedTextBrush}" />
                         </Button>
-                        <TextBlock Grid.Column="1" Text="Diff" FontWeight="SemiBold" FontSize="12"
-                                   Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                            <!-- Back to the file a preview link was followed from. -->
+                            <Button x:Name="DiffBackButton"
+                                    Classes="diffTool"
+                                    IsVisible="{Binding Diff.CanGoBack}"
+                                    Command="{Binding Diff.GoBackCommand}"
+                                    ToolTip.Tip="Back (Alt+Left)">
+                                <materialIcons:MaterialIcon Kind="ArrowLeft" Width="16" Height="16"
+                                                            Foreground="{DynamicResource BudiffTextBrush}" />
+                            </Button>
+                            <TextBlock Text="Diff" FontWeight="SemiBold" FontSize="12"
+                                       Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
+                        </StackPanel>
                         <TextBlock Grid.Column="2" Text="{Binding Diff.Title}" FontWeight="SemiBold" FontSize="12"
                                    HorizontalAlignment="Left" TextTrimming="CharacterEllipsis"
                                    Foreground="{DynamicResource BudiffTextBrush}" VerticalAlignment="Center" />

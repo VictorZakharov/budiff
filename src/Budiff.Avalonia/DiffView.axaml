@@ -73,10 +73,24 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock Text="Diff"
-                           FontWeight="SemiBold"
-                           Foreground="{Binding MutedTextBrush, ElementName=Root}"
-                           VerticalAlignment="Center" />
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <!-- Back to the file a preview link was followed from. -->
+                    <Button x:Name="BackButton"
+                            Content="←"
+                            IsVisible="{Binding CanGoBack}"
+                            Command="{Binding GoBackCommand}"
+                            ToolTip.Tip="Back (Alt+Left)"
+                            Padding="6,0"
+                            MinHeight="0"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Foreground="{Binding TextBrush, ElementName=Root}"
+                            VerticalAlignment="Center" />
+                    <TextBlock Text="Diff"
+                               FontWeight="SemiBold"
+                               Foreground="{Binding MutedTextBrush, ElementName=Root}"
+                               VerticalAlignment="Center" />
+                </StackPanel>
                 <TextBlock Grid.Column="1"
                            Text="{Binding Title}"
                            FontWeight="SemiBold"
@@ -147,7 +161,8 @@
         </Border>
 
         <Grid>
-            <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+            <ScrollViewer x:Name="RowsScroller"
+                          HorizontalScrollBarVisibility="Disabled"
                           VerticalScrollBarVisibility="Auto">
                 <ScrollViewer.IsVisible>
                     <MultiBinding Converter="{x:Static BoolConverters.And}">

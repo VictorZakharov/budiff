@@ -1,7 +1,9 @@
+using System.Collections.Generic;
 using System.ComponentModel;
 using global::Avalonia;
 using global::Avalonia.Controls;
 using global::Avalonia.Input;
+using global::Avalonia.Interactivity;
 using global::Avalonia.Media;
 using global::Avalonia.Media.Immutable;
 using global::Avalonia.Markup.Xaml;
@@ -14,7 +16,15 @@ public partial class DiffView : UserControl
     private const double LineNumberWidth = 46;
     private const double TextPadding = 6;
 
+    // Recently shown previews, by what they show. Going Back re-attaches the
+    // very same control - its scroll position, unfolded sections and loaded
+    // pictures intact - instead of rendering anew and visibly scrolling.
+    private const int PreviewCacheSize = 12;
+
+    private readonly List<(PreviewKey Key, Control View)> _previews = new();
     private DiffViewModel? _model;
+    private PreviewKey? _shownPreview;
+    private bool _reusedPreview;
 
     public static readonly StyledProperty<IBrush> AddedLineBackgroundProperty =
         AvaloniaProperty.Register<DiffView, IBrush>(nameof(AddedLineBackground), Brush("#3331C36B"));
@@ -69,6 +79,27 @@ public partial class DiffView : UserControl
             UpdateVisibleTextWidth();
             WatchModel(DataContext as DiffViewModel);
         };
+
+        RowsScroller.ScrollChanged += (_, _) => ReportScroll(RowsScroller, preview: false);
+
+        // Back after following a preview link: the mouse's back button
+        // anywhere over the diff, or Alt+Left.
+        AddHandler(PointerPressedEvent, (_, e) =>
+        {
+            if (e.GetCurrentPoint(this).Properties.IsXButton1Pressed && _model is { CanGoBack: true } model)
+            {
+                model.GoBackCommand.Execute(null);
+                e.Handled = true;
+            }
+        }, RoutingStrategies.Tunnel);
+        AddHandler(KeyDownEvent, (_, e) =>
+        {
+            if (e.Key == Key.Left && e.KeyModifiers == KeyModifiers.Alt && _model is { CanGoBack: true } model)
+            {
+                model.GoBackCommand.Execute(null);
+                e.Handled = true;
+            }
+        }, RoutingStrategies.Tunnel);
 
         // LayoutUpdated (not just SizeChanged): a fixed-width docked pane gets
         // NO SizeChanged when only the window resizes, yet "half the window"
@@ -208,6 +239,9 @@ public partial class DiffView : UserControl
             || change.Property == FunnelAddedBrushProperty
             || change.Property == FunnelRemovedBrushProperty)
         {
+            // Rendered with the old colors: none can be reused.
+            _previews.Clear();
+            _shownPreview = null;
             RefreshPreview();
         }
     }
@@ -234,6 +268,39 @@ public partial class DiffView : UserControl
         {
             RefreshPreview();
         }
+
+        // New content arrived (PreviewVersion bumps with every diff): if the
+        // host asked to come back to a spot, scroll there - in the view that
+        // is on screen (a docked and a floating view can share one model).
+        if (e.PropertyName == nameof(DiffViewModel.PreviewVersion)
+            && _model is { IsPlaceholder: false, RestoreScroll: { } spot } model
+            && IsEffectivelyVisible)
+        {
+            model.RestoreScroll = null;
+            if (spot.Preview && model.IsPreviewActive && _reusedPreview && PreviewHost.Content is ScrollViewer kept)
+            {
+                // The same control came back: it is already there.
+                kept.Offset = new Vector(kept.Offset.X, spot.Offset);
+            }
+            else if (spot.Preview == model.IsPreviewActive)
+            {
+                ScrollRestore.Start(spot.Preview ? PreviewHost.Content as ScrollViewer : RowsScroller, spot.Offset);
+            }
+        }
+    }
+
+    private void ReportScroll(ScrollViewer scroller, bool preview)
+    {
+        // A cached preview off screen does not speak for the view.
+        if (preview && PreviewHost.Content != scroller)
+        {
+            return;
+        }
+
+        if (_model is { IsPlaceholder: false } model && model.IsPreviewActive == preview && IsEffectivelyVisible)
+        {
+            model.ScrollSpot = new DiffScrollSpot(preview, scroller.Offset.Y);
+        }
     }
 
     // Each view renders its own preview (a control has one visual parent, and
@@ -248,7 +315,59 @@ public partial class DiffView : UserControl
 
         if (_model is { IsPreviewActive: true, Previewer: { } previewer })
         {
-            PreviewHost.Content = previewer.Render(_model.CreatePreviewRequest(), PreviewTheme());
+            // The next file is on its way; it renders when it lands.
+            if (_model.IsLoading)
+            {
+                return;
+            }
+
+            var request = _model.CreatePreviewRequest();
+            var key = new PreviewKey(request.FileName, request.Context?.DocumentPath, request.Mode, request.CollapseUnchanged, request.OldText, request.NewText);
+            if (key == _shownPreview && PreviewHost.Content is not null)
+            {
+                return;
+            }
+
+            var cached = _previews.FindIndex(p => p.Key == key);
+            Control preview;
+            if (cached >= 0)
+            {
+                preview = _previews[cached].View;
+                _previews.RemoveAt(cached);
+                _reusedPreview = true;
+
+                // Another document reached other than by Back starts at the top.
+                if (_model.RestoreScroll is null && preview is ScrollViewer reused && !key.SameDocument(_shownPreview))
+                {
+                    reused.Offset = default;
+                }
+            }
+            else
+            {
+                preview = previewer.Render(request, PreviewTheme());
+                if (preview is ScrollViewer scroller)
+                {
+                    scroller.ScrollChanged += (_, _) => ReportScroll(scroller, preview: true);
+                }
+
+                _reusedPreview = false;
+            }
+
+            _previews.Add((key, preview));
+            if (_previews.Count > PreviewCacheSize)
+            {
+                _previews.RemoveAt(0);
+            }
+
+            _shownPreview = key;
+            PreviewHost.Content = preview;
+
+            // A reused preview comes back already scrolled - no scroll event
+            // tells where, and a link followed next must remember this spot.
+            if (preview is ScrollViewer shown)
+            {
+                ReportScroll(shown, preview: true);
+            }
         }
         else
         {
@@ -286,4 +405,18 @@ public partial class DiffView : UserControl
     }
 
     private static IBrush Brush(string hex) => HexBrush.Parse(hex);
+
+    // What a preview shows. Texts compare by value; the file identifies the
+    // document across renders.
+    private sealed record PreviewKey(
+        string? FileName,
+        string? DocumentPath,
+        DocumentPreviewMode Mode,
+        bool CollapseUnchanged,
+        string OldText,
+        string NewText)
+    {
+        public bool SameDocument(PreviewKey? other)
+            => other is not null && other.FileName == FileName && other.DocumentPath == DocumentPath;
+    }
 }

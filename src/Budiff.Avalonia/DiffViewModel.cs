@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 using Budiff;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using global::Avalonia.Media;
 using global::Avalonia.Media.Immutable;
 using global::Avalonia.Threading;
@@ -76,7 +77,8 @@ public sealed partial class DiffViewModel : ObservableObject
 
     partial void OnShowPreviewChanged(bool value) => NotifyPreviewState();
 
-    public bool CanPreview => Previewer?.CanPreview(Extension) == true;
+    public bool CanPreview => Previewer is { } previewer
+        && (FileName.Length > 0 ? previewer.CanPreviewFile(FileName) : previewer.CanPreview(Extension));
 
     public bool IsPreviewActive => ShowPreview && CanPreview && !IsPlaceholder;
 
@@ -85,10 +87,37 @@ public sealed partial class DiffViewModel : ObservableObject
 
     public bool ShowWrapOption => !IsPreviewActive;
 
+    // Where the open document lives (its images, its links); set by the host
+    // with each file it opens, before that file's diff arrives.
+    public DocumentPreviewContext? PreviewContext { get; set; }
+
+    // Where the open file is scrolled to now (its preview or its line diff),
+    // kept current by the view - a host remembers it to come back to.
+    public DiffScrollSpot? ScrollSpot { get; set; }
+
+    // Set by a host before opening a file: once that file shows, the view
+    // scrolls back to this spot (Back after following a link).
+    public DiffScrollSpot? RestoreScroll { get; set; }
+
+    // After following a preview link, Back (header button, Alt+Left, the
+    // mouse's back button) returns; the host keeps the trail.
+    [ObservableProperty]
+    private bool _canGoBack;
+
+    public Action? GoBackHandler { get; set; }
+
+    [RelayCommand]
+    private void GoBack() => GoBackHandler?.Invoke();
+
     // Bumped whenever what the preview shows changes (new content, collapse
     // toggled), so a view re-renders it.
     [ObservableProperty]
     private int _previewVersion;
+
+    // Between BeginLoad and its result. The rows still belong to the file
+    // shown before, so a view keeps showing that instead of rendering them
+    // under the next file's name (a flash of the wrong document).
+    public bool IsLoading { get; private set; }
 
     public DocumentPreviewRequest CreatePreviewRequest()
     {
@@ -98,7 +127,9 @@ public sealed partial class DiffViewModel : ObservableObject
             string.Join("\n", newLines),
             _all,
             _previewMode,
-            _collapseUnchanged);
+            _collapseUnchanged,
+            PreviewContext,
+            FileName.Length > 0 ? FileName : null);
     }
 
     private void NotifyPreviewState()
@@ -110,6 +141,8 @@ public sealed partial class DiffViewModel : ObservableObject
     }
 
     partial void OnExtensionChanged(string value) => NotifyPreviewState();
+
+    partial void OnFileNameChanged(string value) => NotifyPreviewState();
 
     partial void OnIsPlaceholderChanged(bool value) => NotifyPreviewState();
 
@@ -123,6 +156,11 @@ public sealed partial class DiffViewModel : ObservableObject
 
     [ObservableProperty]
     private string _extension = string.Empty;
+
+    // The open file's name (LICENSE, notes.md); with none, the preview goes
+    // by Extension alone.
+    [ObservableProperty]
+    private string _fileName = string.Empty;
 
     [ObservableProperty]
     private double _horizontalScroll;
@@ -250,6 +288,7 @@ public sealed partial class DiffViewModel : ObservableObject
     public void BeginLoad(Func<DiffResult> loader)
     {
         var gen = ++_loadGen;
+        IsLoading = true;
         _tokenizeGen++;
         IsHighlighting = false;
 
@@ -265,6 +304,9 @@ public sealed partial class DiffViewModel : ObservableObject
         };
         _loadingTimer.Start();
 
+        // The result comes back through the dispatcher taken here, on the UI
+        // thread (see HighlightAsync).
+        var ui = Dispatcher.UIThread;
         Task.Run(() =>
         {
             DiffResult result;
@@ -277,7 +319,7 @@ public sealed partial class DiffViewModel : ObservableObject
                 result = DiffResult.Message("Could not load this diff.");
             }
 
-            Dispatcher.UIThread.Post(() =>
+            ui.Post(() =>
             {
                 if (gen != _loadGen)
                 {
@@ -285,6 +327,7 @@ public sealed partial class DiffViewModel : ObservableObject
                 }
 
                 _loadingTimer?.Stop();
+                IsLoading = false;
                 if (result.Rows is { } rows)
                 {
                     SetDiff(rows);
@@ -343,12 +386,17 @@ public sealed partial class DiffViewModel : ObservableObject
     public void SetDiff(IReadOnlyList<DiffRow> rows)
     {
         _loadingTimer?.Stop();
+        IsLoading = false;
 
         // A reload that produced the exact same rows (e.g. the working-tree
         // toggle with a clean tree) keeps everything - rows, highlighting,
         // scroll - instead of rebuilding into a visible flicker.
         if (!IsPlaceholder && SameRows(_all, rows))
         {
+            // Still news for a view: the file may be another one with the
+            // same text (a preview renders per file), and a pending restore
+            // is consumed now rather than jump the view later.
+            PreviewVersion++;
             return;
         }
 
@@ -419,7 +467,8 @@ public sealed partial class DiffViewModel : ObservableObject
 
         if (SyntaxHighlighter is not null)
         {
-            Task.Run(() => HighlightAsync(oldLines, newLines, displayed, hasHidden, extension, gen));
+            var ui = Dispatcher.UIThread;
+            Task.Run(() => HighlightAsync(oldLines, newLines, displayed, hasHidden, extension, gen, ui));
         }
     }
 
@@ -429,7 +478,10 @@ public sealed partial class DiffViewModel : ObservableObject
         Rebuild();
     }
 
-    private void HighlightAsync(string[] oldLines, string[] newLines, List<DiffRow> displayed, bool hasHidden, string extension, int gen)
+    // Runs off the UI thread and posts back through ui, the dispatcher taken
+    // on the UI thread: reaching for Dispatcher.UIThread from here could
+    // adopt this thread as the UI one while there is none (between tests).
+    private void HighlightAsync(string[] oldLines, string[] newLines, List<DiffRow> displayed, bool hasHidden, string extension, int gen, Dispatcher ui)
     {
         try
         {
@@ -462,21 +514,21 @@ public sealed partial class DiffViewModel : ObservableObject
 
                     if (++pending >= ViewportChunkRows)
                     {
-                        PublishRuns(oldBatch, newBatch, gen);
+                        PublishRuns(oldBatch, newBatch, gen, ui);
                         oldBatch = new List<(int Line, DiffRun[] Runs)>();
                         newBatch = new List<(int Line, DiffRun[] Runs)>();
                         pending = 0;
                     }
                 }
 
-                PublishRuns(oldBatch, newBatch, gen);
+                PublishRuns(oldBatch, newBatch, gen, ui);
             }
 
             if (hasHidden)
             {
                 var oldTok = TokenizeAll(oldLines, extension);
                 var newTok = TokenizeAll(newLines, extension);
-                Dispatcher.UIThread.Post(() =>
+                ui.Post(() =>
                 {
                     if (gen != _tokenizeGen)
                     {
@@ -491,7 +543,7 @@ public sealed partial class DiffViewModel : ObservableObject
             }
             else
             {
-                Dispatcher.UIThread.Post(() =>
+                ui.Post(() =>
                 {
                     if (gen == _tokenizeGen)
                     {
@@ -502,7 +554,7 @@ public sealed partial class DiffViewModel : ObservableObject
         }
         catch
         {
-            Dispatcher.UIThread.Post(() =>
+            ui.Post(() =>
             {
                 if (gen == _tokenizeGen)
                 {
@@ -532,14 +584,14 @@ public sealed partial class DiffViewModel : ObservableObject
         return result;
     }
 
-    private void PublishRuns(List<(int Line, DiffRun[] Runs)> oldBatch, List<(int Line, DiffRun[] Runs)> newBatch, int gen)
+    private void PublishRuns(List<(int Line, DiffRun[] Runs)> oldBatch, List<(int Line, DiffRun[] Runs)> newBatch, int gen, Dispatcher ui)
     {
         if (oldBatch.Count == 0 && newBatch.Count == 0)
         {
             return;
         }
 
-        Dispatcher.UIThread.Post(() =>
+        ui.Post(() =>
         {
             if (gen != _tokenizeGen)
             {

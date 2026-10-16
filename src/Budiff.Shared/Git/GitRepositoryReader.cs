@@ -189,6 +189,28 @@ public static class GitRepositoryReader
         }, DiffResult.Message("Could not load this diff."));
     }
 
+    // A repository file's raw bytes as it is at a revision (for the markdown
+    // preview's pictures); null when absent there or bigger than maxBytes.
+    public static byte[]? ReadFileAtRevision(GitRepositoryScope scope, string path, string revision, long maxBytes)
+    {
+        return WithRepo<byte[]?>(scope.RepositoryRoot, repo =>
+        {
+            if (ResolveCommit(repo, revision)?.Tree?[path.Replace('\\', '/')]?.Target is not Blob blob || blob.Size > maxBytes)
+            {
+                return null;
+            }
+
+            using var content = blob.GetContentStream();
+            using var buffer = new MemoryStream();
+            content.CopyTo(buffer);
+            return buffer.ToArray();
+        }, null);
+    }
+
+    // Whether a repository path is a file at a revision.
+    public static bool HasFileAtRevision(GitRepositoryScope scope, string path, string revision)
+        => WithRepo(scope.RepositoryRoot, repo => ResolveCommit(repo, revision)?.Tree?[path.Replace('\\', '/')]?.Target is Blob, false);
+
     // Line counts for root-relative paths as they are at a revision, not on
     // disk. A path absent there (deleted by that revision) counts as an empty
     // file, so it still lists - with its removals - in the bird's-eye.
