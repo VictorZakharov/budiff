@@ -4,7 +4,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$repo = "wellscoped/budiff"
+$repo = "VictorZakharov/budiff"
 $asset = "budiff-win-x64.zip"
 $release = if ($Version -eq "latest") { "latest/download" } else { "download/$Version" }
 $url = "https://github.com/$repo/releases/$release/$asset"

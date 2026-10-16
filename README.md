@@ -1,7 +1,7 @@
 # budiff
 
 [![NuGet](https://img.shields.io/nuget/v/budiff?label=NuGet)](https://www.nuget.org/packages/budiff/)
-[![CI](https://github.com/wellscoped/budiff/actions/workflows/ci.yml/badge.svg)](https://github.com/wellscoped/budiff/actions/workflows/ci.yml)
+[![CI](https://github.com/VictorZakharov/budiff/actions/workflows/ci.yml/badge.svg)](https://github.com/VictorZakharov/budiff/actions/workflows/ci.yml)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **`ls`, but for your diffs.** Run it in a folder and instantly see what changed.
@@ -35,11 +35,11 @@ budiff reads repositories with the `git` command, so git 2.11 or later must be o
 One-line install scripts:
 
 ```powershell
-irm https://raw.githubusercontent.com/wellscoped/budiff/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/VictorZakharov/budiff/main/scripts/install.ps1 | iex
 ```
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/wellscoped/budiff/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/VictorZakharov/budiff/main/scripts/install.sh | sh
 ```
 
 Set `BUDIFF_VERSION=v0.1.0` / `BUDIFF_INSTALL_DIR=...` for the shell script, or pass `-Version v0.1.0 -InstallDir ...` to the PowerShell script. Winget and Homebrew manifests are not published yet; the release assets and install scripts are the stable inputs for those manifests.
