@@ -4,14 +4,15 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <Authors>Victor Zakharov</Authors>
+    <Authors>budiff contributors</Authors>
     <Company>budiff contributors</Company>
-    <Copyright>Copyright (c) Victor Zakharov and contributors</Copyright>
+    <Copyright>Copyright (c) 2026 budiff contributors</Copyright>
     <PackageProjectUrl>https://github.com/VictorZakharov/budiff</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/VictorZakharov/budiff</RepositoryUrl>
+    <RepositoryUrl>https://github.com/VictorZakharov/budiff.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <PackageReadmeFile>PACKAGE_README.md</PackageReadmeFile>
     <PackageIcon>assets/budiff-icon.png</PackageIcon>
     <PackageTags>diff;git;side-by-side;avalonia;cli</PackageTags>
     <VersionPrefix>0.1.0</VersionPrefix>
@@ -24,7 +25,8 @@
   </PropertyGroup>
 
   <ItemGroup Condition="'$(IsPackable)' != 'false'">
-    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)PACKAGE_README.md" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)LICENSE" Pack="true" PackagePath="\" Visible="false" />
     <None Include="$(MSBuildThisFileDirectory)assets\budiff-icon.png" Pack="true" PackagePath="assets\" Visible="false" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
   </ItemGroup>

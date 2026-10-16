@@ -1,6 +1,8 @@
 # budiff
 
+[![NuGet](https://img.shields.io/nuget/v/budiff?label=NuGet)](https://www.nuget.org/packages/budiff/)
 [![CI](https://github.com/VictorZakharov/budiff/actions/workflows/ci.yml/badge.svg)](https://github.com/VictorZakharov/budiff/actions/workflows/ci.yml)
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **`ls`, but for your diffs.** Run it in a folder and instantly see what changed.
 
@@ -16,13 +18,11 @@ Drilling into a file docks a syntax-highlighted side-by-side diff next to a comp
 
 ## Install
 
-Once published to NuGet:
-
 ```sh
 dotnet tool install -g budiff
 ```
 
-Release tags also attach self-contained, single-file CLI builds for users without the .NET SDK:
+Each release also attaches self-contained, single-file CLI builds for users without the .NET SDK (the Windows one includes the GUI for `budiff -i`):
 
 | Platform | Asset |
 | --- | --- |
@@ -118,6 +118,10 @@ Requires the .NET 10 SDK.
 
 The UI snapshot test writes PNGs under the test output folder by default. Set `BUDIFF_UISNAPSHOT_DIR` to collect them elsewhere.
 
+## Contributing
+
+Issues and pull requests are welcome - see [CONTRIBUTING.md](CONTRIBUTING.md). Report security problems privately as described in [SECURITY.md](SECURITY.md).
+
 ## License
 
-[MIT](LICENSE).
+[MIT](LICENSE). Third-party components and their licenses: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

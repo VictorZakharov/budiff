@@ -16,6 +16,16 @@ public sealed class AnsiRendererTests
     }
 
     [Fact]
+    public void Version_PrintsThePackageVersion()
+    {
+        var output = new StringWriter();
+        var exit = BudiffCli.Run(new[] { "--version" }, TextReader.Null, output, new StringWriter(), inputRedirected: false);
+
+        Assert.Equal(0, exit);
+        Assert.Matches(@"^budiff \d+\.\d+\.\d+\S*$", output.ToString().Trim());
+    }
+
+    [Fact]
     public void Parse_RejectsJsonWithGui()
     {
         var options = CliOptions.Parse(new[] { "-i", "--json" });

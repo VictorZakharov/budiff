@@ -1,0 +1,217 @@
+name: Release
+
+# A v* tag builds the packages and the CLI archives, then waits for approval
+# in the protected nuget.org environment before it publishes them to NuGet.org
+# (trusted publishing - no stored API key) and creates the GitHub release.
+# Pull requests that touch packaging run the build half only, so a broken
+# package shows up before a tag does. See docs/RELEASING.md.
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/release.yml
+      - Directory.Build.props
+      - src/Budiff.Cli/Budiff.Cli.csproj
+      - src/Budiff.App/Budiff.App.csproj
+      - PACKAGE_README.md
+      - THIRD-PARTY-NOTICES.md
+      - LICENSE
+      - licenses/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+
+jobs:
+  package:
+    name: Build release packages
+    # The tool package carries the GUI as a win-x64 NativeAOT build, which
+    # cannot cross-compile.
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Version
+        id: version
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF -like "refs/tags/v*") { $env:GITHUB_REF_NAME.Substring(1) } else { "0.0.0-ci.$env:GITHUB_RUN_NUMBER" }
+          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') {
+            throw "Tag '$env:GITHUB_REF_NAME' is not v<semver>."
+          }
+          "value=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      # The NativeAOT link step finds the C++ tools through vswhere by bare name.
+      - name: Put vswhere on PATH
+        shell: pwsh
+        run: |
+          "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Pack
+        run: dotnet pack Budiff.slnx -c Release -o artifacts/packages -p:Version=${{ steps.version.outputs.value }}
+
+      # The tool is a top `budiff` package that names one package per
+      # platform; the platform list is read from it, so it lives only in
+      # Budiff.Cli.csproj.
+      - name: Inspect packages
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.value }}"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $common = @("LICENSE", "PACKAGE_README.md", "assets/budiff-icon.png")
+          function Read-Package($id, $required) {
+            $package = "artifacts/packages/$id.$version.nupkg"
+            if (-not (Test-Path $package)) { throw "Missing $package" }
+            $zip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $package))
+            $entries = $zip.Entries.FullName
+            foreach ($entry in $required) {
+              if ($entries -notcontains $entry) { throw "$package is missing $entry" }
+            }
+            return @{ Zip = $zip; Entries = $entries }
+          }
+          foreach ($id in "Budiff.Core", "Budiff.Avalonia", "Budiff.Avalonia.TextMate", "Budiff.Avalonia.Markdown") {
+            (Read-Package $id $common).Zip.Dispose()
+          }
+
+          # Where the top package keeps its settings depends on the SDK:
+          # tools/net10.0/any/ (10.0.2xx), tools/any/any/ (10.0.4xx).
+          $top = Read-Package "budiff" ($common + @("THIRD-PARTY-NOTICES.md"))
+          $settingsEntry = @($top.Zip.Entries | Where-Object FullName -like "tools/*/DotnetToolSettings.xml")
+          if ($settingsEntry.Count -ne 1) { throw "The budiff package should have one DotnetToolSettings.xml, has: $($settingsEntry.FullName)" }
+          $reader = New-Object IO.StreamReader($settingsEntry[0].Open())
+          $settings = [xml]$reader.ReadToEnd()
+          $reader.Dispose()
+          $top.Zip.Dispose()
+          $rids = @($settings.DotNetCliTool.RuntimeIdentifierPackages.RuntimeIdentifierPackage | ForEach-Object { $_.RuntimeIdentifier })
+          foreach ($needed in "win-x64", "linux-x64", "osx-arm64", "any") {
+            if ($rids -notcontains $needed) { throw "The budiff package names no $needed package (it names: $rids)." }
+          }
+          foreach ($rid in $rids) {
+            $gui = "tools/net10.0/$rid/gui/win-x64/Budiff.App.exe"
+            $required = $common + @("THIRD-PARTY-NOTICES.md", "licenses/dotnet-runtime.txt", "tools/net10.0/$rid/budiff.dll")
+            if ($rid -like "win-*") { $required += $gui }
+            $package = Read-Package "budiff.$rid" $required
+            $package.Zip.Dispose()
+            if ($rid -notlike "win-*" -and $package.Entries -contains $gui) { throw "budiff.$rid carries the Windows GUI." }
+          }
+          Get-ChildItem artifacts/packages | Format-Table Name, Length
+
+      - name: Install and run the packed tool
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.value }}"
+          dotnet tool install budiff --tool-path artifacts/smoke --add-source artifacts/packages --version $version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $reported = (& artifacts/smoke/budiff --version | Out-String).Trim()
+          if ($reported -ne "budiff $version") { throw "budiff --version printed '$reported'." }
+          & artifacts/smoke/budiff --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # The install picked this machine's package, GUI included.
+          if (-not (Get-ChildItem artifacts/smoke/.store -Recurse -Filter Budiff.App.exe)) { throw "The installed tool has no GUI." }
+
+      - name: Build CLI archives
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.value }}"
+          foreach ($rid in "win-x64", "linux-x64", "osx-arm64") {
+            $out = "artifacts/cli/$rid"
+            dotnet publish src/Budiff.Cli/Budiff.Cli.csproj -c Release -r $rid --self-contained true -o $out -p:Version=$version -p:PublishSingleFile=true -p:DebugType=embedded
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            Copy-Item LICENSE, THIRD-PARTY-NOTICES.md $out
+            Copy-Item licenses $out -Recurse
+            if ($rid -eq "win-x64") {
+              # The GUI the pack step published, where `budiff -i` looks for it.
+              $gui = "$out/gui/win-x64"
+              New-Item -ItemType Directory -Force $gui | Out-Null
+              Copy-Item src/Budiff.Cli/obj/gui-publish/* $gui -Recurse -Exclude *.pdb
+              if (-not (Test-Path "$gui/Budiff.App.exe")) { throw "The GUI is missing from the win-x64 archive." }
+              Compress-Archive -Path "$out/*" -DestinationPath "artifacts/budiff-$rid.zip" -Force
+            } else {
+              tar -czf "artifacts/budiff-$rid.tar.gz" -C $out .
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
+
+      - name: Upload release files
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: budiff-release-${{ steps.version.outputs.value }}
+          path: |
+            artifacts/packages/*.nupkg
+            artifacts/packages/*.snupkg
+            artifacts/budiff-*.zip
+            artifacts/budiff-*.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish to NuGet.org and GitHub
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: nuget.org
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Download release files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: budiff-release-${{ needs.package.outputs.version }}
+          path: artifacts
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Request a short-lived NuGet credential
+        id: nuget_login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      # The top `budiff` package goes last: it names the per-platform ones, so
+      # it must not go live before them. Each .snupkg goes alongside its
+      # .nupkg.
+      - name: Push to NuGet.org
+        env:
+          NUGET_API_KEY: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
+          VERSION: ${{ needs.package.outputs.version }}
+        run: |
+          top="artifacts/packages/budiff.$VERSION.nupkg"
+          for package in artifacts/packages/*.nupkg; do
+            if [ "$package" != "$top" ]; then
+              dotnet nuget push "$package" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+            fi
+          done
+          dotnet nuget push "$top" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.package.outputs.version }}
+        run: |
+          prerelease=""
+          case "$VERSION" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "budiff $VERSION" --generate-notes --verify-tag $prerelease \
+            artifacts/budiff-*.zip artifacts/budiff-*.tar.gz artifacts/packages/*.nupkg

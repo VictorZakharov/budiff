@@ -25,6 +25,12 @@ internal static class BudiffCli
             return 0;
         }
 
+        if (options.ShowVersion)
+        {
+            output.WriteLine("budiff " + McpServer.Version());
+            return 0;
+        }
+
         if (options.Error is { } error)
         {
             errorOutput.WriteLine(error);

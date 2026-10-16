@@ -4,6 +4,7 @@ internal sealed record CliOptions(
     bool Mcp,
     bool Stdin,
     bool ShowHelp,
+    bool ShowVersion,
     string BaseRef,
     string? HeadRef,
     string? FilePath,
@@ -19,6 +20,7 @@ internal sealed record CliOptions(
         var mcp = false;
         var stdin = false;
         var showHelp = false;
+        var showVersion = false;
         var baseRef = "HEAD";
         string? headRef = null;
         string? filePath = null;
@@ -35,6 +37,9 @@ internal sealed record CliOptions(
                 case "-h":
                 case "--help":
                     showHelp = true;
+                    break;
+                case "--version":
+                    showVersion = true;
                     break;
                 case "-r":
                 case "--repo":
@@ -163,6 +168,6 @@ internal sealed record CliOptions(
             error = "--context requires --json.";
         }
 
-        return new CliOptions(gitRoot, openGui, mcp, stdin, showHelp, baseRef, headRef, filePath, json, daysOption, contextLines, error);
+        return new CliOptions(gitRoot, openGui, mcp, stdin, showHelp, showVersion, baseRef, headRef, filePath, json, daysOption, contextLines, error);
     }
 }

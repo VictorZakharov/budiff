@@ -55,6 +55,7 @@ internal static class AnsiRenderer
         output.WriteLine("  --json          Write structured JSON instead of ANSI text");
         output.WriteLine("  --context <n>   With --json <file>: fold unchanged runs into Gap rows, keep n context lines");
         output.WriteLine("  -h, --help      Show help");
+        output.WriteLine("  --version       Show the version");
         output.WriteLine();
         output.WriteLine("MCP:");
         output.WriteLine("  budiff mcp      Run a stdio MCP server for AI coding agents");
