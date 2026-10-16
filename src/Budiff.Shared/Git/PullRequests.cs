@@ -59,7 +59,9 @@ public sealed record PullRequestPage(IReadOnlyList<PullRequestInfo> Items, strin
 // Text: free words, a "#123" number, or raw GitHub search qualifiers.
 public sealed record PullRequestQuery(string? Author, PullRequestStateFilter State, string Text);
 
-public sealed record RepoPerson(string Login, string? Name)
+// Email: the public profile email, else one they commit with (see
+// ParsePeople); AvatarUrl: their GitHub picture.
+public sealed record RepoPerson(string Login, string? Name, string? Email = null, string? AvatarUrl = null)
 {
     public string Display => string.IsNullOrWhiteSpace(Name) ? Login : $"{Name} ({Login})";
 }
@@ -366,23 +368,53 @@ public static class PullRequestSearch
         return result;
     }
 
-    // data.repository.mentionableUsers.nodes [{ login, name }].
+    // data.repository: mentionableUsers.nodes [{ login, name, email,
+    // avatarUrl }], and the default branch's recent commits [{ author {
+    // email, user { login } } }]. GitHub shows a profile email only when it
+    // is public, so a person without one gets the newest address they
+    // committed with (not a noreply one).
     public static IReadOnlyList<RepoPerson> ParsePeople(string json)
     {
         using var doc = JsonDocument.Parse(json);
+        var repository = doc.RootElement.GetProperty("data").GetProperty("repository");
+        var commitEmails = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (repository.TryGetProperty("defaultBranchRef", out var branch) && branch.ValueKind == JsonValueKind.Object
+            && branch.TryGetProperty("target", out var target) && target.ValueKind == JsonValueKind.Object
+            && target.TryGetProperty("history", out var history) && history.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var commit in history.GetProperty("nodes").EnumerateArray())
+            {
+                if (commit.TryGetProperty("author", out var author) && author.ValueKind == JsonValueKind.Object
+                    && author.TryGetProperty("user", out var user) && user.ValueKind == JsonValueKind.Object
+                    && Email(String(author, "email")) is { } email)
+                {
+                    commitEmails.TryAdd(String(user, "login"), email);
+                }
+            }
+        }
+
         var people = new List<RepoPerson>();
-        foreach (var node in doc.RootElement.GetProperty("data").GetProperty("repository").GetProperty("mentionableUsers").GetProperty("nodes").EnumerateArray())
+        foreach (var node in repository.GetProperty("mentionableUsers").GetProperty("nodes").EnumerateArray())
         {
             var login = String(node, "login");
             if (login.Length > 0)
             {
                 var name = String(node, "name");
-                people.Add(new RepoPerson(login, name.Length > 0 ? name : null));
+                var avatar = String(node, "avatarUrl");
+                people.Add(new RepoPerson(
+                    login,
+                    name.Length > 0 ? name : null,
+                    Email(String(node, "email")) ?? commitEmails.GetValueOrDefault(login),
+                    avatar.Length > 0 ? avatar : null));
             }
         }
 
         return people.OrderBy(p => p.Name ?? p.Login, StringComparer.OrdinalIgnoreCase).ToList();
     }
+
+    // An address worth showing: not empty, not GitHub's noreply stand-in.
+    private static string? Email(string text)
+        => text.Contains('@') && !text.Contains("noreply", StringComparison.OrdinalIgnoreCase) ? text : null;
 
     // Search nodes can be issues (empty objects under the PullRequest fragment).
     private static PullRequestInfo? ParsePullRequest(JsonElement node)
@@ -612,7 +644,7 @@ public sealed class GitHubCliPullRequestSource : IPullRequestSource, IPullReques
             return PullRequestSearch.ParsePeople(Gh(
                 ct,
                 "api", "graphql",
-                "-f", "query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){mentionableUsers(first:100){nodes{login name}}}}",
+                "-f", "query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){mentionableUsers(first:100){nodes{login name email avatarUrl(size:64)}} defaultBranchRef{target{...on Commit{history(first:100){nodes{author{email user{login}}}}}}}}}",
                 "-f", "owner=" + owner,
                 "-f", "name=" + name));
         }, ct);
