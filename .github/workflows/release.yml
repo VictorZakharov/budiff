@@ -79,7 +79,7 @@ jobs:
             $entries = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $package)).Entries.FullName
             $required = @("LICENSE", "PACKAGE_README.md", "assets/budiff-icon.png")
             if ($id -eq "budiff") {
-              $required += "THIRD-PARTY-NOTICES.md", "licenses/libgit2.txt", "tools/net10.0/any/budiff.dll", "tools/net10.0/any/gui/win-x64/Budiff.App.exe"
+              $required += "THIRD-PARTY-NOTICES.md", "licenses/dotnet-runtime.txt", "tools/net10.0/any/budiff.dll", "tools/net10.0/any/gui/win-x64/Budiff.App.exe"
             }
             foreach ($entry in $required) {
               if ($entries -notcontains $entry) { throw "$package is missing $entry" }
