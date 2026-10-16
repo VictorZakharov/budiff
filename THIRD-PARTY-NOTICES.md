@@ -22,8 +22,6 @@ Versions below are the ones pinned at the time of writing.
 | Component | Version | License | Notice |
 | --- | --- | --- | --- |
 | [.NET runtime](https://github.com/dotnet/runtime) | 10.0 | MIT | Copyright (c) .NET Foundation and Contributors. Its own third-party notices: [`licenses/dotnet-runtime.txt`](licenses/dotnet-runtime.txt) |
-| [LibGit2Sharp](https://github.com/libgit2/libgit2sharp) | 0.31.0 | MIT | Copyright (c) LibGit2Sharp contributors |
-| [libgit2](https://github.com/libgit2/libgit2) (LibGit2Sharp.NativeBinaries) | 2.0.323 | GPL-2.0 with the libgit2 linking exception, plus the licenses of the code it bundles | Copyright (C) the libgit2 contributors. Full text: [`licenses/libgit2.txt`](licenses/libgit2.txt) |
 | [TextMateSharp](https://github.com/danipen/TextMateSharp), TextMateSharp.Grammars | 2.0.4 | MIT | Copyright (c) 2021 Daniel Peñalba. Bundled grammars and themes: see below |
 | [Onigwrap](https://github.com/aikawayataro/Onigwrap) | 1.0.11 | MIT | Copyright (c) 2024 Aikawa Yataro |
 | [Oniguruma](https://github.com/kkos/oniguruma) (in Onigwrap) | - | BSD-2-Clause | Copyright (c) 2002-2021 K.Kosako. Full text: [`licenses/oniguruma.txt`](licenses/oniguruma.txt) |

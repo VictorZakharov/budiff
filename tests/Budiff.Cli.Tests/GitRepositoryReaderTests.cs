@@ -48,8 +48,8 @@ public sealed class GitRepositoryReaderTests
         Assert.False(GitRepositoryReader.HasFileAtRevision(scope, "docs", first));
     }
 
-    // cmd.exe keeps a typed `g:\...` cwd verbatim; libgit2 matches
-    // safe.directory case-sensitively, so Open must hand it the on-disk spelling.
+    // cmd.exe keeps a typed `g:\...` cwd verbatim; git matches safe.directory
+    // against the path it is given, so Open must hand it the on-disk spelling.
     [Fact]
     public void Open_UsesOnDiskSpellingForMisCasedStartPath()
     {

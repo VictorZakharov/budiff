@@ -22,6 +22,8 @@ budiff mcp             # a stdio MCP server for AI agents
 budiff -i              # the desktop GUI (Windows)
 ```
 
+budiff reads repositories with the `git` command, so git 2.11 or later must be on PATH.
+
 ## Libraries
 
 The diff engine and the Avalonia side-by-side control ship as libraries:

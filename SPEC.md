@@ -81,7 +81,7 @@ Out of v1 (later, see section 9): deeper agent-specific repo summaries beyond th
 - `Budiff.Shared/Git/GitHistory.cs` - commits and authors per path plus the windowed net-diff metric, loaded by the git reader (5.5).
 
 ### 5.5 The git reader (lives in the CLI / App, never in Core/Avalonia)
-- `src/Budiff.Shared/Git/*.cs` (LibGit2Sharp + the `git` CLI), compiled into both `Budiff.Cli` and `Budiff.App`: status, HEAD / commit blobs, history, branches, blame, pull requests. It reads the repo and feeds a `DiffResult` into `DiffViewModel.BeginLoad`. **Core and Avalonia never reference git** - the CLI and the App own the git reader and inject text / results into the engine.
+- `src/Budiff.Shared/Git/*.cs` (the `git` command), compiled into both `Budiff.Cli` and `Budiff.App`: status, HEAD / commit blobs, history, branches, blame, pull requests. It reads the repo and feeds a `DiffResult` into `DiffViewModel.BeginLoad`. **Core and Avalonia never reference git** - the CLI and the App own the git reader and inject text / results into the engine.
 
 ## 6. `Budiff.Cli`
 
