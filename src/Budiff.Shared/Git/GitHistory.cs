@@ -76,10 +76,54 @@ public static class GitHistory
         var result = Parse(output);
         if (sinceDays is { } windowDays and > 0)
         {
-            ApplyWindowNetDiff(root, windowDays, result, ct);
+            ApplyNetDiff(root, FindWindowBaseCommit(root, windowDays), "HEAD", result, ct);
         }
 
         return result;
+    }
+
+    // History of a commit range (a pull request: merge-base..head). Commits and
+    // authors come from the range's log; Added/Removed are the NET diff between
+    // the two ends - what the PR changes, as GitHub's "Files changed" shows it.
+    public static HistoryResult? LoadRange(string root, string baseRev, string headRev, CancellationToken ct = default)
+    {
+        if (!GitCli.TryRun(
+                root,
+                out var output,
+                ct,
+                "-c", "core.quotePath=false",
+                "log",
+                "--relative",
+                "--no-renames",
+                "--numstat",
+                "--no-color",
+                "--format=%x1f%H%x1f%aN",
+                baseRev + ".." + headRev,
+                "--",
+                "."))
+        {
+            return null;
+        }
+
+        var result = Parse(output);
+        ApplyNetDiff(root, baseRev, headRev, result, ct);
+        return result;
+    }
+
+    // Paths (relative to root) whose content differs between two revisions -
+    // binary changes included, which numstat only reports as "-".
+    public static IReadOnlyList<string>? ListChangedFiles(string root, string baseRev, string headRev, CancellationToken ct = default)
+    {
+        if (!GitCli.TryRun(root, out var output, ct, "-c", "core.quotePath=false", "diff", "--relative", "--name-only", "--no-renames", "-z", baseRev, headRev, "--", "."))
+        {
+            return null;
+        }
+
+        return output
+            .Split('\0', StringSplitOptions.RemoveEmptyEntries)
+            .Select(NormalizePath)
+            .Where(path => path.Length > 0)
+            .ToList();
     }
 
     public static HistoryResult Parse(string log)
@@ -297,10 +341,11 @@ public static class GitHistory
         return true;
     }
 
-    private static void ApplyWindowNetDiff(string root, int days, HistoryResult result, CancellationToken ct)
+    // Replaces the summed per-commit churn with the net diff between two
+    // revisions: a line added then removed inside the range counts as nothing.
+    private static void ApplyNetDiff(string root, string baseRev, string headRev, HistoryResult result, CancellationToken ct)
     {
-        var baseRef = FindWindowBaseCommit(root, days);
-        if (!GitCli.TryRun(root, out var diff, ct, "-c", "core.quotePath=false", "diff", "--relative", "--numstat", "--no-renames", baseRef, "HEAD", "--", "."))
+        if (!GitCli.TryRun(root, out var diff, ct, "-c", "core.quotePath=false", "diff", "--relative", "--numstat", "--no-renames", baseRev, headRev, "--", "."))
         {
             return;
         }
@@ -382,6 +427,20 @@ public static class CodeAnalysisRepositoryReader
         var history = scan.HasGit ? GitHistory.Load(root, sinceDays, ct) : null;
         return new CodeAnalysisSnapshot(scan, history);
     }
+
+    // A pull request's view: only the files it changes, counted as they are
+    // at the PR head (a file the PR deletes lists with zero lines), with the
+    // range's commits/authors and net churn. Independent of the working tree,
+    // so an un-checked-out PR reads the same as the current branch.
+    public static CodeAnalysisSnapshot LoadPullRequest(string root, PullRequestRange range, CancellationToken ct = default)
+    {
+        var history = GitHistory.LoadRange(root, range.BaseSha, range.HeadSha, ct)
+            ?? throw new InvalidOperationException($"Could not read the history of PR #{range.PullRequest.Number}.");
+        var changed = GitHistory.ListChangedFiles(root, range.BaseSha, range.HeadSha, ct) ?? Array.Empty<string>();
+        var files = GitRepositoryReader.CountAtRevision(root, range.HeadSha, changed, ct);
+        var scan = new ScanResult { Root = root, Files = files, HasGit = true };
+        return new CodeAnalysisSnapshot(scan, history);
+    }
 }
 
 internal static class GitCli
@@ -392,9 +451,27 @@ internal static class GitCli
         => TryRun(workingDir, out stdout, CancellationToken.None, args);
 
     public static bool TryRun(string workingDir, out string stdout, CancellationToken ct, params string[] args)
+        => ToolProcess.TryRun("git", workingDir, TimeoutMs, ct, args, out stdout, out _);
+}
+
+// One hardened child-process runner for the external tools budiff shells out
+// to (git, gh): both pipes drained, a timeout that actually fires, the whole
+// tree killed on timeout. False on a missing tool, timeout, or non-zero exit;
+// stderr comes back either way so callers can surface the tool's own reason.
+internal static class ToolProcess
+{
+    public static bool TryRun(
+        string fileName,
+        string workingDir,
+        int timeoutMs,
+        CancellationToken ct,
+        IReadOnlyList<string> args,
+        out string stdout,
+        out string stderr)
     {
         stdout = string.Empty;
-        var psi = new ProcessStartInfo("git")
+        stderr = string.Empty;
+        var psi = new ProcessStartInfo(fileName)
         {
             WorkingDirectory = Directory.Exists(workingDir) ? workingDir : Environment.CurrentDirectory,
             RedirectStandardOutput = true,
@@ -418,11 +495,11 @@ internal static class GitCli
             }
 
             // Drain BOTH pipes off-thread: reading stdout inline would block
-            // forever when git fills the un-read stderr pipe (and that block
+            // forever when the tool fills the un-read stderr pipe (and that block
             // would also keep the timeout below from ever firing).
             var stdoutTask = proc.StandardOutput.ReadToEndAsync();
             var stderrTask = proc.StandardError.ReadToEndAsync();
-            if (!proc.WaitForExit(TimeoutMs))
+            if (!proc.WaitForExit(timeoutMs))
             {
                 try
                 {
@@ -433,11 +510,12 @@ internal static class GitCli
                     // Best effort process cleanup.
                 }
 
+                stderr = $"{fileName} timed out after {timeoutMs / 1000}s.";
                 return false;
             }
 
             var output = stdoutTask.GetAwaiter().GetResult();
-            stderrTask.GetAwaiter().GetResult();
+            stderr = stderrTask.GetAwaiter().GetResult();
             ct.ThrowIfCancellationRequested();
             if (proc.ExitCode != 0)
             {
@@ -453,10 +531,12 @@ internal static class GitCli
         }
         catch (Win32Exception)
         {
+            stderr = $"'{fileName}' was not found on PATH.";
             return false;
         }
-        catch
+        catch (Exception ex)
         {
+            stderr = ex.Message;
             return false;
         }
     }

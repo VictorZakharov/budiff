@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using Budiff;
+using Budiff.CodeAnalysis;
 using LibGit2Sharp;
 
 namespace Budiff.Git;
@@ -185,6 +187,42 @@ public static class GitRepositoryReader
 
             return DiffLoader.Build(oldBlob, newBlob);
         }, DiffResult.Message("Could not load this diff."));
+    }
+
+    // Line counts for root-relative paths as they are at a revision, not on
+    // disk. A path absent there (deleted by that revision) counts as an empty
+    // file, so it still lists - with its removals - in the bird's-eye.
+    public static IReadOnlyList<FileStat> CountAtRevision(string root, string revision, IReadOnlyList<string> paths, CancellationToken ct = default)
+    {
+        // Not WithRepo: a missing revision must fail loudly, not read as "no files".
+        var scope = Open(root, gitRoot: false);
+        using var repo = new Repository(scope.RepositoryRoot);
+        var tree = ResolveCommit(repo, revision)?.Tree
+            ?? throw new InvalidOperationException($"Revision {revision} is not available locally.");
+        var files = new List<FileStat>(paths.Count);
+        foreach (var path in paths)
+        {
+            ct.ThrowIfCancellationRequested();
+            var repoPath = scope.ScopePrefix.Length == 0 ? path : scope.ScopePrefix + "/" + path;
+            if (tree[repoPath]?.Target is not Blob blob)
+            {
+                files.Add(new FileStat { RelativePath = path, Extension = Path.GetExtension(path).ToLowerInvariant() });
+                continue;
+            }
+
+            if (!CodeScanner.IsCountable(blob.Size))
+            {
+                files.Add(CodeScanner.Oversized(path));
+                continue;
+            }
+
+            using var content = blob.GetContentStream();
+            using var buffer = new MemoryStream();
+            content.CopyTo(buffer);
+            files.Add(CodeScanner.CountBytes(path, buffer.ToArray()));
+        }
+
+        return files;
     }
 
     private static List<ChangedFile> ListWorkingTreeChanges(Repository repo, GitRepositoryScope scope, DiffTarget target)
