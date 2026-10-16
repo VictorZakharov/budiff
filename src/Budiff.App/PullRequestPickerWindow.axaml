@@ -1,0 +1,113 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:app="using:Budiff.App"
+        x:Class="Budiff.App.PullRequestPickerWindow"
+        x:CompileBindings="False"
+        Title="Show changes by pull request"
+        Width="760"
+        Height="560"
+        MinWidth="520"
+        MinHeight="320"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{DynamicResource BudiffEditorBackgroundBrush}">
+    <Window.Styles>
+        <Style Selector="ListBox#ResultList ListBoxItem">
+            <Setter Property="Padding" Value="10,6" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        </Style>
+        <Style Selector="TextBlock.muted">
+            <Setter Property="Foreground" Value="{DynamicResource BudiffMutedTextBrush}" />
+        </Style>
+    </Window.Styles>
+
+    <DockPanel Margin="12">
+        <!-- Filters: free text (#number, words, or raw GitHub qualifiers),
+             author (Mine / Anyone / a repo person), state. -->
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto,200,Auto,110" ColumnSpacing="8" Margin="0,0,0,10">
+            <TextBox x:Name="SearchBox"
+                     PlaceholderText="Search: words, #123, label:bug, base:main"
+                     ToolTip.Tip="Words match title and body; #123 jumps to that PR; GitHub search qualifiers (label:, base:, head:, review:...) pass through."
+                     Text="{Binding SearchText, Mode=TwoWay}"
+                     VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Classes="muted" Text="Author" VerticalAlignment="Center" />
+            <AutoCompleteBox Grid.Column="2"
+                             ItemsSource="{Binding AuthorOptions}"
+                             Text="{Binding AuthorText, Mode=TwoWay}"
+                             FilterMode="Contains"
+                             MinimumPrefixLength="0"
+                             MaxDropDownHeight="260"
+                             ToolTip.Tip="{Binding MineHint}"
+                             VerticalAlignment="Center" />
+            <TextBlock Grid.Column="3" Classes="muted" Text="State" VerticalAlignment="Center" />
+            <ComboBox Grid.Column="4"
+                      HorizontalAlignment="Stretch"
+                      ItemsSource="{Binding States}"
+                      SelectedItem="{Binding SelectedState, Mode=TwoWay}"
+                      VerticalAlignment="Center">
+                <ComboBox.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding Label}" />
+                    </DataTemplate>
+                </ComboBox.ItemTemplate>
+            </ComboBox>
+        </Grid>
+
+        <Grid DockPanel.Dock="Bottom" ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8" Margin="0,10,0,0">
+            <ProgressBar IsIndeterminate="True" Width="60" Height="4"
+                         IsVisible="{Binding IsLoading}" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Classes="muted" Text="{Binding StatusText}" VerticalAlignment="Center" />
+            <Button Grid.Column="2" Content="Cancel" IsCancel="True" Click="OnCancel" />
+            <Button Grid.Column="3" Content="Show changes" IsDefault="True" Classes="accent"
+                    IsEnabled="{Binding CanShow}" Click="OnShow" />
+        </Grid>
+
+        <Border DockPanel.Dock="Top"
+                IsVisible="{Binding HasError}"
+                Background="#33DA3633"
+                CornerRadius="4"
+                Padding="10,6"
+                Margin="0,0,0,8">
+            <TextBlock Text="{Binding ErrorText}" TextWrapping="Wrap" Foreground="{DynamicResource BudiffTextBrush}" />
+        </Border>
+
+        <Border BorderBrush="{DynamicResource BudiffBorderBrush}" BorderThickness="1" CornerRadius="4">
+            <ListBox x:Name="ResultList"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     Background="Transparent"
+                     ItemsSource="{Binding Items}"
+                     SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
+                     DoubleTapped="OnRowDoubleTapped">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Grid ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="10">
+                            <Border Grid.RowSpan="2"
+                                    Background="{Binding StateBrush}"
+                                    CornerRadius="10"
+                                    Padding="8,1"
+                                    MinWidth="62"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="{Binding StateLabel}" FontSize="11" FontWeight="SemiBold"
+                                           Foreground="White" HorizontalAlignment="Center" />
+                            </Border>
+                            <!-- Grid, not a StackPanel: a long title must trim, not run under the stats. -->
+                            <Grid Grid.Column="1" ColumnDefinitions="Auto,*" ColumnSpacing="6">
+                                <TextBlock Classes="muted" Text="{Binding NumberText}" FontWeight="SemiBold" />
+                                <TextBlock Grid.Column="1" Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                                           Foreground="{DynamicResource BudiffTextBrush}" />
+                            </Grid>
+                            <TextBlock Grid.Column="1" Grid.Row="1" Classes="muted" FontSize="11.5"
+                                       Text="{Binding Meta}" TextTrimming="CharacterEllipsis" />
+                            <StackPanel Grid.Column="2" Grid.RowSpan="2" Orientation="Horizontal" Spacing="8"
+                                        VerticalAlignment="Center">
+                                <TextBlock Text="{Binding Added}" Foreground="#3FB950" FontFamily="Cascadia Code,Consolas,monospace" FontSize="12" />
+                                <TextBlock Text="{Binding Removed}" Foreground="#F85149" FontFamily="Cascadia Code,Consolas,monospace" FontSize="12" />
+                                <TextBlock Classes="muted" Text="{Binding Files}" FontSize="12" MinWidth="52" TextAlignment="Right" />
+                            </StackPanel>
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Border>
+    </DockPanel>
+</Window>

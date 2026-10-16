@@ -1,11 +1,13 @@
 using System;
 using System.ComponentModel;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
+using Budiff.Git;
 
 namespace Budiff.App;
 
@@ -27,11 +29,24 @@ public sealed partial class MainWindow : Window
         DataContext = _viewModel;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         _viewModel.Analysis.PropertyChanged += OnAnalysisPropertyChanged;
+        _viewModel.Analysis.PickPullRequest = PickPullRequestAsync;
         BodyGrid.SizeChanged += (_, _) => ClampDockedDiff();
         ApplyDiffLayout();
     }
 
     internal MainWindowViewModel ViewModel => _viewModel;
+
+    // The Period "Pull request..." entry: a modal picker over this window.
+    private async Task<PullRequestInfo?> PickPullRequestAsync()
+    {
+        if (_viewModel.Analysis.PullRequests is not { } source)
+        {
+            return null;
+        }
+
+        var picker = new PullRequestPickerWindow(new PullRequestPickerViewModel(source));
+        return await picker.ShowDialog<PullRequestInfo?>(this);
+    }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {

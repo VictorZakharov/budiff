@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
@@ -18,7 +19,7 @@ namespace Budiff.App;
 
 public sealed record GroupingOption(string Label, AnalysisGrouping Value);
 
-public sealed record PeriodOption(string Label, int? Days, bool IsCustom = false);
+public sealed record PeriodOption(string Label, int? Days, bool IsCustom = false, bool IsPullRequest = false);
 
 // Common shape of one include/exclude filter entry (extension, author); the
 // panel wires all filter lists through the same subscribe/set-all helpers.
@@ -167,6 +168,11 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     private readonly HashSet<string> _expanded = new(StringComparer.OrdinalIgnoreCase);
     private string _root = string.Empty;
     private ScanResult? _scan;
+
+    // The working-tree scan. PR mode swaps _scan for the PR head's changed
+    // files; leaving it restores this one without rescanning the disk.
+    private ScanResult? _folderScan;
+    private PullRequestRange? _appliedPullRequest;
     private HistoryResult? _history;
     private bool _ready;
     private bool _suspendRebuild;
@@ -187,6 +193,27 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     }
 
     public Func<string, Task<bool>>? ConfirmExpensive { get; set; }
+
+    // Where pull requests come from (null outside git) and the UI that picks
+    // one; both are wired by the shell.
+    public IPullRequestSource? PullRequests { get; set; }
+
+    public Func<Task<PullRequestInfo?>>? PickPullRequest { get; set; }
+
+    // The PR the visible analysis was computed for (null = a time period).
+    public PullRequestRange? AppliedPullRequest => _appliedPullRequest;
+
+    [ObservableProperty]
+    private bool _isPullRequestPeriod;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PullRequestButtonText))]
+    [NotifyPropertyChangedFor(nameof(PullRequestTip))]
+    private string _pullRequestLabel = string.Empty;
+
+    public string PullRequestButtonText => PullRequestLabel.Length > 0 ? PullRequestLabel : "Choose...";
+
+    public string PullRequestTip => PullRequestLabel.Length > 0 ? PullRequestLabel + " - click to pick another" : "Choose a pull request";
 
     [ObservableProperty]
     private ObservableCollection<CodeAnalysisRow> _roots = new();
@@ -258,6 +285,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         new PeriodOption("Last month", 30),
         new PeriodOption("Last 3 months", 90),
         new PeriodOption("Custom...", null, IsCustom: true),
+        new PeriodOption("Pull request...", null, IsPullRequest: true),
     };
 
     private PeriodOption DefaultPeriod => Periods.First(p => p.Days == 30);
@@ -307,7 +335,8 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         }
     }
 
-    private bool Historical => SinceDays.HasValue;
+    // PR mode is period-like too: churn columns show what the PR changed.
+    private bool Historical => _appliedPullRequest is not null || SinceDays.HasValue;
 
     // The window the visible analysis was actually computed with (null = all
     // time). The drill-in diff aligns its default base to this.
@@ -322,6 +351,16 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
     public async Task LoadAsync(string root)
     {
+        // A refresh of the same folder keeps the PR view; a new folder drops it.
+        var reapply = SelectedPeriod.IsPullRequest && string.Equals(root, _root, StringComparison.OrdinalIgnoreCase)
+            ? _appliedPullRequest?.PullRequest
+            : null;
+        if (SelectedPeriod.IsPullRequest && reapply is null)
+        {
+            SelectPeriodQuietly(DefaultPeriod);
+        }
+
+        ClearPullRequest();
         _root = root;
         _ready = false;
         Roots.Clear();
@@ -338,7 +377,8 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         ShowMessage("Scanning...");
         try
         {
-            var days = SinceDays;
+            // Re-applying a PR only needs the folder scan; skip an all-time history.
+            var days = reapply is not null ? DefaultPeriod.Days : SinceDays;
             var sw = Stopwatch.StartNew();
             var snapshot = await Task.Run(() => CodeAnalysisRepositoryReader.Load(root, days));
             RecordTiming(sw.ElapsedMilliseconds, snapshot.History?.CommitCount ?? 0);
@@ -357,11 +397,18 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             IsScanning = false;
         }
 
+        if (reapply is not null)
+        {
+            await ApplyPullRequestAsync(reapply);
+            return;
+        }
+
         HistoryApplied?.Invoke();
     }
 
     public void LoadFrom(ScanResult scan, HistoryResult? history)
     {
+        _folderScan = scan;
         _scan = scan;
         _history = history;
         GitAvailable = scan.HasGit && history is not null;
@@ -590,7 +637,11 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         var tail = ")";
         if (_history is not null)
         {
-            if (Historical)
+            if (_appliedPullRequest is { } pr)
+            {
+                tail += $"  -  +{N(root.Added)} / -{N(root.Removed)} in PR #{pr.PullRequest.Number}";
+            }
+            else if (Historical)
             {
                 tail += $"  -  +{N(root.Added)} / -{N(root.Removed)} in window";
             }
@@ -675,7 +726,96 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     partial void OnSelectedPeriodChanged(PeriodOption value)
     {
         IsCustomPeriod = value.IsCustom;
+        IsPullRequestPeriod = value.IsPullRequest;
+        if (value.IsPullRequest)
+        {
+            if (!_suspendRebuild)
+            {
+                _ = ChoosePullRequestAsync();
+            }
+
+            return;
+        }
+
         _ = ReloadHistoryAsync();
+    }
+
+    // Opens the picker (from the Period entry or the PR button beside it).
+    // Cancelling the very first pick returns to the previous period.
+    [RelayCommand]
+    private async Task ChoosePullRequestAsync()
+    {
+        var picked = PickPullRequest is null ? null : await PickPullRequest();
+        if (picked is not null)
+        {
+            await ApplyPullRequestAsync(picked);
+        }
+        else if (_appliedPullRequest is null)
+        {
+            SelectPeriodQuietly(_appliedPeriod.IsPullRequest ? DefaultPeriod : _appliedPeriod);
+        }
+    }
+
+    public async Task ApplyPullRequestAsync(PullRequestInfo pullRequest)
+    {
+        if (PullRequests is null || _folderScan is null || !GitAvailable)
+        {
+            return;
+        }
+
+        IsScanning = true;
+        ShowMessage($"Loading PR #{pullRequest.Number}...");
+        try
+        {
+            var range = await PullRequests.ResolveAsync(pullRequest, CancellationToken.None);
+            var root = _root;
+            var snapshot = await Task.Run(() => CodeAnalysisRepositoryReader.LoadPullRequest(root, range));
+            _appliedPullRequest = range;
+            _scan = snapshot.Scan;
+            _history = snapshot.History;
+            SelectPeriodQuietly(Periods.First(p => p.IsPullRequest));
+            _appliedPeriod = SelectedPeriod;
+            _appliedDays = null;
+            PullRequestLabel = $"#{pullRequest.Number} {pullRequest.Title}";
+            LoadFilters(_scan, _history, preserveSelection: true);
+        }
+        catch (Exception ex)
+        {
+            // Keep whatever was showing; the summary line says why.
+            if (_appliedPullRequest is null)
+            {
+                SelectPeriodQuietly(_appliedPeriod.IsPullRequest ? DefaultPeriod : _appliedPeriod);
+            }
+
+            Rebuild();
+            ShowMessage($"Could not load PR #{pullRequest.Number}: {ex.Message}");
+            return;
+        }
+        finally
+        {
+            IsScanning = false;
+        }
+
+        Rebuild();
+        HistoryApplied?.Invoke();
+    }
+
+    private void SelectPeriodQuietly(PeriodOption period)
+    {
+        var suspended = _suspendRebuild;
+        _suspendRebuild = true;
+        SelectedPeriod = period;
+        _suspendRebuild = suspended;
+    }
+
+    private void ClearPullRequest()
+    {
+        _appliedPullRequest = null;
+        PullRequestLabel = string.Empty;
+        if (_folderScan is not null)
+        {
+            _scan = _folderScan;
+        }
     }
 
     partial void OnCustomDaysTextChanged(string value)
@@ -694,7 +834,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
     private async Task ReloadHistoryAsync()
     {
-        if (_suspendRebuild || !_ready || _scan is null || !GitAvailable)
+        if (_suspendRebuild || !_ready || _folderScan is null || !GitAvailable)
         {
             Rebuild();
             return;
@@ -725,9 +865,10 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             var sw = Stopwatch.StartNew();
             _history = await Task.Run(() => GitHistory.Load(_root, days));
             RecordTiming(sw.ElapsedMilliseconds, _history?.CommitCount ?? 0);
+            ClearPullRequest();
             _appliedPeriod = SelectedPeriod;
             _appliedDays = days;
-            LoadFilters(_scan, _history, preserveSelection: true);
+            LoadFilters(_folderScan, _history, preserveSelection: true);
         }
         catch (Exception ex)
         {

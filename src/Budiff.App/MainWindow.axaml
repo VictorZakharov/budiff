@@ -241,6 +241,27 @@
                                            Foreground="{DynamicResource BudiffMutedTextBrush}"
                                            IsVisible="{Binding Analysis.IsCustomPeriod}"
                                            VerticalAlignment="Center" />
+                                <!-- The applied pull request; click to pick another. -->
+                                <!-- A Grid (not a StackPanel) so a long title actually
+                                     trims inside MaxWidth instead of painting over the
+                                     filter box next to it. -->
+                                <Button IsVisible="{Binding Analysis.IsPullRequestPeriod}"
+                                        Command="{Binding Analysis.ChoosePullRequestCommand}"
+                                        MaxWidth="180"
+                                        Padding="8,4"
+                                        ClipToBounds="True"
+                                        HorizontalContentAlignment="Stretch"
+                                        VerticalAlignment="Center"
+                                        ToolTip.Tip="{Binding Analysis.PullRequestTip}">
+                                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6">
+                                        <materialIcons:MaterialIcon Kind="SourcePull" Width="14" Height="14"
+                                                                    Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding Analysis.PullRequestButtonText}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   VerticalAlignment="Center" />
+                                    </Grid>
+                                </Button>
                             </StackPanel>
 
                             <TextBox Grid.Column="2"
@@ -536,9 +557,9 @@
 
                         <!-- Comparison controls live with the diff: base branch only;
                              head is the working tree (or HEAD when the toggle is off). -->
-                        <TextBlock Grid.Column="3" Text="Base" FontSize="12" IsVisible="{Binding Diff.ShowDiffOptions}" Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="3" Text="Base" FontSize="12" IsVisible="{Binding ShowCompareOptions}" Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
                         <ComboBox Grid.Column="4" FontSize="12"
-                                  IsVisible="{Binding Diff.ShowDiffOptions}"
+                                  IsVisible="{Binding ShowCompareOptions}"
                                   HorizontalAlignment="Stretch"
                                   ItemsSource="{Binding BaseRefs}"
                                   SelectedItem="{Binding SelectedBaseRef, Mode=TwoWay}">
@@ -549,7 +570,7 @@
                             </ComboBox.ItemTemplate>
                         </ComboBox>
                         <CheckBox Grid.Column="5"
-                                  IsVisible="{Binding Diff.ShowDiffOptions}"
+                                  IsVisible="{Binding ShowCompareOptions}"
                                   IsChecked="{Binding IncludeWorkingTree, Mode=TwoWay}"
                                   Content="Working tree"
                                   FontSize="12"
