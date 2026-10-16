@@ -71,6 +71,10 @@ public interface IPullRequestSource
     Task<string?> GetCurrentLoginAsync(CancellationToken ct);
 
     Task<PullRequestRange> ResolveAsync(PullRequestInfo pullRequest, CancellationToken ct);
+
+    // The folder the list is limited to (repository path), or empty for the
+    // whole repository. A scoped page has no total (TotalCount -1).
+    string Scope => string.Empty;
 }
 
 public static class PullRequestSearch
@@ -154,6 +158,50 @@ public static class PullRequestSearch
             : PullRequestPage.Empty;
     }
 
+    // data.repository.c{i}.associatedPullRequests.nodes, for commits[i]; a
+    // commit GitHub does not know comes back null and is left out.
+    public static IReadOnlyDictionary<string, IReadOnlyList<PullRequestInfo>> ParseCommitPulls(string json, IReadOnlyList<string> commits)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var repository = doc.RootElement.GetProperty("data").GetProperty("repository");
+        var result = new Dictionary<string, IReadOnlyList<PullRequestInfo>>(StringComparer.Ordinal);
+        for (var i = 0; i < commits.Count; i++)
+        {
+            if (repository.TryGetProperty("c" + i.ToString(CultureInfo.InvariantCulture), out var commit)
+                && commit.ValueKind == JsonValueKind.Object
+                && commit.TryGetProperty("associatedPullRequests", out var pulls)
+                && pulls.TryGetProperty("nodes", out var nodes))
+            {
+                result[commits[i]] = nodes.EnumerateArray().Select(ParsePullRequest).OfType<PullRequestInfo>().ToList();
+            }
+        }
+
+        return result;
+    }
+
+    // data.repository.p{i}.files { totalCount, nodes [{ path }] }, for
+    // numbers[i]; null paths when GitHub listed only some of them.
+    public static IReadOnlyDictionary<int, IReadOnlyList<string>?> ParseFiles(string json, IReadOnlyList<int> numbers)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var repository = doc.RootElement.GetProperty("data").GetProperty("repository");
+        var result = new Dictionary<int, IReadOnlyList<string>?>();
+        for (var i = 0; i < numbers.Count; i++)
+        {
+            if (repository.TryGetProperty("p" + i.ToString(CultureInfo.InvariantCulture), out var pr)
+                && pr.ValueKind == JsonValueKind.Object
+                && pr.TryGetProperty("files", out var files)
+                && files.ValueKind == JsonValueKind.Object)
+            {
+                var paths = files.GetProperty("nodes").EnumerateArray().Select(n => String(n, "path")).Where(p => p.Length > 0).ToList();
+                var total = Int(files, "totalCount");
+                result[numbers[i]] = total > paths.Count ? null : paths;
+            }
+        }
+
+        return result;
+    }
+
     // data.repository.mentionableUsers.nodes [{ login, name }].
     public static IReadOnlyList<RepoPerson> ParsePeople(string json)
     {
@@ -206,44 +254,140 @@ public static class PullRequestSearch
 
 // Pull requests through the GitHub CLI: it already owns auth, enterprise
 // hosts, and which remote is "the" GitHub repo (`gh repo set-default`).
-public sealed class GitHubCliPullRequestSource(string root) : IPullRequestSource
+//
+// scopePrefix (a folder's repository path) limits the list to PRs that touch
+// it - see ScopedPullRequestSearch; an explicit "#123" is shown regardless.
+public sealed class GitHubCliPullRequestSource : IPullRequestSource, IPullRequestApi
 {
     private const int TimeoutMs = 30_000;
     private const int FetchTimeoutMs = 180_000;
 
+    private readonly string _root;
+    private readonly ScopedPullRequestSearch? _scoped;
     private string? _repo;
+    private string? _defaultBranch;
+    private string? _historyRef;
+
+    public GitHubCliPullRequestSource(string root, string scopePrefix = "")
+    {
+        _root = root;
+        if (scopePrefix.Trim('/', '\\').Length > 0)
+        {
+            _scoped = new ScopedPullRequestSearch(_root, scopePrefix, this);
+        }
+    }
+
+    public string Scope => _scoped?.Scope ?? string.Empty;
 
     public Task<PullRequestPage> SearchAsync(PullRequestQuery query, string? after, int pageSize, CancellationToken ct)
         => Task.Run(() =>
+            _scoped is not null && PullRequestSearch.ParseNumber(query.Text) is null
+                ? _scoped.Search(query, after, pageSize, ct)
+                : ((IPullRequestApi)this).Search(query, after, pageSize, ct), ct);
+
+    PullRequestPage IPullRequestApi.Search(PullRequestQuery query, string? after, int pageSize, CancellationToken ct)
+    {
+        var repo = Repo(ct);
+        if (PullRequestSearch.ParseNumber(query.Text) is { } number)
         {
-            var repo = Repo(ct);
-            if (PullRequestSearch.ParseNumber(query.Text) is { } number)
-            {
-                var (owner, name) = Split(repo);
-                return PullRequestSearch.ParseSingle(Gh(
-                    ct,
-                    "api", "graphql",
-                    "-f", "query=query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){" + PullRequestSearch.PullRequestFields + "}}}",
-                    "-f", "owner=" + owner,
-                    "-f", "name=" + name,
-                    "-F", "number=" + number.ToString(CultureInfo.InvariantCulture)));
-            }
-
-            var args = new List<string>
-            {
+            var (owner, name) = Split(repo);
+            return PullRequestSearch.ParseSingle(Gh(
+                ct,
                 "api", "graphql",
-                "-f", "query=query($q:String!,$n:Int!,$after:String){search(query:$q,type:ISSUE,first:$n,after:$after){issueCount pageInfo{endCursor hasNextPage} nodes{... on PullRequest{" + PullRequestSearch.PullRequestFields + "}}}}",
-                "-f", "q=" + PullRequestSearch.BuildQuery(repo, query),
-                "-F", "n=" + pageSize.ToString(CultureInfo.InvariantCulture),
-            };
-            if (after is not null)
-            {
-                args.Add("-f");
-                args.Add("after=" + after);
-            }
+                "-f", "query=query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){" + PullRequestSearch.PullRequestFields + "}}}",
+                "-f", "owner=" + owner,
+                "-f", "name=" + name,
+                "-F", "number=" + number.ToString(CultureInfo.InvariantCulture)));
+        }
 
-            return PullRequestSearch.ParseSearch(Gh(ct, args.ToArray()));
-        }, ct);
+        var args = new List<string>
+        {
+            "api", "graphql",
+            "-f", "query=query($q:String!,$n:Int!,$after:String){search(query:$q,type:ISSUE,first:$n,after:$after){issueCount pageInfo{endCursor hasNextPage} nodes{... on PullRequest{" + PullRequestSearch.PullRequestFields + "}}}}",
+            "-f", "q=" + PullRequestSearch.BuildQuery(repo, query),
+            "-F", "n=" + pageSize.ToString(CultureInfo.InvariantCulture),
+        };
+        if (after is not null)
+        {
+            args.Add("-f");
+            args.Add("after=" + after);
+        }
+
+        return PullRequestSearch.ParseSearch(Gh(ct, args.ToArray()));
+    }
+
+    // One GraphQL request for the slice: an alias per commit (SHAs are hex).
+    public IReadOnlyDictionary<string, IReadOnlyList<PullRequestInfo>> PullRequestsOf(IReadOnlyList<string> commits, CancellationToken ct)
+    {
+        var shas = commits.Where(IsSha).ToList();
+        if (shas.Count == 0)
+        {
+            return new Dictionary<string, IReadOnlyList<PullRequestInfo>>();
+        }
+
+        var body = new StringBuilder();
+        for (var i = 0; i < shas.Count; i++)
+        {
+            body.Append('c').Append(i.ToString(CultureInfo.InvariantCulture))
+                .Append(":object(oid:\"").Append(shas[i]).Append("\"){...on Commit{associatedPullRequests(first:3){nodes{")
+                .Append(PullRequestSearch.PullRequestFields).Append("}}}} ");
+        }
+
+        return PullRequestSearch.ParseCommitPulls(RepositoryQuery(ct, body.ToString()), shas);
+    }
+
+    public IReadOnlyDictionary<int, IReadOnlyList<string>?> FilesOf(IReadOnlyList<int> numbers, CancellationToken ct)
+    {
+        if (numbers.Count == 0)
+        {
+            return new Dictionary<int, IReadOnlyList<string>?>();
+        }
+
+        var body = new StringBuilder();
+        for (var i = 0; i < numbers.Count; i++)
+        {
+            body.Append('p').Append(i.ToString(CultureInfo.InvariantCulture))
+                .Append(":pullRequest(number:").Append(numbers[i].ToString(CultureInfo.InvariantCulture))
+                .Append("){files(first:100){totalCount nodes{path}}} ");
+        }
+
+        return PullRequestSearch.ParseFiles(RepositoryQuery(ct, body.ToString()), numbers);
+    }
+
+    // The default branch on the remote that is the GitHub repo, else locally,
+    // else HEAD.
+    public string HistoryRef(CancellationToken ct)
+    {
+        if (_historyRef is not null)
+        {
+            return _historyRef;
+        }
+
+        var repo = Repo(ct);
+        var branch = _defaultBranch ?? string.Empty;
+        var candidates = new List<string>();
+        if (branch.Length > 0)
+        {
+            candidates.Add($"refs/remotes/{PullRequestRanges.FindRemote(_root, repo)}/{branch}");
+            candidates.Add("refs/heads/" + branch);
+        }
+
+        candidates.Add("HEAD");
+        return _historyRef = candidates.First(c => c == "HEAD" || GitCli.TryRun(_root, out _, ct, "rev-parse", "--verify", "--quiet", c + "^{commit}"));
+    }
+
+    private string RepositoryQuery(CancellationToken ct, string body)
+    {
+        var (owner, name) = Split(Repo(ct));
+        return Gh(
+            ct,
+            "api", "graphql",
+            "-f", "query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){" + body + "}}",
+            "-f", "owner=" + owner,
+            "-f", "name=" + name);
+    }
+
+    private static bool IsSha(string text) => text.Length == 40 && text.All(char.IsAsciiHexDigit);
 
     public Task<IReadOnlyList<RepoPerson>> GetPeopleAsync(CancellationToken ct)
         => Task.Run(() =>
@@ -265,10 +409,21 @@ public sealed class GitHubCliPullRequestSource(string root) : IPullRequestSource
         }, ct);
 
     public Task<PullRequestRange> ResolveAsync(PullRequestInfo pullRequest, CancellationToken ct)
-        => Task.Run(() => PullRequestRanges.Resolve(root, pullRequest, () => Repo(ct), FetchTimeoutMs, ct), ct);
+        => Task.Run(() => PullRequestRanges.Resolve(_root, pullRequest, () => Repo(ct), FetchTimeoutMs, ct), ct);
 
+    // owner/name and its default branch, in one call.
     private string Repo(CancellationToken ct)
-        => _repo ??= Gh(ct, "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner").Trim();
+    {
+        if (_repo is null)
+        {
+            var line = Gh(ct, "repo", "view", "--json", "nameWithOwner,defaultBranchRef", "-q", ".nameWithOwner + \" \" + .defaultBranchRef.name").Trim();
+            var space = line.IndexOf(' ');
+            _defaultBranch = space > 0 ? line[(space + 1)..].Trim() : null;
+            _repo = space > 0 ? line[..space] : line;
+        }
+
+        return _repo;
+    }
 
     private static (string Owner, string Name) Split(string repo)
     {
@@ -278,7 +433,7 @@ public sealed class GitHubCliPullRequestSource(string root) : IPullRequestSource
 
     private string Gh(CancellationToken ct, params string[] args)
     {
-        if (ToolProcess.TryRun("gh", root, TimeoutMs, ct, args, out var stdout, out var stderr))
+        if (ToolProcess.TryRun("gh", _root, TimeoutMs, ct, args, out var stdout, out var stderr))
         {
             return stdout;
         }
