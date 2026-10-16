@@ -30,6 +30,8 @@ Release tags also attach self-contained, single-file CLI builds for users withou
 | Linux x64 | `budiff-linux-x64.tar.gz` |
 | macOS arm64 | `budiff-osx-arm64.tar.gz` |
 
+budiff reads repositories with the `git` command, so git 2.11 or later must be on PATH.
+
 One-line install scripts:
 
 ```powershell

@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Threading;
-using LibGit2Sharp;
+using System.Threading.Tasks;
 
 namespace Budiff.Git;
 
@@ -60,7 +60,6 @@ public sealed class ScopedPullRequestSearch
     // ahead), so what they learn is kept in thread-safe places.
     private readonly ConcurrentDictionary<string, IReadOnlyList<PullRequestInfo>> _pullsOfCommit = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<(int Number, string Head), bool> _touches = new();
-    private volatile string? _canonicalPrefix;
     private volatile FolderHistory? _history;
 
     // root: anywhere in the repository; scopePrefix: the folder, from the
@@ -73,6 +72,11 @@ public sealed class ScopedPullRequestSearch
     }
 
     public string Scope => _prefix;
+
+    // The folder for git, from the repository top whatever the working
+    // directory, in any letter case (the scope may come from a path typed
+    // in another case on Windows).
+    private string Pathspec => ":(top,literal,icase)" + _prefix;
 
     public PullRequestPage Search(PullRequestQuery query, string? after, int pageSize, CancellationToken ct)
     {
@@ -169,27 +173,24 @@ public sealed class ScopedPullRequestSearch
 
     private IEnumerable<PullRequestInfo> Touching(IReadOnlyList<PullRequestInfo> prs, CancellationToken ct)
     {
-        var verdicts = new Dictionary<int, bool>();
-        var unknown = new List<PullRequestInfo>();
-        using (var repo = OpenRepository())
-        {
-            foreach (var pr in prs)
-            {
-                if (_touches.TryGetValue((pr.Number, pr.HeadRefOid), out var known))
-                {
-                    verdicts[pr.Number] = known;
-                }
-                else if (repo is not null && TouchesLocally(repo, pr) is { } local)
-                {
-                    verdicts[pr.Number] = _touches[(pr.Number, pr.HeadRefOid)] = local;
-                }
-                else
-                {
-                    unknown.Add(pr);
-                }
-            }
-        }
+        var verdicts = new ConcurrentDictionary<int, bool>();
+        var fallbackStart = new Lazy<string>(HistoryRefOrHead);
 
+        // A git process per PR (~20-30 ms to start on Windows), a few at once.
+        Parallel.ForEach(prs, new ParallelOptions { MaxDegreeOfParallelism = 8, CancellationToken = ct }, pr =>
+        {
+            if (_touches.TryGetValue((pr.Number, pr.HeadRefOid), out var known))
+            {
+                verdicts[pr.Number] = known;
+            }
+            else if (TouchesLocally(pr, fallbackStart, ct) is { } local)
+            {
+                verdicts[pr.Number] = _touches[(pr.Number, pr.HeadRefOid)] = local;
+            }
+        });
+
+        // The rest, in list order: their file lists, in one request.
+        var unknown = prs.Where(pr => !verdicts.ContainsKey(pr.Number)).ToList();
         if (unknown.Count > 0)
         {
             var files = _api.FilesOf(unknown.Select(pr => pr.Number).ToList(), ct);
@@ -204,23 +205,39 @@ public sealed class ScopedPullRequestSearch
         return prs.Where(pr => verdicts.GetValueOrDefault(pr.Number));
     }
 
-    // Did merge-base -> head change the folder? Null when either end is not
-    // in this clone (a fork's PR, or not fetched yet).
-    private bool? TouchesLocally(Repository repo, PullRequestInfo pr)
+    // Did merge-base -> head change the folder? `git diff A...B` diffs from
+    // their merge base; --quiet answers by exit code. The default branch
+    // stands in for a base that is not here. Null when the head is not in
+    // this clone (a fork's PR, or not fetched yet) or the ends share no
+    // history.
+    private bool? TouchesLocally(PullRequestInfo pr, Lazy<string> fallbackStart, CancellationToken ct)
     {
-        var head = Commit(repo, pr.HeadRefOid);
-        var start = Commit(repo, pr.BaseRefOid) ?? Commit(repo, HistoryRefOrHead(repo));
-        if (head is null || start is null)
+        if (!IsSha(pr.HeadRefOid))
         {
             return null;
         }
 
-        var mergeBase = repo.ObjectDatabase.FindMergeBase(start, head) ?? start;
-        var prefix = CanonicalPrefix(repo);
-        return !Equals(head[prefix]?.Target.Id, mergeBase[prefix]?.Target.Id);
+        foreach (var start in new[] { pr.BaseRefOid, null })
+        {
+            var from = start ?? fallbackStart.Value;
+            if (from.Length == 0)
+            {
+                continue;
+            }
+
+            switch (GitCli.ExitCode(_root, ct, "diff", "--quiet", "--no-ext-diff", "--no-textconv", $"{from}...{pr.HeadRefOid}", "--", Pathspec))
+            {
+                case 0:
+                    return false;
+                case 1:
+                    return true;
+            }
+        }
+
+        return null;
     }
 
-    private string HistoryRefOrHead(Repository repo)
+    private string HistoryRefOrHead()
     {
         try
         {
@@ -228,7 +245,7 @@ public sealed class ScopedPullRequestSearch
         }
         catch (Exception)
         {
-            return repo.Head.Tip?.Sha ?? string.Empty;
+            return "HEAD";
         }
     }
 
@@ -237,25 +254,27 @@ public sealed class ScopedPullRequestSearch
     private IReadOnlyList<string> History(CancellationToken ct)
     {
         var reference = _api.HistoryRef(ct);
-        using var repo = OpenRepository();
-        if (repo is null || Commit(repo, reference) is not { } tip)
+        if (!GitCli.TryRun(_root, out var tipOutput, ct, "rev-parse", "--verify", "--quiet", reference + "^{commit}")
+            || tipOutput.Trim() is not { Length: > 0 } tip)
         {
             return Array.Empty<string>();
         }
 
-        if (_history is { } cached && cached.Tip == tip.Sha)
+        if (_history is { } cached && cached.Tip == tip)
         {
             return cached.Commits;
         }
 
-        var commits = GitCli.TryRun(repo.Info.WorkingDirectory, out var log, ct, "log", "--first-parent", "--format=%H", tip.Sha, "--", CanonicalPrefix(repo))
+        var commits = GitCli.TryRun(_root, out var log, ct, "log", "--first-parent", "--format=%H", tip, "--", Pathspec)
             ? log.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             : Array.Empty<string>();
-        _history = new FolderHistory(tip.Sha, commits);
+        _history = new FolderHistory(tip, commits);
         return commits;
     }
 
     private sealed record FolderHistory(string Tip, IReadOnlyList<string> Commits);
+
+    private static bool IsSha(string text) => text.Length >= 40 && text.All(char.IsAsciiHexDigit);
 
     private IReadOnlyDictionary<string, IReadOnlyList<PullRequestInfo>> PullRequestsOf(IReadOnlyList<string> commits, CancellationToken ct)
     {
@@ -270,56 +289,5 @@ public sealed class ScopedPullRequestSearch
         }
 
         return _pullsOfCommit;
-    }
-
-    // The folder as the repository spells it: the scope may come from a path
-    // typed in another letter case (Windows), and git paths are exact.
-    private string CanonicalPrefix(Repository repo)
-    {
-        if (_canonicalPrefix is not null)
-        {
-            return _canonicalPrefix;
-        }
-
-        var tree = repo.Head.Tip?.Tree;
-        var parts = new List<string>();
-        foreach (var segment in _prefix.Split('/', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var entry = tree?.FirstOrDefault(e => e.Name.Equals(segment, StringComparison.Ordinal))
-                ?? tree?.FirstOrDefault(e => e.Name.Equals(segment, StringComparison.OrdinalIgnoreCase));
-            parts.Add(entry?.Name ?? segment);
-            tree = entry?.Target as Tree;
-        }
-
-        return _canonicalPrefix = string.Join('/', parts);
-    }
-
-    private Repository? OpenRepository()
-    {
-        try
-        {
-            return Repository.Discover(_root) is { } path ? new Repository(path) : null;
-        }
-        catch (Exception)
-        {
-            return null;
-        }
-    }
-
-    private static Commit? Commit(Repository repo, string spec)
-    {
-        if (spec.Length == 0)
-        {
-            return null;
-        }
-
-        try
-        {
-            return repo.Lookup<Commit>(spec);
-        }
-        catch (Exception)
-        {
-            return null;
-        }
     }
 }

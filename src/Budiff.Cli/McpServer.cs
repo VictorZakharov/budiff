@@ -223,7 +223,7 @@ internal sealed class McpServer
         }
         catch (Exception ex)
         {
-            // Unexpected failure: keep internals (paths, libgit2 details) out
+            // Unexpected failure: keep internals (paths, git details) out
             // of the tool result; the detail goes to stderr for diagnosis.
             _error.WriteLine($"tools/call {name} failed: {ex}");
             return ToolResult("Tool '" + name + "' failed unexpectedly.", isError: true);

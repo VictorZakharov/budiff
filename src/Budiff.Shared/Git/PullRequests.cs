@@ -80,70 +80,75 @@ internal static class GitHubRemote
 {
     public static (string Repo, string? DefaultBranch)? Resolve(string root)
     {
-        try
+        var remotes = Remotes(root);
+        var github = remotes
+            .Select(r => (r.Name, Repo: ParseUrl(r.Url), r.GhResolved))
+            .Where(r => r.Repo is not null)
+            .ToList();
+        (string Name, string? Repo)? chosen = null;
+        foreach (var remote in github)
         {
-            using var repo = OpenRepository(root);
-            if (repo is null)
+            // "base" on the remote gh set as default; older gh wrote owner/name.
+            if (remote.GhResolved == "base")
+            {
+                chosen = (remote.Name, remote.Repo);
+                break;
+            }
+
+            if (remote.GhResolved is { } resolved && resolved.Contains('/'))
+            {
+                chosen = (remote.Name, resolved);
+                break;
+            }
+        }
+
+        if (chosen is null)
+        {
+            if (github.Select(r => r.Repo).Distinct(StringComparer.OrdinalIgnoreCase).Count() != 1)
             {
                 return null;
             }
 
-            var remotes = repo.Network.Remotes
-                .Select(r => (r.Name, Repo: ParseUrl(r.Url)))
-                .Where(r => r.Repo is not null)
-                .ToList();
-            (string Name, string? Repo)? chosen = null;
-            foreach (var remote in remotes)
-            {
-                // "base" on the remote gh set as default; older gh wrote owner/name.
-                var resolved = repo.Config.Get<string>($"remote.{remote.Name}.gh-resolved")?.Value;
-                if (resolved == "base")
-                {
-                    chosen = remote;
-                    break;
-                }
-
-                if (resolved is not null && resolved.Contains('/'))
-                {
-                    chosen = (remote.Name, resolved);
-                    break;
-                }
-            }
-
-            if (chosen is null)
-            {
-                if (remotes.Select(r => r.Repo).Distinct(StringComparer.OrdinalIgnoreCase).Count() != 1)
-                {
-                    return null;
-                }
-
-                chosen = remotes.OrderBy(r => r.Name switch { "upstream" => 0, "github" => 1, "origin" => 2, _ => 3 }).First();
-            }
-
-            var (name, owner) = chosen.Value;
-            var prefix = $"refs/remotes/{name}/";
-            var branch = repo.Refs[prefix + "HEAD"] is LibGit2Sharp.SymbolicReference { TargetIdentifier: var target } && target.StartsWith(prefix, StringComparison.Ordinal)
-                ? target[prefix.Length..]
-                : null;
-            return (owner!, branch);
+            var first = github.OrderBy(r => r.Name switch { "upstream" => 0, "github" => 1, "origin" => 2, _ => 3 }).First();
+            chosen = (first.Name, first.Repo);
         }
-        catch (Exception)
-        {
-            return null;
-        }
+
+        var (name, owner) = chosen.Value;
+        var prefix = $"refs/remotes/{name}/";
+        var branch = GitCli.TryRun(root, out var target, "symbolic-ref", "-q", prefix + "HEAD") && target.Trim().StartsWith(prefix, StringComparison.Ordinal)
+            ? target.Trim()[prefix.Length..]
+            : null;
+        return (owner!, branch);
     }
 
-    public static bool HasGitHubRemote(string root)
+    public static bool HasGitHubRemote(string root) => Remotes(root).Any(r => ParseUrl(r.Url) is not null);
+
+    // Each remote's URL and gh's set-default mark, in one `git config` call.
+    private static List<(string Name, string Url, string? GhResolved)> Remotes(string root)
     {
-        try
+        var urls = new Dictionary<string, string>(StringComparer.Ordinal);
+        var marks = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (GitCli.TryRun(root, out var config, "config", "-z", "--get-regexp", @"^remote\..*\.(url|gh-resolved)$"))
         {
-            using var repo = OpenRepository(root);
-            return repo is not null && repo.Network.Remotes.Any(r => ParseUrl(r.Url) is not null);
+            // -z: "key\nvalue\0"; the key is remote.<name>.<variable>, and a name may hold dots.
+            foreach (var entry in config.Split('\0', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var newline = entry.IndexOf('\n');
+                var key = newline < 0 ? entry : entry[..newline];
+                var value = newline < 0 ? string.Empty : entry[(newline + 1)..];
+                var dot = key.LastIndexOf('.');
+                if (dot <= "remote.".Length)
+                {
+                    continue;
+                }
+
+                var name = key["remote.".Length..dot];
+                var target = key[(dot + 1)..].Equals("url", StringComparison.OrdinalIgnoreCase) ? urls : marks;
+                target.TryAdd(name, value);
+            }
         }
-        catch (Exception)
-        {
-            return false;
-        }
+
+        return urls.Select(u => (u.Key, u.Value, marks.GetValueOrDefault(u.Key))).ToList();
     }
 
     // owner/name of a GitHub URL - https, ssh, or scp-like (git@host:o/n) -
@@ -188,9 +193,6 @@ internal static class GitHubRemote
         var name = parts[1].EndsWith(".git", StringComparison.OrdinalIgnoreCase) ? parts[1][..^4] : parts[1];
         return name.Length > 0 ? parts[0] + "/" + name : null;
     }
-
-    private static LibGit2Sharp.Repository? OpenRepository(string root)
-        => LibGit2Sharp.Repository.Discover(root) is { } path ? new LibGit2Sharp.Repository(path) : null;
 }
 
 public interface IPullRequestSource
