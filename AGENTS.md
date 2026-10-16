@@ -6,13 +6,7 @@ This file is the operating guide for any AI agent (Codex, Claude Code, etc.) imp
 
 budiff is "`ls` for diffs": a folder-scoped, read-only, syntax-highlighted side-by-side diff viewer, as a terminal tool (`Budiff.Cli`) and an Avalonia desktop GUI (`Budiff.App`). See `SPEC.md` sections 1-2.
 
-## Local reference: read the real source
-
-budiff is **extracted from the Burin IDE** (a private repository at the time of writing). On the original development machine it is checked out as a **sibling folder**:
-
-- **`../coderide`** (optional - only present on that machine)
-
-When that checkout exists, it is a valuable resource: `SPEC.md` section 5 lists exactly which files map to which budiff project and what glue to drop, and the real algorithms, threading, the highlighting pipeline, the funnel geometry, and the git calls live in those files. When it does not exist, the budiff source itself is the reference - v1 has already ported everything the spec maps. Either way, do **not** add a dependency on Burin/coderide.
+`SPEC.md` section 5 maps where each responsibility lives (engine, control, highlighter, bird's-eye, git reader).
 
 ## Build & test
 
