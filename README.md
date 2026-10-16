@@ -4,17 +4,20 @@
 [![CI](https://github.com/VictorZakharov/budiff/actions/workflows/ci.yml/badge.svg)](https://github.com/VictorZakharov/budiff/actions/workflows/ci.yml)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**`ls`, but for your diffs.** Run it in a folder and instantly see what changed.
+**`ls`, but for your diffs.** Run it in a folder and see what changed there: lines added and removed per folder and file, commits and authors, then a side-by-side diff of any file. In the terminal, in a desktop app, or as JSON and an MCP server for AI agents. Read-only: it never changes your files or branches.
 
-![budiff CLI bird's-eye](docs/cli-birdseye.svg)
+<table>
+  <tr>
+    <td width="50%"><a href="docs/screenshots/birdseye.png"><img src="docs/screenshots/birdseye.png" alt="The bird's-eye: every folder and file with its lines, changes, commits and authors over the last week"></a><br><b>Bird's-eye</b> - what changed where, over a period</td>
+    <td width="50%"><a href="docs/screenshots/diff.png"><img src="docs/screenshots/diff.png" alt="A file's side-by-side diff docked next to the bird's-eye, with blame and folded unchanged lines"></a><br><b>Side-by-side diff</b> - syntax highlighting, blame, unchanged runs folded</td>
+  </tr>
+  <tr>
+    <td width="50%"><a href="docs/screenshots/markdown.png"><img src="docs/screenshots/markdown.png" alt="A README rendered as a formatted preview, a changed paragraph shown old in red and new in green, with its screenshot"></a><br><b>Markdown preview</b> - rendered with its pictures, changed blocks marked</td>
+    <td width="50%"><a href="docs/screenshots/pull-request.png"><img src="docs/screenshots/pull-request.png" alt="Pull request mode: only the files a pull request changed, and one of them diffed from the merge-base"></a><br><b>Pull requests</b> - only what a PR changed, from its merge-base</td>
+  </tr>
+</table>
 
-budiff is a folder-scoped, read-only diff viewer. The CLI opens with a Code Analysis bird's-eye: folders or projects, line/code/blank/comment counts, file counts, period churn, commits, and authors. Drill into a file to print a side-by-side diff. `--gitroot` widens scope to the whole repository. `-i` opens the desktop GUI on the same target:
-
-![budiff GUI bird's-eye](docs/gui-screenshot.png)
-
-Drilling into a file docks a syntax-highlighted side-by-side diff next to a compact bird's-eye - resizable, collapsible, and able to float into its own window:
-
-![budiff GUI diff drill-in](docs/gui-diff.png)
+<sub>budiff on <a href="https://github.com/VictorZakharov/last-stand">last-stand</a>, a public game repository.</sub>
 
 ## Install
 
@@ -22,17 +25,9 @@ Drilling into a file docks a syntax-highlighted side-by-side diff next to a comp
 dotnet tool install -g budiff
 ```
 
-Each release also attaches self-contained, single-file CLI builds for users without the .NET SDK (the Windows one includes the GUI for `budiff -i`):
+Needs the [.NET 10 SDK](https://dotnet.microsoft.com/download) and git 2.11 or later on PATH. On Windows the tool includes the desktop app (`budiff -i`); on Linux and macOS it is the terminal tool for now ([#89](https://github.com/VictorZakharov/budiff/issues/89)).
 
-| Platform | Asset |
-| --- | --- |
-| Windows x64 | `budiff-win-x64.zip` |
-| Linux x64 | `budiff-linux-x64.tar.gz` |
-| macOS arm64 | `budiff-osx-arm64.tar.gz` |
-
-budiff reads repositories with the `git` command, so git 2.11 or later must be on PATH.
-
-One-line install scripts:
+Without .NET, use a self-contained build from the [releases](https://github.com/VictorZakharov/budiff/releases) (`budiff-win-x64.zip` with the desktop app, `budiff-linux-x64.tar.gz`, `budiff-osx-arm64.tar.gz`) or an install script:
 
 ```powershell
 irm https://raw.githubusercontent.com/VictorZakharov/budiff/main/scripts/install.ps1 | iex
@@ -42,44 +37,42 @@ irm https://raw.githubusercontent.com/VictorZakharov/budiff/main/scripts/install
 curl -fsSL https://raw.githubusercontent.com/VictorZakharov/budiff/main/scripts/install.sh | sh
 ```
 
-Set `BUDIFF_VERSION=v0.1.0` / `BUDIFF_INSTALL_DIR=...` for the shell script, or pass `-Version v0.1.0 -InstallDir ...` to the PowerShell script. Winget and Homebrew manifests are not published yet; the release assets and install scripts are the stable inputs for those manifests.
-
-The GUI inside the tool package ships as a Native AOT publish (Windows), so `budiff -i` opens in well under a second. The self-contained CLI release builds are single-file JIT publishes; per-OS Native AOT CLI binaries are a possible future upgrade (AOT cannot cross-compile, so they need per-OS release legs).
-
-## Usage
+## Use
 
 ```sh
-budiff                 # show the bird's-eye for the current folder
-budiff --gitroot       # show the bird's-eye for the whole repository
-budiff --days 90       # widen the analysis window (default 30; 0 = all time)
-budiff src/App.cs      # print a syntax-highlighted side-by-side diff for one file
-budiff --base main --head feature/foo --gitroot
-budiff --json          # emit the listing as structured JSON
-budiff src/App.cs --json
-git diff | budiff      # render a unified diff from stdin as side-by-side output
-budiff --stdin         # explicit stdin pager mode
-budiff mcp             # run the stdio MCP server for AI agents
-budiff -i              # open the GUI
+budiff                 # the bird's-eye for the current folder (last 30 days)
+budiff -r              # ... for the whole repository (--gitroot)
+budiff --days 90       # another window (0 = all time)
+budiff src/App.cs      # a syntax-highlighted side-by-side diff of one file
+budiff --base main --head feature/foo
+git diff | budiff      # any unified diff, side by side
+budiff --json          # structured output for scripts and agents
+budiff -i              # the desktop app on the same folder (Windows)
 ```
 
-Outside a git repository, `budiff` still works: it falls back to a plain folder analysis (lines / code / blank / comment - no churn, commits, or authors), and in the GUI double-clicking a file shows its current content. Terminal output is colored, and file diffs are syntax-highlighted with the same DarkPlus grammars the GUI uses; set `BUDIFF_FORCE_COLOR=1` to keep color when piping (e.g. `| less -R`).
+![budiff's bird's-eye in a terminal](docs/cli-birdseye.svg)
 
-The stdin mode is a pure unified-diff transform; it does not need repository access. The GUI ships inside the tool package, so `budiff -i` works from any folder right after `dotnet tool install` (set `BUDIFF_APP_PATH` only to point at a different build). The GUI provides the same bird's-eye with filters, grouping, and period controls (including a custom window in days). The period list also offers **Pull request...**: pick a PR (yours by default; search by author, state, `#number`, or text - opened on a project folder, only PRs that touch it are listed, found from that folder's own history so it stays quick in big monorepos) and the bird's-eye shows just that PR's changes, with the drill-in diffing its merge-base against its head - this uses the [GitHub CLI](https://cli.github.com) (`gh auth login`). The diff pane stays hidden until you drill into a file; it then docks on the right (the bird's-eye compacts to its core columns, and drops Authors, Commits, Code and Lines in turn as you narrow it) with a base-branch picker and a working-tree toggle in its toolbar, the split is resizable, the funnel gutter between the old and new code drags to resize the side-by-side halves (double-click re-centers), long lines wrap (toggle **Wrap**), markdown files (and text documents such as LICENSE) can switch to a formatted **Preview** that marks changed blocks (old in red, new in green), shows the project's pictures (click one for a lightbox: wheel zooms, drag pans, arrow keys or side buttons step through) and follows links (another project file opens in the diff - **Back** returns; web links open in the browser), the tree can collapse away entirely, and the diff can pop out into its own window - handy on a second monitor.
+Outside a git repository it still works: a plain folder analysis (lines, code, blank, comment). `budiff --help` lists every option.
+
+### Desktop app
+
+- **Filter and group:** by extension and author, by folder or project, over a period: last week, month, 3 months, a custom window, or a pull request.
+- **Pull requests:** pick one (yours by default; search by author, state, `#number` or text) and see only its changes, diffed from its merge-base. Uses the [GitHub CLI](https://cli.github.com) (`gh auth login`).
+- **Diff:** docks next to the bird's-eye; blame, line wrap, unchanged runs folded, another base branch or the working tree, and it pops out into its own window for a second monitor.
+- **Markdown preview:** Markdown and text documents render formatted, changed blocks marked (old in red, new in green), with the project's pictures (click one to zoom) and links that open the linked file.
 
 ## For AI agents
 
-Agents work the same way humans do here: list what changed, then drill into just the files that matter - far cheaper than paging whole diffs into context.
+Agents work the way people do here: list what changed, then read only the files that matter - far cheaper than paging whole diffs into context.
 
-- `budiff --json` (and `budiff <file> --json`) emit the change listing / a single file diff as structured JSON. Add `--context 3` to fold long unchanged runs into `Gap` rows (first hidden line numbers + a `hiddenLines` count) instead of paying for the whole file.
-- `budiff mcp` runs a stdio MCP server exposing `list_changes`, `get_file_diff`, and `repo_overview`. `get_file_diff` collapses to 3 context lines by default; pass `contextLines` to widen it, or `null` for the full file.
-
-Register with Claude Code in one line:
+- `budiff --json` (and `budiff <file> --json`) emit the change listing or one file's diff as JSON. `--context 3` folds long unchanged runs into `Gap` rows.
+- `budiff mcp` runs a stdio MCP server with `list_changes`, `get_file_diff` (3 context lines by default; `contextLines` widens it, `null` for the whole file) and `repo_overview`.
 
 ```sh
 claude mcp add budiff -- budiff mcp
 ```
 
-Or in any MCP-capable client's config:
+Or in any MCP client's config:
 
 ```json
 {
@@ -92,20 +85,24 @@ Or in any MCP-capable client's config:
 }
 ```
 
-## Performance
+## Settings
 
-The bird's-eye scans files under the selected folder and uses git's path-scoped history for the selected period. The changed-file drill-in still bounds recent author/commit enrichment to 1,000 commits by default. Set `BUDIFF_HISTORY_MAX_COMMITS=0` to skip those drill-in counts, or set it to a larger number when you want a deeper window.
+| Environment variable | Effect |
+| --- | --- |
+| `BUDIFF_FORCE_COLOR=1` | Keep colors when piping, e.g. `budiff \| less -R`. |
+| `BUDIFF_HISTORY_MAX_COMMITS` | How many recent commits the file drill-in reads for author and commit counts (default 1,000; `0` skips them). |
+| `BUDIFF_APP_PATH` | Run a different build of the desktop app for `budiff -i`. |
 
-## Components
+## Libraries
 
-| Project | What it is |
+The diff engine and the Avalonia side-by-side control are NuGet packages too:
+
+| Package | What it is |
 | --- | --- |
 | `Budiff.Core` | The diff engine - pure .NET, no UI, no git. |
 | `Budiff.Avalonia` | The side-by-side diff control (Avalonia 12). |
 | `Budiff.Avalonia.TextMate` | Optional TextMate syntax highlighting. |
-| `Budiff.Avalonia.Markdown` | Optional formatted markdown preview (a block-level rich diff). |
-| `Budiff.Cli` | The terminal tool (`budiff`). |
-| `Budiff.App` | The standalone desktop GUI. |
+| `Budiff.Avalonia.Markdown` | Optional formatted Markdown preview (a block-level rich diff). |
 
 ## Build
 
@@ -114,9 +111,7 @@ dotnet build
 dotnet test
 ```
 
-Requires the .NET 10 SDK.
-
-The UI snapshot test writes PNGs under the test output folder by default. Set `BUDIFF_UISNAPSHOT_DIR` to collect them elsewhere.
+Needs the .NET 10 SDK. UI snapshot tests write PNGs under the test output folder, or to `BUDIFF_UISNAPSHOT_DIR`. The screenshots above come from `ReadmeGridScreenshotTests` (set `BUDIFF_README_REPO` to a clone of last-stand).
 
 ## Contributing
 
