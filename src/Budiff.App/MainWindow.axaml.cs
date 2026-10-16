@@ -13,6 +13,20 @@ namespace Budiff.App;
 
 public sealed partial class MainWindow : Window
 {
+    // Narrowest docked bird's-eye: Name's minimum plus Added / Removed and the
+    // row padding (330) - the optional columns drop out before this is reached -
+    // rounded up to what the wrapped toolbar's first row needs.
+    private const double BirdsEyeMinWidth = 365;
+
+    // Horizontal padding around the header/row grids (6 left, 18 right).
+    private const double TreeRowPadding = 24;
+
+    // The filter box wraps to its own row rather than shrink below this.
+    private const double FilterComfortWidth = 140;
+
+    // Left margin before the period controls and the filter group.
+    private const double ToolbarGap = 10;
+
     private readonly MainWindowViewModel _viewModel;
     private DiffWindow? _floatWindow;
     private GridLength _diffWidth = new(640);
@@ -31,7 +45,46 @@ public sealed partial class MainWindow : Window
         _viewModel.Analysis.PropertyChanged += OnAnalysisPropertyChanged;
         _viewModel.Analysis.PickPullRequest = PickPullRequestAsync;
         BodyGrid.SizeChanged += (_, _) => ClampDockedDiff();
+        TreeArea.SizeChanged += (_, _) => FitColumns();
+        BirdsEyePanel.SizeChanged += (_, _) => UpdateToolbarWrap();
+        PeriodBar.SizeChanged += (_, _) => UpdateToolbarWrap();
         ApplyDiffLayout();
+    }
+
+    // Drops optional bird's-eye columns that no longer fit the pane.
+    private void FitColumns()
+    {
+        if (TreeArea.Bounds.Width > 0)
+        {
+            _viewModel.FitColumns(TreeArea.Bounds.Width - TreeRowPadding);
+        }
+    }
+
+    // A narrow bird's-eye moves the filter box and Reset under the grouping /
+    // period controls instead of squeezing the filter to nothing.
+    private void UpdateToolbarWrap()
+    {
+        var available = ToolbarGrid.Bounds.Width;
+        if (available <= 0)
+        {
+            return;
+        }
+
+        // PeriodBar's desired width already includes its left margin.
+        var oneRow = GroupingSwitch.DesiredSize.Width + PeriodBar.DesiredSize.Width + ToolbarGap
+            + FilterComfortWidth + FilterRow.ColumnSpacing + ResetButton.DesiredSize.Width;
+        var wrap = available < oneRow;
+        var row = wrap ? 1 : 0;
+        if (Grid.GetRow(FilterRow) == row)
+        {
+            return;
+        }
+
+        Grid.SetRow(FilterRow, row);
+        Grid.SetColumn(FilterRow, wrap ? 0 : 2);
+        Grid.SetColumnSpan(FilterRow, wrap ? 4 : 1);
+        FilterRow.Margin = new Thickness(wrap ? 0 : ToolbarGap, 0, 0, 0);
+        ToolbarGrid.RowSpacing = wrap ? 8 : 0;
     }
 
     internal MainWindowViewModel ViewModel => _viewModel;
@@ -56,6 +109,11 @@ public sealed partial class MainWindow : Window
             or nameof(MainWindowViewModel.IsDiffFloating))
         {
             ApplyDiffLayout();
+        }
+
+        if (e.PropertyName is nameof(MainWindowViewModel.ShowWideColumns))
+        {
+            FitColumns();
         }
     }
 
@@ -116,7 +174,7 @@ public sealed partial class MainWindow : Window
             }
             else
             {
-                cols[0].MinWidth = 420;
+                cols[0].MinWidth = BirdsEyeMinWidth;
                 cols[0].Width = new GridLength(1, GridUnitType.Star);
                 cols[1].Width = new GridLength(5);
                 cols[2].MinWidth = 360;
@@ -158,7 +216,7 @@ public sealed partial class MainWindow : Window
         }
 
         var splitter = cols[1].Width.Value;
-        var treeMin = Math.Clamp(available - 360 - splitter, 0, 420);
+        var treeMin = Math.Clamp(available - 360 - splitter, 0, BirdsEyeMinWidth);
         var diffMin = Math.Clamp(available - treeMin - splitter, 0, 360);
         cols[0].MinWidth = treeMin;
         cols[2].MinWidth = diffMin;

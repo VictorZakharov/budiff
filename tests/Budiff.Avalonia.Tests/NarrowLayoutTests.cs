@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Threading;
+using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Budiff.App;
 using Xunit;
@@ -106,25 +107,120 @@ public sealed class NarrowLayoutTests
         window.Close();
     }
 
-    private static void AssertColumnsAligned(MainWindow window, string context)
+    // Squeezing the docked bird's-eye drops optional columns in a fixed order -
+    // Authors, Commits, Code, then Lines - leaving Name + Added + Removed; the
+    // toolbar's filter box wraps to its own row when the pane gets that tight.
+    [AvaloniaFact]
+    public void BirdsEyeColumns_DropInOrder_AsThePaneNarrows()
     {
-        // The Lines header button and each row's Lines TextBlock (num class,
-        // column 1) must share the same right edge on screen.
-        var headerButtons = global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(window)
+        var root = ReadmeFixture.BuildFixtureRepo("budiff-columns");
+        var window = new MainWindow(root, gitRoot: true);
+        window.MinWidth = 0;
+        window.Width = 1400;
+        window.Height = 420;
+        window.Show();
+
+        var vm = window.ViewModel;
+        WaitUntil(() => !vm.Analysis.IsScanning && vm.Analysis.Roots.Count > 0, "bird's-eye scan");
+        var filterRow = window.FindControl<global::Avalonia.Controls.Grid>("FilterRow")!;
+        Assert.Equal(8, vm.FittingColumns);
+        Assert.Equal(0, global::Avalonia.Controls.Grid.GetRow(filterRow));
+
+        var file = vm.Analysis.Roots.SelectMany(r => r.SelfAndDescendants()).First(r => r.IsFile && r.Name == "Program.cs");
+        _ = vm.Analysis.OpenAsync(file);
+        WaitUntil(() => vm.IsDiffOpen && vm.ShowDiffPane, "diff open");
+
+        // The docked diff keeps its width, so the window width sets the tree's.
+        var seen = new System.Collections.Generic.List<int>();
+        foreach (var width in new[] { 1400.0, 1220.0, 1150.0, 1080.0, 1000.0 })
+        {
+            window.Width = width;
+            UiSnapshot.Pump();
+            UiSnapshot.Pump();
+            var context = $"window={width}";
+            seen.Add(vm.FittingColumns);
+
+            var headers = HeaderButtons(window).ToDictionary(b => global::Avalonia.Controls.Grid.GetColumn(b));
+            Assert.Equal(vm.ShowLinesColumn, headers[1].IsEffectivelyVisible);
+            Assert.Equal(vm.ShowCodeColumn, headers[2].IsEffectivelyVisible);
+            Assert.Equal(vm.ShowCommitsColumn, headers[8].IsEffectivelyVisible);
+            Assert.Equal(vm.ShowAuthorsColumn, headers[9].IsEffectivelyVisible);
+            Assert.True(headers[6].IsEffectivelyVisible && headers[7].IsEffectivelyVisible, context);
+            Assert.False(headers[3].IsEffectivelyVisible || headers[4].IsEffectivelyVisible || headers[5].IsEffectivelyVisible, context);
+
+            // What is left fits: the last visible header ends inside the pane.
+            var treeArea = window.FindControl<global::Avalonia.Controls.DockPanel>("TreeArea")!;
+            var paneRight = AvaloniaVisualExtensions.TranslatePoint(treeArea, new global::Avalonia.Point(treeArea.Bounds.Width, 0), window)!.Value.X;
+            var lastHeader = headers.Values.Where(b => b.IsEffectivelyVisible).OrderBy(b => global::Avalonia.Controls.Grid.GetColumn(b)).Last();
+            var lastRight = AvaloniaVisualExtensions.TranslatePoint(lastHeader, new global::Avalonia.Point(lastHeader.Bounds.Width, 0), window)!.Value.X;
+            Assert.True(lastRight <= paneRight + 0.5, $"{context}: last column ends at {lastRight}, pane at {paneRight}");
+
+            AssertColumnsAligned(window, context, column: 6);
+            if (vm.ShowLinesColumn)
+            {
+                AssertColumnsAligned(window, context, column: 1);
+            }
+
+            UiSnapshot.Capture(window, $"birdseye-columns-{vm.FittingColumns}");
+        }
+
+        Assert.Equal(new[] { 4, 3, 2, 1, 0 }, seen);
+        Assert.Equal(1, global::Avalonia.Controls.Grid.GetRow(filterRow));
+
+        // Wrapped, the filter box and Reset both sit inside the pane.
+        var reset = window.FindControl<global::Avalonia.Controls.Button>("ResetButton")!;
+        var birdsEye = window.FindControl<global::Avalonia.Controls.DockPanel>("BirdsEyePanel")!;
+        var resetRight = AvaloniaVisualExtensions.TranslatePoint(reset, new global::Avalonia.Point(reset.Bounds.Width, 0), birdsEye)!.Value.X;
+        Assert.True(resetRight <= birdsEye.Bounds.Width, $"Reset ends at {resetRight}, pane is {birdsEye.Bounds.Width}");
+        window.Close();
+    }
+
+    // Keep order: Lines, Code, Commits, Authors, then (no docked diff only)
+    // Blank, Comment, Files, Size - so a narrow window keeps the essentials.
+    [AvaloniaTheory]
+    [InlineData(true, 2000, 4)]
+    [InlineData(true, 574, 4)]
+    [InlineData(true, 573, 3)]
+    [InlineData(true, 514, 3)]
+    [InlineData(true, 513, 2)]
+    [InlineData(true, 450, 2)]
+    [InlineData(true, 449, 1)]
+    [InlineData(true, 378, 1)]
+    [InlineData(true, 377, 0)]
+    [InlineData(true, 100, 0)]
+    [InlineData(false, 858, 8)]
+    [InlineData(false, 857, 7)]
+    [InlineData(false, 638, 5)]
+    [InlineData(false, 637, 4)]
+    [InlineData(false, 377, 0)]
+    public void FitColumns_DropsColumnsFromTheEndOfTheKeepOrder(bool docked, double rowWidth, int expected)
+    {
+        var vm = new MainWindowViewModel(System.IO.Directory.CreateTempSubdirectory("budiff-fit-").FullName, gitRoot: false) { IsDiffOpen = docked };
+        vm.FitColumns(rowWidth);
+        Assert.Equal(expected, vm.FittingColumns);
+        Assert.False(docked && vm.ShowBlankColumn);
+    }
+
+    private static System.Collections.Generic.List<global::Avalonia.Controls.Button> HeaderButtons(MainWindow window)
+        => global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(window)
             .OfType<global::Avalonia.Controls.Button>()
             .Where(b => b.Classes.Contains("colHeader"))
             .ToList();
-        Assert.True(headerButtons.Count > 1, "no header buttons found");
-        var linesHeader = headerButtons[1];
+
+    private static void AssertColumnsAligned(MainWindow window, string context, int column = 1)
+    {
+        // The column's header button and each row's TextBlock (num class) in
+        // that column must share the same right edge on screen.
+        var header = HeaderButtons(window).Single(b => global::Avalonia.Controls.Grid.GetColumn(b) == column);
         var headerRight = AvaloniaVisualExtensions
-            .TranslatePoint(linesHeader, new global::Avalonia.Point(linesHeader.Bounds.Width, 0), window)!.Value.X;
+            .TranslatePoint(header, new global::Avalonia.Point(header.Bounds.Width, 0), window)!.Value.X;
 
         var rowCells = global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(window)
             .OfType<global::Avalonia.Controls.TextBlock>()
-            .Where(t => t.Classes.Contains("num") && t.Text is { Length: > 0 })
-            .Where(t => ((global::Avalonia.Controls.Grid)t.Parent!).Children.IndexOf(t) >= 0 && global::Avalonia.Controls.Grid.GetColumn(t) == 1)
+            .Where(t => t.Classes.Contains("num") && t.Text is { Length: > 0 } && t.IsEffectivelyVisible)
+            .Where(t => ((global::Avalonia.Controls.Grid)t.Parent!).Children.IndexOf(t) >= 0 && global::Avalonia.Controls.Grid.GetColumn(t) == column)
             .ToList();
-        Assert.True(rowCells.Count > 2, "no Lines row cells found");
+        Assert.True(rowCells.Count > 2, $"{context}: no row cells found in column {column}");
 
         foreach (var cell in rowCells)
         {
@@ -134,7 +230,7 @@ public sealed class NarrowLayoutTests
                 .TranslatePoint(cell, new global::Avalonia.Point(cell.Bounds.Width, 0), window)!.Value.X
                 + cell.Margin.Right;
             Assert.True(Math.Abs(cellColumnRight - headerRight) <= 2,
-                $"{context}: Lines column right {cellColumnRight} vs header right {headerRight} (row text '{cell.Text}')");
+                $"{context}: column {column} right {cellColumnRight} vs header right {headerRight} (row text '{cell.Text}')");
         }
     }
 

@@ -4,14 +4,23 @@ using System.Collections.Specialized;
 using Budiff;
 using global::Avalonia;
 using global::Avalonia.Controls;
+using global::Avalonia.Data;
+using global::Avalonia.Input;
 using global::Avalonia.Media;
 using global::Avalonia.Media.Immutable;
+using global::Avalonia.Rendering;
 
 namespace Budiff.Avalonia;
 
-public sealed class DiffFunnelGutter : Control
+// Draws the change "funnels" between the code halves AND is the split handle:
+// the gutter band is hit-testable (nothing else is, so the rows underneath keep
+// their clicks), dragging it moves SplitRatio, double-click resets it.
+public sealed class DiffFunnelGutter : Control, ICustomHitTest
 {
-    private const double GutterWidth = 18;
+    public const double GutterWidth = 18;
+
+    // Extra grab slop either side of the 18px band.
+    private const double GrabSlop = 2;
 
     // Every diff row (content and gap) renders at this fixed height; geometry is
     // pure index math so it works with a VIRTUALIZED items host, where off-screen
@@ -37,6 +46,25 @@ public sealed class DiffFunnelGutter : Control
     // funnel sits at the center of the REMAINING width, not the full row.
     public static readonly StyledProperty<double> BlameWidthProperty =
         AvaloniaProperty.Register<DiffFunnelGutter, double>(nameof(BlameWidth));
+
+    // The old side's share of the code width - the same weight DiffSplitGrid
+    // gives its star columns, so the funnel and the rows' divider agree.
+    public static readonly StyledProperty<double> SplitRatioProperty =
+        AvaloniaProperty.Register<DiffFunnelGutter, double>(nameof(SplitRatio), 0.5, defaultBindingMode: BindingMode.TwoWay);
+
+    private static readonly Cursor ResizeCursor = new(StandardCursorType.SizeWestEast);
+
+    // Row geometry from the last Render, for hit testing between frames.
+    private double _hostTop;
+    private double _pitch = RowHeight;
+    private readonly List<DiffRowVm> _rows = new();
+    private bool _dragging;
+    private double _grabOffset;
+
+    public DiffFunnelGutter()
+    {
+        Cursor = ResizeCursor;
+    }
 
     public IEnumerable? Rows
     {
@@ -74,6 +102,98 @@ public sealed class DiffFunnelGutter : Control
         set => SetValue(BlameWidthProperty, value);
     }
 
+    public double SplitRatio
+    {
+        get => GetValue(SplitRatioProperty);
+        set => SetValue(SplitRatioProperty, value);
+    }
+
+    private double CodeWidth => Math.Max(0, Bounds.Width - BlameWidth - GutterWidth);
+
+    private double GutterLeft => BlameWidth + (Math.Clamp(SplitRatio, DiffViewModel.MinSplitRatio, DiffViewModel.MaxSplitRatio) * CodeWidth);
+
+    // Only the gutter band of a content row: a gap row's "N unchanged lines"
+    // bar spans the gutter and must stay clickable.
+    public bool HitTest(Point point)
+    {
+        if (!IsEffectivelyVisible || Bounds.Width <= GutterWidth)
+        {
+            return false;
+        }
+
+        if (_dragging)
+        {
+            return true;
+        }
+
+        var left = GutterLeft;
+        if (point.X < left - GrabSlop || point.X > left + GutterWidth + GrabSlop)
+        {
+            return false;
+        }
+
+        if (_blocksDirty)
+        {
+            RebuildBlocks();
+        }
+
+        var index = (int)Math.Floor((point.Y - _hostTop) / _pitch);
+        return index >= 0 && index < _rows.Count && !_rows[index].IsGap;
+    }
+
+    protected override void OnPointerPressed(PointerPressedEventArgs e)
+    {
+        base.OnPointerPressed(e);
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        if (e.ClickCount >= 2)
+        {
+            SetCurrentValue(SplitRatioProperty, 0.5);
+            return;
+        }
+
+        // Keep the grab point under the pointer instead of snapping the
+        // gutter's edge to it.
+        _grabOffset = e.GetPosition(this).X - GutterLeft;
+        _dragging = true;
+        e.Pointer.Capture(this);
+    }
+
+    protected override void OnPointerMoved(PointerEventArgs e)
+    {
+        base.OnPointerMoved(e);
+        if (!_dragging || CodeWidth <= 0)
+        {
+            return;
+        }
+
+        var left = e.GetPosition(this).X - _grabOffset;
+        var ratio = Math.Clamp((left - BlameWidth) / CodeWidth, DiffViewModel.MinSplitRatio, DiffViewModel.MaxSplitRatio);
+        SetCurrentValue(SplitRatioProperty, ratio);
+        e.Handled = true;
+    }
+
+    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    {
+        base.OnPointerReleased(e);
+        if (_dragging)
+        {
+            _dragging = false;
+            e.Pointer.Capture(null);
+            e.Handled = true;
+        }
+    }
+
+    protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
+    {
+        base.OnPointerCaptureLost(e);
+        _dragging = false;
+    }
+
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
@@ -109,7 +229,8 @@ public sealed class DiffFunnelGutter : Control
         else if (change.Property == AddedBrushProperty
                  || change.Property == RemovedBrushProperty
                  || change.Property == ModifiedBrushProperty
-                 || change.Property == BlameWidthProperty)
+                 || change.Property == BlameWidthProperty
+                 || change.Property == SplitRatioProperty)
         {
             InvalidateVisual();
         }
@@ -148,7 +269,7 @@ public sealed class DiffFunnelGutter : Control
             RebuildBlocks();
         }
 
-        var gutterLeft = BlameWidth + (Bounds.Width - BlameWidth - GutterWidth) / 2;
+        var gutterLeft = GutterLeft;
         var gutterRight = gutterLeft + GutterWidth;
         var midX = gutterLeft + GutterWidth / 2;
 
@@ -188,6 +309,9 @@ public sealed class DiffFunnelGutter : Control
             hostTop = f.Top - f.Index * pitch;
         }
 
+        _hostTop = hostTop;
+        _pitch = pitch > 0 ? pitch : RowHeight;
+
         foreach (var block in _blocks)
         {
             var blockTop = hostTop + block.Start * pitch;
@@ -219,13 +343,14 @@ public sealed class DiffFunnelGutter : Control
     private void RebuildBlocks()
     {
         _blocks.Clear();
+        _rows.Clear();
         _blocksDirty = false;
         if (Rows is null)
         {
             return;
         }
 
-        var rows = new List<DiffRowVm>();
+        var rows = _rows;
         foreach (var item in Rows)
         {
             if (item is DiffRowVm row)

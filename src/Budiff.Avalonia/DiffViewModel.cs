@@ -17,6 +17,13 @@ public sealed partial class DiffViewModel : ObservableObject
     private const int LoadingIndicatorDelayMs = 120;
     private const int ViewportChunkRows = 64;
 
+    // Monospace advance at the diff font size; the horizontal range is the
+    // longest line's width minus what the narrower pane already shows.
+    private const double CharWidth = 7.6;
+
+    public const double MinSplitRatio = 0.15;
+    public const double MaxSplitRatio = 0.85;
+
     private readonly HashSet<int> _expandedGaps = new();
     private IReadOnlyList<DiffRow> _all = Array.Empty<DiffRow>();
     private DiffRun[][] _oldRuns = Array.Empty<DiffRun[]>();
@@ -26,6 +33,11 @@ public sealed partial class DiffViewModel : ObservableObject
     private IBrush _defaultSyntaxBrush = Brush("#D4D4D4");
     private bool _collapseUnchanged = true;
     private bool _hasChanges;
+    private double _splitRatio = 0.5;
+    private int _maxLineLength;
+
+    // Until a view reports its real pane width, assume ~80 visible columns.
+    private double _visibleTextWidth = 80 * CharWidth;
     private IReadOnlyList<BlameEntry?>? _blameLines;
     private int _tokenizeGen;
     private int _loadGen;
@@ -107,6 +119,40 @@ public sealed partial class DiffViewModel : ObservableObject
     private string _placeholder = string.Empty;
 
     public bool HasHorizontalScroll => MaxScroll > 0;
+
+    // The OLD side's share of the two-pane code width (what remains after the
+    // blame column and the funnel gutter). Dragging the gutter sets it, a
+    // double-click resets it; it carries over from file to file.
+    public double SplitRatio
+    {
+        get => _splitRatio;
+        set => SetProperty(ref _splitRatio, Math.Clamp(double.IsFinite(value) ? value : 0.5, MinSplitRatio, MaxSplitRatio));
+    }
+
+    // Text width (px) of the narrower code pane, reported by the view as the
+    // split or the pane size changes - a squeezed side must still be able to
+    // scroll to the end of the longest line.
+    public double VisibleTextWidth
+    {
+        get => _visibleTextWidth;
+        set
+        {
+            if (Math.Abs(_visibleTextWidth - value) >= 0.5)
+            {
+                _visibleTextWidth = value;
+                UpdateMaxScroll();
+            }
+        }
+    }
+
+    private void UpdateMaxScroll()
+    {
+        MaxScroll = _maxLineLength == 0 ? 0 : Math.Max(0, (_maxLineLength * CharWidth) - _visibleTextWidth);
+        if (HorizontalScroll > MaxScroll)
+        {
+            HorizontalScroll = MaxScroll;
+        }
+    }
 
     public bool CollapseUnchanged
     {
@@ -215,6 +261,7 @@ public sealed partial class DiffViewModel : ObservableObject
         _oldRuns = Array.Empty<DiffRun[]>();
         _newRuns = Array.Empty<DiffRun[]>();
         _expandedGaps.Clear();
+        _maxLineLength = 0;
         MaxScroll = 0;
         HorizontalScroll = 0;
         IsSinglePane = false;
@@ -273,7 +320,8 @@ public sealed partial class DiffViewModel : ObservableObject
             maxLen = Math.Max(maxLen, Math.Max(row.OldText?.Length ?? 0, row.NewText?.Length ?? 0));
         }
 
-        MaxScroll = Math.Max(0, (maxLen - 80) * 7.6);
+        _maxLineLength = maxLen;
+        UpdateMaxScroll();
 
         var (oldLines, newLines) = ReconstructSides();
         _oldRuns = Plain(oldLines);
