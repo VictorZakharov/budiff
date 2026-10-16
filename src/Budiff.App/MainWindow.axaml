@@ -224,16 +224,19 @@
 
                             <StackPanel Grid.Column="1" x:Name="PeriodBar" Margin="10,0,0,0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                                 <TextBlock Text="Period" Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
-                                <ComboBox Width="132"
-                                          ItemsSource="{Binding Analysis.Periods}"
-                                          IsEnabled="{Binding Analysis.GitAvailable}"
-                                          SelectedItem="{Binding Analysis.SelectedPeriod, Mode=TwoWay}">
-                                    <ComboBox.ItemTemplate>
+                                <!-- Picking "Pull request..." again reopens the picker. -->
+                                <app:RepickComboBox x:Name="PeriodBox"
+                                                    Width="132"
+                                                    ItemsSource="{Binding Analysis.Periods}"
+                                                    IsEnabled="{Binding Analysis.GitAvailable}"
+                                                    SelectedItem="{Binding Analysis.SelectedPeriod, Mode=TwoWay}"
+                                                    RepickCommand="{Binding Analysis.RepickPeriodCommand}">
+                                    <app:RepickComboBox.ItemTemplate>
                                         <DataTemplate>
                                             <TextBlock Text="{Binding Label}" />
                                         </DataTemplate>
-                                    </ComboBox.ItemTemplate>
-                                </ComboBox>
+                                    </app:RepickComboBox.ItemTemplate>
+                                </app:RepickComboBox>
                                 <TextBox Width="52"
                                          Text="{Binding Analysis.CustomDaysText, Mode=TwoWay}"
                                          IsVisible="{Binding Analysis.IsCustomPeriod}"
