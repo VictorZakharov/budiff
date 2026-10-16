@@ -19,11 +19,16 @@
         <Style Selector="TextBlock.muted">
             <Setter Property="Foreground" Value="{DynamicResource BudiffMutedTextBrush}" />
         </Style>
+        <!-- Notes ("Loading people...") are rows, not choices. -->
+        <Style Selector="ComboBox#AuthorBox ComboBoxItem">
+            <Setter Property="IsEnabled" Value="{Binding !IsNote}" />
+        </Style>
     </Window.Styles>
 
     <DockPanel Margin="12">
         <!-- Filters: free text (#number, words, or raw GitHub qualifiers),
-             author (Mine / Anyone / a repo person), state. -->
+             author (Mine / Anyone / a repo person - listed on first drop-down,
+             or typed), state. -->
         <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto,200,Auto,110" ColumnSpacing="8" Margin="0,0,0,10">
             <TextBox x:Name="SearchBox"
                      PlaceholderText="Search: words, #123, label:bug, base:main"
@@ -31,14 +36,21 @@
                      Text="{Binding SearchText, Mode=TwoWay}"
                      VerticalAlignment="Center" />
             <TextBlock Grid.Column="1" Classes="muted" Text="Author" VerticalAlignment="Center" />
-            <AutoCompleteBox Grid.Column="2"
-                             ItemsSource="{Binding AuthorOptions}"
-                             Text="{Binding AuthorText, Mode=TwoWay}"
-                             FilterMode="Contains"
-                             MinimumPrefixLength="0"
-                             MaxDropDownHeight="260"
-                             ToolTip.Tip="{Binding MineHint}"
-                             VerticalAlignment="Center" />
+            <ComboBox x:Name="AuthorBox"
+                      Grid.Column="2"
+                      IsEditable="True"
+                      HorizontalAlignment="Stretch"
+                      ItemsSource="{Binding AuthorOptions}"
+                      Text="{Binding AuthorText, Mode=TwoWay}"
+                      MaxDropDownHeight="320"
+                      ToolTip.Tip="{Binding MineHint}"
+                      VerticalAlignment="Center">
+                <ComboBox.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding Display}" TextTrimming="CharacterEllipsis" />
+                    </DataTemplate>
+                </ComboBox.ItemTemplate>
+            </ComboBox>
             <TextBlock Grid.Column="3" Classes="muted" Text="State" VerticalAlignment="Center" />
             <ComboBox Grid.Column="4"
                       HorizontalAlignment="Stretch"
