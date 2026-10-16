@@ -49,6 +49,7 @@ public sealed partial class PullRequestPickerWindow : Window
             SearchBox.Focus();
             await _viewModel.InitializeAsync();
         };
+        Closed += (_, _) => _viewModel.StopSearching();
     }
 
     internal PullRequestPickerViewModel ViewModel => _viewModel;

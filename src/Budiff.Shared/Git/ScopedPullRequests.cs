@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -39,23 +40,28 @@ public interface IPullRequestApi
 //   both ends are here (the folder's tree id at each end), else from the PR's
 //   file list.
 // With anyone and no text, All lists the open PRs first, then the merged
-// ones; closed-unmerged PRs only under Closed.
+// ones; closed-unmerged PRs only under Closed. A page returns as soon as one
+// request found something - the picker asks for more while its list is short,
+// so rows show after one round trip rather than after a full page's worth.
 public sealed class ScopedPullRequestSearch
 {
     private const int ScanPageSize = 50;
     private const int HistorySlice = 40;
 
-    // GitHub requests one page may make before it returns what it has (the
-    // picker asks again as the list scrolls, or while it is still short).
+    // GitHub requests one page may make while it finds nothing (the picker
+    // asks again as the list scrolls, or while it is still short).
     private const int RequestBudget = 4;
 
     private readonly string _root;
     private readonly string _prefix;
     private readonly IPullRequestApi _api;
-    private readonly Dictionary<string, IReadOnlyList<PullRequestInfo>> _pullsOfCommit = new(StringComparer.Ordinal);
-    private readonly Dictionary<(int Number, string Head), bool> _touches = new();
-    private string? _canonicalPrefix;
-    private (string Tip, IReadOnlyList<string> Commits)? _history;
+
+    // Searches may overlap (one superseded while it finishes, a search
+    // ahead), so what they learn is kept in thread-safe places.
+    private readonly ConcurrentDictionary<string, IReadOnlyList<PullRequestInfo>> _pullsOfCommit = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<(int Number, string Head), bool> _touches = new();
+    private volatile string? _canonicalPrefix;
+    private volatile FolderHistory? _history;
 
     // root: anywhere in the repository; scopePrefix: the folder, from the
     // repository root ('/'-separated, any letter case).
@@ -75,7 +81,7 @@ public sealed class ScopedPullRequestSearch
         var items = new List<PullRequestInfo>();
         var seen = new HashSet<int>();
         var budget = RequestBudget;
-        while (phase < phases.Count && items.Count < pageSize && budget-- > 0)
+        while (phase < phases.Count && items.Count == 0 && budget-- > 0)
         {
             ct.ThrowIfCancellationRequested();
             string? next;
@@ -245,9 +251,11 @@ public sealed class ScopedPullRequestSearch
         var commits = GitCli.TryRun(repo.Info.WorkingDirectory, out var log, ct, "log", "--first-parent", "--format=%H", tip.Sha, "--", CanonicalPrefix(repo))
             ? log.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             : Array.Empty<string>();
-        _history = (tip.Sha, commits);
+        _history = new FolderHistory(tip.Sha, commits);
         return commits;
     }
+
+    private sealed record FolderHistory(string Tip, IReadOnlyList<string> Commits);
 
     private IReadOnlyDictionary<string, IReadOnlyList<PullRequestInfo>> PullRequestsOf(IReadOnlyList<string> commits, CancellationToken ct)
     {

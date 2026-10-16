@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -23,22 +24,46 @@ public sealed class ScopedPullRequestTests
         var (root, c) = BuildRepo();
         var api = new FakeApi(c);
         var search = new ScopedPullRequestSearch(root, "proj", api);
+        var query = new PullRequestQuery(null, PullRequestStateFilter.All, string.Empty);
 
-        var page = search.Search(new PullRequestQuery(null, PullRequestStateFilter.All, string.Empty), null, 10, CancellationToken.None);
-        Assert.Equal(new[] { 10, 12, 3, 1 }, page.Items.Select(p => p.Number));
-        Assert.False(page.HasNextPage);
-        Assert.Equal(-1, page.TotalCount);
-
-        // GitHub heard only about the folder's commits (not "PR 2"), newest
-        // first, and only about the files of PRs whose commits are not here.
-        Assert.Equal(new[] { c["direct"], c["pr3"], c["pr1"], c["scaffold"] }, api.CommitsAsked);
-        Assert.Equal(new[] { 12, 13 }, api.FilesAsked);
+        // A page returns once a request found something: the open PRs first,
+        // checked locally, else by the files of PRs whose commits are not here.
+        var open = search.Search(query, null, 10, CancellationToken.None);
+        Assert.Equal(new[] { 10, 12 }, open.Items.Select(p => p.Number));
+        Assert.True(open.HasNextPage);
+        Assert.Equal(-1, open.TotalCount);
         Assert.Equal(PullRequestStateFilter.Open, Assert.Single(api.Queries).State);
+        Assert.Equal(new[] { 12, 13 }, api.FilesAsked);
+        Assert.Empty(api.CommitsAsked);
 
-        // Asked again: nothing new goes out.
-        search.Search(new PullRequestQuery(null, PullRequestStateFilter.All, string.Empty), null, 10, CancellationToken.None);
+        // Then the merged history: GitHub hears only about the folder's
+        // commits (not "PR 2"), newest first.
+        var merged = search.Search(query, open.EndCursor, 10, CancellationToken.None);
+        Assert.Equal(new[] { 3, 1 }, merged.Items.Select(p => p.Number));
+        Assert.False(merged.HasNextPage);
+        Assert.Equal(new[] { c["direct"], c["pr3"], c["pr1"], c["scaffold"] }, api.CommitsAsked);
+
+        // Asked again: nothing new goes out but the search itself.
+        search.Search(query, null, 10, CancellationToken.None);
+        search.Search(query, open.EndCursor, 10, CancellationToken.None);
         Assert.Equal(4, api.CommitsAsked.Count);
         Assert.Equal(2, api.FilesAsked.Count);
+    }
+
+    // A request that finds nothing does not end the page: it goes on (within
+    // a budget) until something turns up.
+    [Fact]
+    public void ARequestThatFindsNothing_KeepsLooking()
+    {
+        var (root, c) = BuildRepo();
+        var api = new FakeApi(c) { OnlyOpen = 10 };
+        var search = new ScopedPullRequestSearch(root, "Other", api);
+
+        // The one open PR touches Proj only; Other's history has PR 2.
+        var page = search.Search(new PullRequestQuery(null, PullRequestStateFilter.All, string.Empty), null, 10, CancellationToken.None);
+        Assert.Equal(new[] { 2 }, page.Items.Select(p => p.Number));
+        Assert.Equal(PullRequestStateFilter.Open, Assert.Single(api.Queries).State);
+        Assert.Equal(new[] { c["pr2"], c["scaffold"] }, api.CommitsAsked);
     }
 
     [Fact]
@@ -89,6 +114,75 @@ public sealed class ScopedPullRequestTests
             new[] { 5, 6 });
         Assert.Equal(new[] { "a/x.cs", "b/y.cs" }, files[5]);
         Assert.Null(files[6]);
+    }
+
+    // The repository gh would use, read from the clone instead of asking gh
+    // (~0.5 s): set-default's mark, else the only GitHub repository.
+    [Theory]
+    [InlineData("https://github.com/Ada/Engine.git", "Ada/Engine")]
+    [InlineData("https://github.com/Ada/Engine", "Ada/Engine")]
+    [InlineData("git@github.com:Ada/Engine.git", "Ada/Engine")]
+    [InlineData("ssh://git@ssh.github.com:443/Ada/Engine.git", "Ada/Engine")]
+    [InlineData("https://gitlab.com/Ada/Engine.git", null)]
+    [InlineData("https://github.com/Ada", null)]
+    [InlineData("C:/src/engine", null)]
+    public void GitHubRemote_ParsesGitHubUrls(string url, string? repo)
+        => Assert.Equal(repo, GitHubRemote.ParseUrl(url));
+
+    // A cancelled run stops the tool rather than waiting it out - a search
+    // superseded by the next keystroke, say.
+    [Fact]
+    public async Task ToolProcess_Cancelled_StopsTheTool()
+    {
+        var (tool, args) = OperatingSystem.IsWindows()
+            ? ("powershell", new[] { "-NoProfile", "-Command", "Start-Sleep 30" })
+            : ("sleep", new[] { "30" });
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+        var clock = Stopwatch.StartNew();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Task.Run(
+            () => ToolProcess.TryRun(tool, Environment.CurrentDirectory, 60_000, cts.Token, args, out _, out _),
+            CancellationToken.None));
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(10), $"took {clock.Elapsed}");
+    }
+
+    [Fact]
+    public void GitHubRemote_FollowsGh()
+    {
+        var (root, _) = BuildRepo();
+        using (var repo = new Repository(root))
+        {
+            repo.Network.Remotes.Add("origin", "git@github.com:me/engine.git");
+            repo.Refs.Add("refs/remotes/origin/trunk", repo.Head.Tip.Id);
+            repo.Refs.Add("refs/remotes/origin/HEAD", "refs/remotes/origin/trunk");
+        }
+
+        Assert.Equal(("me/engine", "trunk"), GitHubRemote.Resolve(Path.Combine(root, "Proj")));
+        Assert.True(GitHubRemote.HasGitHubRemote(root));
+
+        // A fork's two repositories: only set-default's mark decides.
+        using (var repo = new Repository(root))
+        {
+            repo.Network.Remotes.Add("upstream", "https://github.com/corp/engine.git");
+        }
+
+        Assert.Null(GitHubRemote.Resolve(root));
+        using (var repo = new Repository(root))
+        {
+            repo.Config.Set("remote.upstream.gh-resolved", "base");
+        }
+
+        Assert.Equal(("corp/engine", (string?)null), GitHubRemote.Resolve(root));
+
+        var plain = Directory.CreateTempSubdirectory("budiff-no-github-").FullName;
+        Repository.Init(plain);
+        using (var repo = new Repository(plain))
+        {
+            repo.Network.Remotes.Add("origin", "https://gitlab.com/me/engine.git");
+        }
+
+        Assert.Null(GitHubRemote.Resolve(plain));
+        Assert.False(GitHubRemote.HasGitHubRemote(plain));
     }
 
     [Fact]
@@ -159,6 +253,9 @@ public sealed class ScopedPullRequestTests
 
         public List<int> FilesAsked { get; } = new();
 
+        // When set, the open search finds just this PR.
+        public int? OnlyOpen { get; init; }
+
         public PullRequestPage Search(PullRequestQuery query, string? after, int pageSize, CancellationToken ct)
         {
             Queries.Add(query);
@@ -171,6 +268,7 @@ public sealed class ScopedPullRequestTests
                     Pr(12, "OPEN", new string('a', 40), c["direct"]),
                     Pr(13, "OPEN", new string('b', 40), c["direct"]),
                 };
+            items = OnlyOpen is { } only ? items.Where(p => p.Number == only).ToArray() : items;
             return new PullRequestPage(items, null, false, items.Length);
         }
 

@@ -59,9 +59,22 @@ public sealed class PullRequestTests : IDisposable
         var first = page.Items[0];
         Assert.Equal("Draft", first.StateLabel);
         Assert.Equal("ada", first.Author);
-        Assert.Equal((351, 13, 11), (first.Additions, first.Deletions, first.ChangedFiles));
+        Assert.Equal(new PullRequestCounts(351, 13, 11), first.Counts);
         Assert.Equal("ghost", page.Items[1].Author);
         Assert.Equal("Merged", page.Items[1].StateLabel);
+    }
+
+    // Lists come without counts (GitHub computes them per PR, slowly); the
+    // rows on screen fetch them afterwards, an alias per PR.
+    [Fact]
+    public void Counts_AreAbsentFromLists_AndParsedPerPr()
+    {
+        var page = PullRequestSearch.ParseSingle("""{"data":{"repository":{"pullRequest":{"number":5,"title":"t","state":"OPEN"}}}}""");
+        Assert.Null(Assert.Single(page.Items).Counts);
+
+        var counts = PullRequestSearch.ParseCounts("""{"data":{"repository":{"p0":{"additions":3,"deletions":1,"changedFiles":2},"p1":null}}}""", new[] { 8, 9 });
+        Assert.Equal(new PullRequestCounts(3, 1, 2), counts[8]);
+        Assert.False(counts.ContainsKey(9));
     }
 
     [Fact]

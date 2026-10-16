@@ -44,6 +44,14 @@ public sealed partial class MainWindow : Window
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         _viewModel.Analysis.PropertyChanged += OnAnalysisPropertyChanged;
         _viewModel.Analysis.PickPullRequest = PickPullRequestAsync;
+        // "Pull request..." may be next: start the list its picker opens on.
+        PeriodBox.DropDownOpened += (_, _) =>
+        {
+            if (_viewModel.Analysis.PullRequests is { } source)
+            {
+                PullRequestPickerViewModel.SearchAhead(source);
+            }
+        };
         BodyGrid.SizeChanged += (_, _) => ClampDockedDiff();
         TreeArea.SizeChanged += (_, _) => FitColumns();
         BirdsEyePanel.SizeChanged += (_, _) => UpdateToolbarWrap();

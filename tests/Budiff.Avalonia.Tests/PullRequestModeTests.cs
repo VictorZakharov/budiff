@@ -260,6 +260,250 @@ public sealed class PullRequestModeTests
         window.Close();
     }
 
+    // Lists come without counts: the rows show at once, their +/- and file
+    // counts follow in one request for the page ("..." until then).
+    [Fact]
+    public async Task Picker_ShowsRowsFirst_ThenTheirCounts()
+    {
+        var gate = new TaskCompletionSource();
+        var source = new FakePullRequestSource(Enumerable.Range(1, 12).Select(n => Pr(n, "victor", withCounts: false))) { CountsGate = gate.Task };
+        var vm = new PullRequestPickerViewModel(source, () => FakePullRequestSource.Now);
+
+        await vm.InitializeAsync();
+        Assert.Equal(10, vm.Items.Count);
+        var first = vm.Items[0];
+        Assert.Equal((string.Empty, string.Empty, "…"), (first.Added, first.Removed, first.Files));
+        Assert.Equal(Enumerable.Range(1, 10), Assert.Single(source.CountsAsked));
+
+        gate.SetResult();
+        await WaitFor(() => first.Counts is not null);
+        Assert.Equal(("+1,000", "−13", "1 file"), (first.Added, first.Removed, first.Files));
+        Assert.Equal("10 files", vm.Items[9].Files);
+
+        // The next page asks for its own rows only.
+        await vm.LoadMoreAsync();
+        await WaitFor(() => vm.Items.All(r => r.Counts is not null));
+        Assert.Equal(new[] { 11, 12 }, source.CountsAsked[1]);
+    }
+
+    [Fact]
+    public async Task Picker_CountsFailure_LeavesTheRows()
+    {
+        var source = new FakePullRequestSource(new[] { Pr(1, "victor", withCounts: false) }) { CountsFailure = "rate limited" };
+        var vm = new PullRequestPickerViewModel(source, () => FakePullRequestSource.Now);
+
+        await vm.InitializeAsync();
+        var row = Assert.Single(vm.Items);
+        await WaitFor(() => row.CountsUnavailable);
+        Assert.Equal((string.Empty, string.Empty, string.Empty), (row.Added, row.Removed, row.Files));
+        Assert.Null(vm.ErrorText);
+    }
+
+    // Opening the Period list ("Pull request..." may be next) starts the
+    // list the picker opens on - for a GitHub repository only.
+    [AvaloniaFact]
+    public void OpeningThePeriodList_SearchesAhead()
+    {
+        var root = ReadmeFixture.BuildFixtureRepo("pr-ahead");
+        var window = new MainWindow(root, gitRoot: true) { Width = 1200, Height = 520 };
+        window.Show();
+        var vm = window.ViewModel;
+        WaitUntil(() => !vm.Analysis.IsScanning && vm.Analysis.Roots.Count > 0, "bird's-eye scan");
+        var box = window.FindControl<RepickComboBox>("PeriodBox")!;
+
+        var elsewhere = new FakePullRequestSource(new[] { Pr(1, "victor") });
+        vm.Analysis.PullRequests = elsewhere;
+        box.IsDropDownOpen = true;
+        UiSnapshot.Pump();
+        box.IsDropDownOpen = false;
+        Assert.Empty(elsewhere.Queries);
+
+        // The picker's list, and the recent PRs typing filters (see
+        // Picker_Typing_FindsRecentPullRequests).
+        var github = new FakePullRequestSource(new[] { Pr(1, "victor") }) { CanSearchAhead = true };
+        vm.Analysis.PullRequests = github;
+        box.IsDropDownOpen = true;
+        UiSnapshot.Pump();
+        box.IsDropDownOpen = false;
+        Assert.Equal(new[] { PullRequestPickerViewModel.DefaultQuery, new PullRequestQuery(null, PullRequestStateFilter.All, string.Empty) }, github.Queries);
+        window.Close();
+    }
+
+    // The picker opening right after the search ahead uses its answer: no
+    // second search, rows at once.
+    [Fact]
+    public async Task Picker_UsesTheSearchAhead()
+    {
+        var gate = new TaskCompletionSource();
+        var source = new FakePullRequestSource(new[] { Pr(1, "victor"), Pr(2, "victor") }) { CanSearchAhead = true, SearchGate = gate.Task };
+
+        PullRequestPickerViewModel.SearchAhead(source);
+        var vm = new PullRequestPickerViewModel(source);
+        var opening = vm.InitializeAsync();
+        gate.SetResult();
+        await opening;
+
+        Assert.Equal(new[] { 1, 2 }, vm.Items.Select(r => r.PullRequest.Number));
+        Assert.Equal(2, source.Queries.Count);
+    }
+
+    // Opening again shows the last list at once while it asks again; the
+    // rows stay when the answer is the same, and are replaced (keeping the
+    // selected PR) when it differs.
+    [Fact]
+    public async Task Picker_OpeningAgain_ShowsTheLastList_ThenTheNewAnswer()
+    {
+        var clock = FakePullRequestSource.Now;
+        var source = new FakePullRequestSource(new[] { Pr(1, "victor"), Pr(2, "victor") });
+        var first = new PullRequestPickerViewModel(source, () => clock);
+        await first.InitializeAsync();
+
+        // Within seconds: the same answer, no new search.
+        var soon = new PullRequestPickerViewModel(source, () => clock);
+        await soon.InitializeAsync();
+        Assert.Single(source.Queries);
+
+        clock = clock.AddMinutes(1);
+        var gate = new TaskCompletionSource();
+        source.SearchGate = gate.Task;
+        var same = new PullRequestPickerViewModel(source, () => clock);
+        var opening = same.InitializeAsync();
+        Assert.Equal(new[] { 1, 2 }, same.Items.Select(r => r.PullRequest.Number));
+        Assert.True(same.IsLoading);
+        var shown = same.Items.ToList();
+        gate.SetResult();
+        await opening;
+        Assert.Equal(shown, same.Items);
+        Assert.False(same.IsLoading);
+        Assert.Equal(2, source.Queries.Count);
+
+        source.Replace(new[] { Pr(0, "victor"), Pr(2, "victor"), Pr(1, "victor") });
+        clock = clock.AddMinutes(1);
+        gate = new TaskCompletionSource();
+        source.SearchGate = gate.Task;
+        var changed = new PullRequestPickerViewModel(source, () => clock);
+        opening = changed.InitializeAsync();
+        changed.SelectedItem = changed.Items.Single(r => r.PullRequest.Number == 2);
+        gate.SetResult();
+        await opening;
+        Assert.Equal(new[] { 0, 1, 2 }, changed.Items.Select(r => r.PullRequest.Number));
+        Assert.Equal(2, changed.SelectedItem!.PullRequest.Number);
+    }
+
+    // Typing narrows the PRs already seen at once, before GitHub is asked;
+    // its answer (it matches more than titles) then fills in, keeping the
+    // rows already there and the selection.
+    [Fact]
+    public async Task Picker_Typing_NarrowsTheSeenPullRequestsAtOnce_ThenGitHubsAnswer()
+    {
+        var source = new FakePullRequestSource(new[] { Pr(1, "victor"), Pr(2, "victor"), Pr(3, "victor"), Pr(4, "victor") });
+        var vm = new PullRequestPickerViewModel(source);
+        await vm.InitializeAsync();
+        var gate = new TaskCompletionSource();
+        source.SearchGate = gate.Task;
+
+        vm.SearchText = "LOWERCASE drive";
+        Assert.Equal(new[] { 3 }, vm.Items.Select(r => r.PullRequest.Number));
+        Assert.Same(vm.Items[0], vm.SelectedItem);
+        Assert.True(vm.IsLoading);
+        Assert.Equal("Searching...", vm.StatusText);
+        Assert.Single(source.Queries);
+        var shown = vm.Items[0];
+
+        source.Replace(new[] { Pr(1, "victor"), Pr(2, "victor"), Pr(3, "victor"), Pr(6, "victor") });
+        vm.SearchText = "lowercase";
+        var searching = vm.SearchNowAsync();
+        Assert.Equal(new[] { 3 }, vm.Items.Select(r => r.PullRequest.Number));
+        gate.SetResult();
+        await searching;
+        Assert.Equal(new[] { 3, 6 }, vm.Items.Select(r => r.PullRequest.Number));
+        Assert.Same(shown, vm.Items[0]);
+        Assert.Same(shown, vm.SelectedItem);
+        Assert.False(vm.IsLoading);
+
+        // A number: the seen PR at once.
+        source.SearchGate = new TaskCompletionSource().Task;
+        vm.SearchText = "#2";
+        Assert.Equal(new[] { 2 }, vm.Items.Select(r => r.PullRequest.Number));
+    }
+
+    // For a GitHub repository listed whole, typing also finds the recent PRs
+    // no list showed: the picker fetched them in the background.
+    [Fact]
+    public async Task Picker_Typing_FindsRecentPullRequests()
+    {
+        var source = new FakePullRequestSource(new[] { Pr(1, "victor"), Pr(2, "victor"), Pr(4, "ada"), Pr(5, "grace") }) { CanSearchAhead = true };
+        var vm = new PullRequestPickerViewModel(source);
+        await vm.InitializeAsync();
+        Assert.Equal(new[] { 1, 2 }, vm.Items.Select(r => r.PullRequest.Number));
+        Assert.Equal(2, source.Queries.Count);
+        source.SearchGate = new TaskCompletionSource().Task;
+
+        vm.AuthorText = "anyone";
+        Assert.Equal(new[] { 1, 2, 4, 5 }, vm.Items.Select(r => r.PullRequest.Number));
+        vm.SearchText = "change 4";
+        Assert.Equal(new[] { 4 }, vm.Items.Select(r => r.PullRequest.Number));
+
+        // Once per source, for a while.
+        await new PullRequestPickerViewModel(source).InitializeAsync();
+        Assert.Single(source.Queries, q => q.Author is null && q.Text.Length == 0);
+    }
+
+    // What a local filter cannot answer - search qualifiers, an author not
+    // known yet - waits for GitHub, as before.
+    [Fact]
+    public async Task Picker_Typing_LeavesQualifiersAndUnknownAuthorsToGitHub()
+    {
+        var source = new FakePullRequestSource(new[] { Pr(1, "victor"), Pr(2, "victor") });
+        var vm = new PullRequestPickerViewModel(source);
+        await vm.InitializeAsync();
+        var gate = new TaskCompletionSource();
+        source.SearchGate = gate.Task;
+
+        vm.SearchText = "label:bug";
+        Assert.Equal(new[] { 1, 2 }, vm.Items.Select(r => r.PullRequest.Number));
+        var searching = vm.SearchNowAsync();
+        Assert.Empty(vm.Items);
+        Assert.Equal("Searching...", vm.StatusText);
+        gate.SetResult();
+        await searching;
+
+        vm.SearchText = string.Empty;
+        await vm.SearchNowAsync();
+        vm.AuthorText = "vic";
+        Assert.Equal(new[] { 1, 2 }, vm.Items.Select(r => r.PullRequest.Number));
+        vm.AuthorText = "anyone";
+        Assert.Equal(new[] { 1, 2 }, vm.Items.Select(r => r.PullRequest.Number));
+        Assert.True(vm.IsLoading);
+    }
+
+    // A later query stops the search still out for an earlier one (its gh
+    // is killed), and the earlier answer never shows.
+    [Fact]
+    public async Task Picker_LaterQuery_StopsTheEarlierSearch()
+    {
+        var source = new FakePullRequestSource(new[] { Pr(1, "victor"), Pr(3, "victor") });
+        var vm = new PullRequestPickerViewModel(source);
+        await vm.InitializeAsync();
+        var gate = new TaskCompletionSource();
+        source.SearchGate = gate.Task;
+
+        vm.SearchText = "change";
+        var first = vm.SearchNowAsync();
+        vm.SearchText = "lowercase";
+        var second = vm.SearchNowAsync();
+        Assert.True(source.Tokens[^2].IsCancellationRequested);
+        Assert.False(source.Tokens[^1].IsCancellationRequested);
+
+        gate.SetResult();
+        await Task.WhenAll(first, second);
+        Assert.Equal(new[] { 3 }, vm.Items.Select(r => r.PullRequest.Number));
+        Assert.Null(vm.ErrorText);
+
+        vm.StopSearching();
+        Assert.True(source.Tokens[^1].IsCancellationRequested);
+    }
+
     // The real window: picking "Pull request..." again (it is already the
     // period) reopens the picker; just opening the drop-down does not.
     [AvaloniaFact]
@@ -321,7 +565,7 @@ public sealed class PullRequestModeTests
         => vm.Analysis.Roots.SelectMany(r => r.SelfAndDescendants()).Where(r => r.IsFile).ToList();
 
     // Every third title is long (like real ones) so snapshots exercise trimming.
-    private static PullRequestInfo Pr(int number, string author, string state = "OPEN")
+    private static PullRequestInfo Pr(int number, string author, string state = "OPEN", bool withCounts = true)
         => new(
             number,
             number % 3 == 0 ? $"Change {number}: detect git with a lowercase drive letter; show the file outside git or when unchanged" : $"Change {number}",
@@ -333,9 +577,9 @@ public sealed class PullRequestModeTests
             number % 3 == 0 ? "vzakharov/lowercase-drive-git-detect-" + number : "b" + number,
             "base",
             "head",
-            number * 1000,
-            number * 13,
-            number);
+            withCounts ? number * 1000 : null,
+            withCounts ? number * 13 : null,
+            withCounts ? number : null);
 
     private static async Task WaitFor(Func<bool> condition)
     {
@@ -370,9 +614,19 @@ public sealed class PullRequestModeTests
     {
         public static readonly DateTimeOffset Now = new(2026, 10, 15, 12, 0, 0, TimeSpan.Zero);
 
-        private readonly List<PullRequestInfo> _all = all.OrderByDescending(p => p.UpdatedAt).ToList();
+        private List<PullRequestInfo> _all = all.OrderByDescending(p => p.UpdatedAt).ToList();
+
+        // Searches wait for this, when set.
+        public Task? SearchGate { get; set; }
+
+        public bool CanSearchAhead { get; init; }
+
+        public void Replace(IEnumerable<PullRequestInfo> all) => _all = all.OrderByDescending(p => p.UpdatedAt).ToList();
 
         public List<PullRequestQuery> Queries { get; } = new();
+
+        // The token each search came with.
+        public List<CancellationToken> Tokens { get; } = new();
 
         public string? Failure { get; init; }
 
@@ -381,6 +635,18 @@ public sealed class PullRequestModeTests
         public Task<PullRequestPage> SearchAsync(PullRequestQuery query, string? after, int pageSize, CancellationToken ct)
         {
             Queries.Add(query);
+            Tokens.Add(ct);
+            return SearchGate is { } gate ? AfterAsync(gate, () => Answer(query, after, pageSize)) : Answer(query, after, pageSize);
+        }
+
+        private static async Task<PullRequestPage> AfterAsync(Task gate, Func<Task<PullRequestPage>> answer)
+        {
+            await gate;
+            return await answer();
+        }
+
+        private Task<PullRequestPage> Answer(PullRequestQuery query, string? after, int pageSize)
+        {
             if (Failure is not null)
             {
                 return Task.FromException<PullRequestPage>(new PullRequestSourceException(Failure));
@@ -444,5 +710,29 @@ public sealed class PullRequestModeTests
 
         public Task<PullRequestRange> ResolveAsync(PullRequestInfo pullRequest, CancellationToken ct)
             => Task.Run(() => PullRequestRanges.Resolve(Root!, pullRequest, () => null, 10_000, ct), ct);
+
+        // Counts are held until this completes, when set.
+        public Task? CountsGate { get; init; }
+
+        public string? CountsFailure { get; init; }
+
+        // The PR numbers of each counts request.
+        public List<int[]> CountsAsked { get; } = new();
+
+        public async Task<IReadOnlyDictionary<int, PullRequestCounts>> GetCountsAsync(IReadOnlyList<PullRequestInfo> pullRequests, CancellationToken ct)
+        {
+            CountsAsked.Add(pullRequests.Select(p => p.Number).ToArray());
+            if (CountsGate is not null)
+            {
+                await CountsGate;
+            }
+
+            if (CountsFailure is not null)
+            {
+                throw new PullRequestSourceException(CountsFailure);
+            }
+
+            return pullRequests.ToDictionary(p => p.Number, p => new PullRequestCounts(p.Number * 1000, p.Number * 13, p.Number));
+        }
     }
 }

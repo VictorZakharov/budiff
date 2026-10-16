@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -28,10 +29,14 @@ public sealed record PullRequestInfo(
     string HeadRefName,
     string BaseRefOid,
     string HeadRefOid,
-    int Additions,
-    int Deletions,
-    int ChangedFiles)
+    int? Additions,
+    int? Deletions,
+    int? ChangedFiles)
 {
+    // Null until fetched: lists come without them (see GetCountsAsync).
+    public PullRequestCounts? Counts
+        => Additions is { } added && Deletions is { } removed && ChangedFiles is { } files ? new(added, removed, files) : null;
+
     // GitHub reports OPEN / MERGED / CLOSED; a draft is an open PR.
     public string StateLabel => State switch
     {
@@ -41,6 +46,9 @@ public sealed record PullRequestInfo(
         _ => State,
     };
 }
+
+// A PR's size as GitHub shows it: lines added / removed, files changed.
+public sealed record PullRequestCounts(int Additions, int Deletions, int ChangedFiles);
 
 public sealed record PullRequestPage(IReadOnlyList<PullRequestInfo> Items, string? EndCursor, bool HasNextPage, int TotalCount)
 {
@@ -62,6 +70,127 @@ public sealed record PullRequestRange(PullRequestInfo PullRequest, string BaseSh
 
 public sealed class PullRequestSourceException(string message) : Exception(message);
 
+// The GitHub repository a clone points at, read locally - `gh repo view`
+// takes ~0.5 s. Follows gh: the remote `gh repo set-default` marked, else the
+// only GitHub repository among the remotes. Null when that is not clear
+// (several, another host), and the caller asks gh.
+internal static class GitHubRemote
+{
+    public static (string Repo, string? DefaultBranch)? Resolve(string root)
+    {
+        try
+        {
+            using var repo = OpenRepository(root);
+            if (repo is null)
+            {
+                return null;
+            }
+
+            var remotes = repo.Network.Remotes
+                .Select(r => (r.Name, Repo: ParseUrl(r.Url)))
+                .Where(r => r.Repo is not null)
+                .ToList();
+            (string Name, string? Repo)? chosen = null;
+            foreach (var remote in remotes)
+            {
+                // "base" on the remote gh set as default; older gh wrote owner/name.
+                var resolved = repo.Config.Get<string>($"remote.{remote.Name}.gh-resolved")?.Value;
+                if (resolved == "base")
+                {
+                    chosen = remote;
+                    break;
+                }
+
+                if (resolved is not null && resolved.Contains('/'))
+                {
+                    chosen = (remote.Name, resolved);
+                    break;
+                }
+            }
+
+            if (chosen is null)
+            {
+                if (remotes.Select(r => r.Repo).Distinct(StringComparer.OrdinalIgnoreCase).Count() != 1)
+                {
+                    return null;
+                }
+
+                chosen = remotes.OrderBy(r => r.Name switch { "upstream" => 0, "github" => 1, "origin" => 2, _ => 3 }).First();
+            }
+
+            var (name, owner) = chosen.Value;
+            var prefix = $"refs/remotes/{name}/";
+            var branch = repo.Refs[prefix + "HEAD"] is LibGit2Sharp.SymbolicReference { TargetIdentifier: var target } && target.StartsWith(prefix, StringComparison.Ordinal)
+                ? target[prefix.Length..]
+                : null;
+            return (owner!, branch);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    public static bool HasGitHubRemote(string root)
+    {
+        try
+        {
+            using var repo = OpenRepository(root);
+            return repo is not null && repo.Network.Remotes.Any(r => ParseUrl(r.Url) is not null);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    // owner/name of a GitHub URL - https, ssh, or scp-like (git@host:o/n) -
+    // on github.com or GH_HOST; null for anything else.
+    internal static string? ParseUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return null;
+        }
+
+        string host, path;
+        var text = url.Trim();
+        if (Uri.TryCreate(text, UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http" or "ssh" or "git")
+        {
+            host = uri.Host;
+            path = uri.AbsolutePath;
+        }
+        else if (text.IndexOf(':') is var colon and > 0 && !text.Contains("://", StringComparison.Ordinal))
+        {
+            var at = text.LastIndexOf('@', colon);
+            host = text[(at + 1)..colon];
+            path = text[(colon + 1)..];
+        }
+        else
+        {
+            return null;
+        }
+
+        var hosts = new[] { "github.com", "www.github.com", "ssh.github.com", Environment.GetEnvironmentVariable("GH_HOST") ?? string.Empty };
+        if (!hosts.Any(h => h.Length > 0 && host.Equals(h, StringComparison.OrdinalIgnoreCase)))
+        {
+            return null;
+        }
+
+        var parts = path.Trim('/').Split('/');
+        if (parts.Length != 2 || parts[0].Length == 0 || parts[1].Length == 0)
+        {
+            return null;
+        }
+
+        var name = parts[1].EndsWith(".git", StringComparison.OrdinalIgnoreCase) ? parts[1][..^4] : parts[1];
+        return name.Length > 0 ? parts[0] + "/" + name : null;
+    }
+
+    private static LibGit2Sharp.Repository? OpenRepository(string root)
+        => LibGit2Sharp.Repository.Discover(root) is { } path ? new LibGit2Sharp.Repository(path) : null;
+}
+
 public interface IPullRequestSource
 {
     Task<PullRequestPage> SearchAsync(PullRequestQuery query, string? after, int pageSize, CancellationToken ct);
@@ -75,12 +204,25 @@ public interface IPullRequestSource
     // The folder the list is limited to (repository path), or empty for the
     // whole repository. A scoped page has no total (TotalCount -1).
     string Scope => string.Empty;
+
+    // The +/- line and file counts of listed PRs, by number. GitHub computes
+    // them per PR, which makes a list several times slower - so lists come
+    // without them and the rows on screen ask afterwards.
+    Task<IReadOnlyDictionary<int, PullRequestCounts>> GetCountsAsync(IReadOnlyList<PullRequestInfo> pullRequests, CancellationToken ct)
+        => Task.FromResult<IReadOnlyDictionary<int, PullRequestCounts>>(new Dictionary<int, PullRequestCounts>());
+
+    // Whether searching ahead is worthwhile (a pick may follow soon): the
+    // repository has a GitHub remote.
+    bool CanSearchAhead => false;
 }
 
 public static class PullRequestSearch
 {
+    // What a list row needs - not the counts (PullRequestCountFields).
     internal const string PullRequestFields =
-        "number title state isDraft author { login } updatedAt baseRefName headRefName baseRefOid headRefOid additions deletions changedFiles";
+        "number title state isDraft author { login } updatedAt baseRefName headRefName baseRefOid headRefOid";
+
+    internal const string PullRequestCountFields = "additions deletions changedFiles";
 
     // GitHub search syntax for one picker query, newest activity first.
     public static string BuildQuery(string repo, PullRequestQuery query)
@@ -179,6 +321,28 @@ public static class PullRequestSearch
         return result;
     }
 
+    // data.repository.p{i} { additions deletions changedFiles }, for
+    // numbers[i]; a PR GitHub did not return is left out.
+    public static IReadOnlyDictionary<int, PullRequestCounts> ParseCounts(string json, IReadOnlyList<int> numbers)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var repository = doc.RootElement.GetProperty("data").GetProperty("repository");
+        var result = new Dictionary<int, PullRequestCounts>();
+        for (var i = 0; i < numbers.Count; i++)
+        {
+            if (repository.TryGetProperty("p" + i.ToString(CultureInfo.InvariantCulture), out var pr)
+                && pr.ValueKind == JsonValueKind.Object
+                && IntOrNull(pr, "additions") is { } added
+                && IntOrNull(pr, "deletions") is { } removed
+                && IntOrNull(pr, "changedFiles") is { } files)
+            {
+                result[numbers[i]] = new PullRequestCounts(added, removed, files);
+            }
+        }
+
+        return result;
+    }
+
     // data.repository.p{i}.files { totalCount, nodes [{ path }] }, for
     // numbers[i]; null paths when GitHub listed only some of them.
     public static IReadOnlyDictionary<int, IReadOnlyList<string>?> ParseFiles(string json, IReadOnlyList<int> numbers)
@@ -240,10 +404,13 @@ public static class PullRequestSearch
             String(node, "headRefName"),
             String(node, "baseRefOid"),
             String(node, "headRefOid"),
-            Int(node, "additions"),
-            Int(node, "deletions"),
-            Int(node, "changedFiles"));
+            IntOrNull(node, "additions"),
+            IntOrNull(node, "deletions"),
+            IntOrNull(node, "changedFiles"));
     }
+
+    private static int? IntOrNull(JsonElement node, string name)
+        => node.TryGetProperty(name, out var value) && value.TryGetInt32(out var number) ? number : null;
 
     private static string String(JsonElement node, string name)
         => node.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() ?? string.Empty : string.Empty;
@@ -264,8 +431,12 @@ public sealed class GitHubCliPullRequestSource : IPullRequestSource, IPullReques
 
     private readonly string _root;
     private readonly ScopedPullRequestSearch? _scoped;
+    private readonly object _repoGate = new();
+    private readonly ConcurrentDictionary<(int Number, string Head), PullRequestCounts> _counts = new();
     private string? _repo;
     private string? _defaultBranch;
+    private bool _viewed;
+    private bool? _canSearchAhead;
     private string? _historyRef;
 
     public GitHubCliPullRequestSource(string root, string scopePrefix = "")
@@ -278,6 +449,51 @@ public sealed class GitHubCliPullRequestSource : IPullRequestSource, IPullReques
     }
 
     public string Scope => _scoped?.Scope ?? string.Empty;
+
+    public bool CanSearchAhead => _canSearchAhead ??= GitHubRemote.HasGitHubRemote(_root);
+
+    // One GraphQL request for the rows: an alias per PR. Kept per head
+    // commit - a PR's counts change only when its head moves.
+    public Task<IReadOnlyDictionary<int, PullRequestCounts>> GetCountsAsync(IReadOnlyList<PullRequestInfo> pullRequests, CancellationToken ct)
+        => Task.Run<IReadOnlyDictionary<int, PullRequestCounts>>(() =>
+        {
+            var result = new Dictionary<int, PullRequestCounts>();
+            var missing = new List<PullRequestInfo>();
+            foreach (var pr in pullRequests)
+            {
+                if (_counts.TryGetValue((pr.Number, pr.HeadRefOid), out var known))
+                {
+                    result[pr.Number] = known;
+                }
+                else
+                {
+                    missing.Add(pr);
+                }
+            }
+
+            if (missing.Count > 0)
+            {
+                var body = new StringBuilder();
+                for (var i = 0; i < missing.Count; i++)
+                {
+                    body.Append('p').Append(i.ToString(CultureInfo.InvariantCulture))
+                        .Append(":pullRequest(number:").Append(missing[i].Number.ToString(CultureInfo.InvariantCulture))
+                        .Append("){").Append(PullRequestSearch.PullRequestCountFields).Append("} ");
+                }
+
+                var numbers = missing.Select(pr => pr.Number).ToList();
+                var found = PullRequestSearch.ParseCounts(RepositoryQuery(ct, body.ToString()), numbers);
+                foreach (var pr in missing)
+                {
+                    if (found.TryGetValue(pr.Number, out var counts))
+                    {
+                        result[pr.Number] = _counts[(pr.Number, pr.HeadRefOid)] = counts;
+                    }
+                }
+            }
+
+            return result;
+        }, ct);
 
     public Task<PullRequestPage> SearchAsync(PullRequestQuery query, string? after, int pageSize, CancellationToken ct)
         => Task.Run(() =>
@@ -364,7 +580,7 @@ public sealed class GitHubCliPullRequestSource : IPullRequestSource, IPullReques
         }
 
         var repo = Repo(ct);
-        var branch = _defaultBranch ?? string.Empty;
+        var branch = DefaultBranch(ct) ?? string.Empty;
         var candidates = new List<string>();
         if (branch.Length > 0)
         {
@@ -411,18 +627,52 @@ public sealed class GitHubCliPullRequestSource : IPullRequestSource, IPullReques
     public Task<PullRequestRange> ResolveAsync(PullRequestInfo pullRequest, CancellationToken ct)
         => Task.Run(() => PullRequestRanges.Resolve(_root, pullRequest, () => Repo(ct), FetchTimeoutMs, ct), ct);
 
-    // owner/name and its default branch, in one call.
+    // owner/name, once: from the clone's remotes when that is clear (instant),
+    // else gh's answer (~0.5 s). Concurrent searches wait for the one answer.
     private string Repo(CancellationToken ct)
     {
-        if (_repo is null)
+        lock (_repoGate)
         {
-            var line = Gh(ct, "repo", "view", "--json", "nameWithOwner,defaultBranchRef", "-q", ".nameWithOwner + \" \" + .defaultBranchRef.name").Trim();
-            var space = line.IndexOf(' ');
-            _defaultBranch = space > 0 ? line[(space + 1)..].Trim() : null;
-            _repo = space > 0 ? line[..space] : line;
-        }
+            if (_repo is null)
+            {
+                if (GitHubRemote.Resolve(_root) is { } local)
+                {
+                    (_repo, _defaultBranch) = local;
+                }
+                else
+                {
+                    ViewRepo(ct);
+                }
+            }
 
-        return _repo;
+            return _repo!;
+        }
+    }
+
+    // The default branch: the remote's HEAD when the clone knows it, else gh's.
+    private string? DefaultBranch(CancellationToken ct)
+    {
+        lock (_repoGate)
+        {
+            Repo(ct);
+            if (_defaultBranch is null && !_viewed)
+            {
+                ViewRepo(ct);
+            }
+
+            return _defaultBranch;
+        }
+    }
+
+    // gh's own resolution (`gh repo set-default`, hosts, forks): owner/name
+    // and the default branch in one call.
+    private void ViewRepo(CancellationToken ct)
+    {
+        var line = Gh(ct, "repo", "view", "--json", "nameWithOwner,defaultBranchRef", "-q", ".nameWithOwner + \" \" + .defaultBranchRef.name").Trim();
+        var space = line.IndexOf(' ');
+        _defaultBranch = space > 0 ? line[(space + 1)..].Trim() : null;
+        _repo ??= space > 0 ? line[..space] : line;
+        _viewed = true;
     }
 
     private static (string Owner, string Name) Split(string repo)
