@@ -9,6 +9,10 @@ namespace Budiff.Avalonia;
 
 public partial class DiffView : UserControl
 {
+    // Line-number column plus the code TextBlock's horizontal padding.
+    private const double LineNumberWidth = 46;
+    private const double TextPadding = 6;
+
     public static readonly StyledProperty<IBrush> AddedLineBackgroundProperty =
         AvaloniaProperty.Register<DiffView, IBrush>(nameof(AddedLineBackground), Brush("#3331C36B"));
 
@@ -59,12 +63,34 @@ public partial class DiffView : UserControl
         {
             ApplyThemeToViewModel();
             UpdateBlameCramped();
+            UpdateVisibleTextWidth();
         };
 
         // LayoutUpdated (not just SizeChanged): a fixed-width docked pane gets
         // NO SizeChanged when only the window resizes, yet "half the window"
-        // changes. The check is a couple of comparisons - cheap per pass.
-        LayoutUpdated += (_, _) => UpdateBlameCramped();
+        // changes. The checks are a couple of comparisons - cheap per pass.
+        LayoutUpdated += (_, _) =>
+        {
+            UpdateBlameCramped();
+            UpdateVisibleTextWidth();
+        };
+    }
+
+    // The horizontal scrollbar's range is the longest line minus what the
+    // NARROWER pane shows, so a side squeezed by the split still reaches the
+    // end of its lines.
+    private void UpdateVisibleTextWidth()
+    {
+        if (DataContext is not DiffViewModel model || RowsHost.Bounds.Width <= 0)
+        {
+            return;
+        }
+
+        var code = RowsHost.Bounds.Width - model.BlameGutterWidth;
+        var pane = model.IsSinglePane
+            ? code
+            : (code - DiffFunnelGutter.GutterWidth) * Math.Min(model.SplitRatio, 1 - model.SplitRatio);
+        model.VisibleTextWidth = Math.Max(0, pane - LineNumberWidth - TextPadding);
     }
 
     // Blame needs real estate: it hides while the pane is under half the

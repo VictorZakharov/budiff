@@ -174,13 +174,16 @@
                                         </Border>
                                     </Grid>
 
-                                    <Grid Height="18" ColumnDefinitions="Auto,*,18,*">
-                                        <Grid.IsVisible>
+                                    <!-- Columns: blame | old | funnel gutter | new; the
+                                         halves are weighted by SplitRatio (drag the gutter). -->
+                                    <local:DiffSplitGrid Height="18"
+                                                         SplitRatio="{Binding $parent[ItemsControl].DataContext.SplitRatio}">
+                                        <local:DiffSplitGrid.IsVisible>
                                             <MultiBinding Converter="{x:Static BoolConverters.And}">
                                                 <Binding Path="!IsGap" />
                                                 <Binding Path="!$parent[ItemsControl].DataContext.IsSinglePane" />
                                             </MultiBinding>
-                                        </Grid.IsVisible>
+                                        </local:DiffSplitGrid.IsVisible>
                                         <!-- Blame gutter (#46): who last touched the OLD side's line;
                                              hover for the commit's details. Its own OUTER column, so
                                              showing it costs BOTH code halves equally. -->
@@ -242,7 +245,7 @@
                                                 </ScrollViewer>
                                             </Grid>
                                         </Border>
-                                    </Grid>
+                                    </local:DiffSplitGrid>
                                 </Panel>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
@@ -251,11 +254,11 @@
                     <local:DiffFunnelGutter Rows="{Binding Rows}"
                                             ItemsHost="{Binding #RowsHost}"
                                             BlameWidth="{Binding BlameGutterWidth}"
+                                            SplitRatio="{Binding SplitRatio, Mode=TwoWay}"
                                             IsVisible="{Binding !IsSinglePane}"
                                             AddedBrush="{Binding FunnelAddedBrush, ElementName=Root}"
                                             RemovedBrush="{Binding FunnelRemovedBrush, ElementName=Root}"
                                             ModifiedBrush="{Binding FunnelModifiedBrush, ElementName=Root}"
-                                            IsHitTestVisible="False"
                                             VerticalAlignment="Stretch"
                                             HorizontalAlignment="Stretch" />
                 </Grid>
