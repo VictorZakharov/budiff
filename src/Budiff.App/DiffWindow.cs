@@ -29,9 +29,9 @@ public sealed class DiffWindow : Window
         // Icon button, mirroring the docked pane's OpenInNew undock icon.
         var dockButton = new Button
         {
-            Content = new Material.Icons.Avalonia.MaterialIcon
+            Content = new AppIcon
             {
-                Kind = Material.Icons.MaterialIconKind.DockWindow,
+                Kind = AppIconKind.DockWindow,
                 Width = 16,
                 Height = 16,
                 Foreground = HexBrush.Parse("#9DA0A8"),

@@ -13,7 +13,6 @@ using Budiff.CodeAnalysis;
 using Budiff.Git;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Material.Icons;
 
 namespace Budiff.App;
 
@@ -117,7 +116,7 @@ public sealed partial class CodeAnalysisRow : ObservableObject
 
     public double IndentWidth => Depth * 16;
 
-    public MaterialIconKind ExpandIcon => IsExpanded ? MaterialIconKind.ChevronDown : MaterialIconKind.ChevronRight;
+    public AppIconKind ExpandIcon => IsExpanded ? AppIconKind.ChevronDown : AppIconKind.ChevronRight;
 
     partial void OnIsExpandedChanged(bool value) => OnPropertyChanged(nameof(ExpandIcon));
 
@@ -125,7 +124,7 @@ public sealed partial class CodeAnalysisRow : ObservableObject
 
     public bool IsFile { get; init; }
 
-    public MaterialIconKind Icon { get; init; }
+    public AppIconKind Icon { get; init; }
 
     public string LinesText { get; init; } = string.Empty;
 
@@ -922,13 +921,13 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     private string Glyph(AnalysisSortKey key)
         => SortKey != key ? string.Empty : (SortAscending ? "▲" : "▼");
 
-    private static MaterialIconKind IconFor(AnalysisNode node) => node.Kind switch
+    private static AppIconKind IconFor(AnalysisNode node) => node.Kind switch
     {
-        AnalysisNodeKind.Project => MaterialIconKind.Package,
-        AnalysisNodeKind.Ungrouped => MaterialIconKind.FolderQuestionOutline,
-        AnalysisNodeKind.Folder => MaterialIconKind.FolderOutline,
-        AnalysisNodeKind.File => MaterialIconKind.FileOutline,
-        _ => MaterialIconKind.FolderOpenOutline,
+        AnalysisNodeKind.Project => AppIconKind.Package,
+        AnalysisNodeKind.Ungrouped => AppIconKind.FolderQuestionOutline,
+        AnalysisNodeKind.Folder => AppIconKind.FolderOutline,
+        AnalysisNodeKind.File => AppIconKind.FileOutline,
+        _ => AppIconKind.FolderOpenOutline,
     };
 
     private static string N(long value) => value.ToString("N0", CultureInfo.CurrentCulture);

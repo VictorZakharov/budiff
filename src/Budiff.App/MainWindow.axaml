@@ -3,7 +3,6 @@
         xmlns:ca="using:Budiff.CodeAnalysis"
         xmlns:app="using:Budiff.App"
         xmlns:budiff="using:Budiff.Avalonia"
-        xmlns:materialIcons="using:Material.Icons.Avalonia"
         x:Class="Budiff.App.MainWindow"
         x:CompileBindings="False"
         Width="1440"
@@ -126,8 +125,8 @@
                 BorderThickness="0,0,0,1">
             <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="10">
                 <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <materialIcons:MaterialIcon Kind="FileCompare" Width="18" Height="18"
-                                                Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                    <app:AppIcon Kind="FileCompare" Width="18" Height="18"
+                                 Foreground="{DynamicResource BudiffMutedTextBrush}" />
                     <StackPanel>
                         <TextBlock Text="{Binding RepoTitle}"
                                    FontWeight="SemiBold"
@@ -148,14 +147,14 @@
                         Padding="8,4"
                         Click="OnOpenFolder"
                         ToolTip.Tip="Open folder">
-                    <materialIcons:MaterialIcon Kind="FolderOpen" Width="18" Height="18" />
+                    <app:AppIcon Kind="FolderOpen" Width="18" Height="18" />
                 </Button>
 
                 <Button Grid.Column="3"
                         Padding="8,4"
                         Command="{Binding RefreshCommand}"
                         ToolTip.Tip="Refresh">
-                    <materialIcons:MaterialIcon Kind="Refresh" Width="18" Height="18" />
+                    <app:AppIcon Kind="Refresh" Width="18" Height="18" />
                 </Button>
             </Grid>
         </Border>
@@ -259,8 +258,8 @@
                                         VerticalAlignment="Center"
                                         ToolTip.Tip="{Binding Analysis.PullRequestTip}">
                                     <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6">
-                                        <materialIcons:MaterialIcon Kind="SourcePull" Width="14" Height="14"
-                                                                    Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                                        <app:AppIcon Kind="SourcePull" Width="14" Height="14"
+                                                     Foreground="{DynamicResource BudiffMutedTextBrush}" />
                                         <TextBlock Grid.Column="1"
                                                    Text="{Binding Analysis.PullRequestButtonText}"
                                                    TextTrimming="CharacterEllipsis"
@@ -489,12 +488,12 @@
                                         <Border Width="{Binding IndentWidth}" />
                                         <Panel Grid.Column="1" Width="18">
                                             <Button Classes="chevron" Click="OnToggleExpand" IsVisible="{Binding !IsFile}">
-                                                <materialIcons:MaterialIcon Kind="{Binding ExpandIcon}" Width="14" Height="14"
-                                                                            Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                                                <app:AppIcon Kind="{Binding ExpandIcon}" Width="14" Height="14"
+                                                             Foreground="{DynamicResource BudiffMutedTextBrush}" />
                                             </Button>
                                         </Panel>
-                                        <materialIcons:MaterialIcon Grid.Column="2" Kind="{Binding Icon}" Width="15" Height="15"
-                                                                    Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                                        <app:AppIcon Grid.Column="2" Kind="{Binding Icon}" Width="15" Height="15"
+                                                     Foreground="{DynamicResource BudiffMutedTextBrush}" />
                                         <TextBlock Grid.Column="3" app:NameInlines.Runs="{Binding NameRuns}" Padding="2,0" Margin="6,0,0,0"
                                                    HorizontalAlignment="Left"
                                                    VerticalAlignment="Center"
@@ -557,8 +556,8 @@
                                 Opacity="0"
                                 IsHitTestVisible="False"
                                 ToolTip.Tip="View options">
-                            <materialIcons:MaterialIcon Kind="Tune" Width="16" Height="16"
-                                                        Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                            <app:AppIcon Kind="Tune" Width="16" Height="16"
+                                         Foreground="{DynamicResource BudiffMutedTextBrush}" />
                             <Button.Flyout>
                                 <MenuFlyout Placement="BottomEdgeAlignedRight">
                                     <MenuItem Header="Working tree" ToggleType="CheckBox"
@@ -582,14 +581,14 @@
                         <Button Classes="diffTool"
                                 Click="OnFloatDiff"
                                 ToolTip.Tip="Open diff in its own window">
-                            <materialIcons:MaterialIcon Kind="OpenInNew" Width="16" Height="16"
-                                                        Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                            <app:AppIcon Kind="OpenInNew" Width="16" Height="16"
+                                         Foreground="{DynamicResource BudiffMutedTextBrush}" />
                         </Button>
                         <Button Classes="diffTool"
                                 Command="{Binding CloseDiffCommand}"
                                 ToolTip.Tip="Close diff">
-                            <materialIcons:MaterialIcon Kind="Close" Width="16" Height="16"
-                                                        Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                            <app:AppIcon Kind="Close" Width="16" Height="16"
+                                         Foreground="{DynamicResource BudiffMutedTextBrush}" />
                         </Button>
                     </StackPanel>
                     <Grid x:Name="DiffToolbarGrid" ColumnSpacing="6" MinHeight="26" ClipToBounds="True">
@@ -608,8 +607,8 @@
                         <Button Classes="diffTool"
                                 Command="{Binding ToggleTreeCommand}"
                                 ToolTip.Tip="{Binding TreeToggleTip}">
-                            <materialIcons:MaterialIcon Kind="{Binding TreeToggleIcon}" Width="16" Height="16"
-                                                        Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                            <app:AppIcon Kind="{Binding TreeToggleIcon}" Width="16" Height="16"
+                                         Foreground="{DynamicResource BudiffMutedTextBrush}" />
                         </Button>
                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
                             <!-- Back to the file a preview link was followed from. -->
@@ -618,8 +617,8 @@
                                     IsVisible="{Binding Diff.CanGoBack}"
                                     Command="{Binding Diff.GoBackCommand}"
                                     ToolTip.Tip="Back (Alt+Left)">
-                                <materialIcons:MaterialIcon Kind="ArrowLeft" Width="16" Height="16"
-                                                            Foreground="{DynamicResource BudiffTextBrush}" />
+                                <app:AppIcon Kind="ArrowLeft" Width="16" Height="16"
+                                             Foreground="{DynamicResource BudiffTextBrush}" />
                             </Button>
                             <TextBlock Text="Diff" FontWeight="SemiBold" FontSize="12"
                                        Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />

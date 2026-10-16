@@ -10,7 +10,6 @@ using Budiff.Avalonia;
 using Budiff.Git;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Material.Icons;
 
 namespace Budiff.App;
 
@@ -24,7 +23,7 @@ public sealed record AuthorOption(string Display, string? Login, bool IsNote = f
 
     public AvatarVm? Avatar { get; init; }
 
-    public MaterialIconKind? Icon { get; init; }
+    public AppIconKind? Icon { get; init; }
 
     // What Mine / Anyone mean, under their name.
     public string? Meaning { get; init; }
@@ -33,7 +32,7 @@ public sealed record AuthorOption(string Display, string? Login, bool IsNote = f
 
     public bool HasIcon => Icon is not null;
 
-    public MaterialIconKind IconKind => Icon ?? MaterialIconKind.Account;
+    public AppIconKind IconKind => Icon ?? AppIconKind.Account;
 
     public string Title => Person is { } person ? person.Name ?? person.Login : Display;
 
@@ -125,8 +124,8 @@ public sealed partial class PullRequestPickerViewModel : ObservableObject
     // How many recent PRs are fetched for typing to filter (see Seed).
     private const int SeedSize = 100;
 
-    public static readonly AuthorOption Mine = new("Mine", "@me") { Icon = MaterialIconKind.Account, Meaning = "Pull requests you opened" };
-    public static readonly AuthorOption Anyone = new("Anyone", null) { Icon = MaterialIconKind.AccountGroup, Meaning = "Everyone's pull requests" };
+    public static readonly AuthorOption Mine = new("Mine", "@me") { Icon = AppIconKind.Account, Meaning = "Pull requests you opened" };
+    public static readonly AuthorOption Anyone = new("Anyone", null) { Icon = AppIconKind.AccountGroup, Meaning = "Everyone's pull requests" };
     public static readonly AuthorOption LoadingPeople = new("Loading people…", null, IsNote: true);
     public static readonly AuthorOption NoPeople = new("Could not list people - type a login", null, IsNote: true);
 
