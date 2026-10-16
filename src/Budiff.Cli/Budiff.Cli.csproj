@@ -7,6 +7,18 @@
     <PackageId>budiff</PackageId>
     <Description>ls for diffs: a folder-scoped terminal diff viewer.</Description>
     <PackageTags>$(PackageTags);dotnet-tool;terminal</PackageTags>
+    <!-- One tool package per platform (.NET 10 RID-specific tools). `budiff`
+         itself only names them; `dotnet tool install` then fetches the one for
+         the machine - its own Oniguruma build and, on Windows, the GUI -
+         instead of every platform's. Still framework-dependent: nothing here
+         asks for self-contained (trimming, single-file or AOT would). `any`
+         is the fallback for other platforms: the portable build with every
+         platform's natives, as before (listed here, not only as a tool
+         package RID, so restore covers it). -->
+    <RuntimeIdentifiers>win-x64;win-arm64;linux-x64;linux-arm64;linux-musl-x64;linux-musl-arm64;osx-x64;osx-arm64;any</RuntimeIdentifiers>
+    <!-- The top package holds no code, so no symbols either (each platform's
+         package has its own .snupkg). -->
+    <IncludeSymbols Condition="'$(RuntimeIdentifier)' == ''">false</IncludeSymbols>
   </PropertyGroup>
 
   <ItemGroup>
@@ -28,17 +40,22 @@
     <None Include="..\..\licenses\*.txt" Pack="true" PackagePath="licenses\" Visible="false" />
   </ItemGroup>
 
-  <!-- Ship the GUI inside the tool package so `budiff -i` works from any folder:
-       publish Budiff.App and pack the publish output under tools/<tfm>/any/gui/win-x64/,
-       where AppLauncher probes for it (Windows only). The publish is NativeAOT:
-       time-to-window ~0.55s (vs ~0.7s ReadyToRun, ~1.2s portable IL) and the
-       payload is ~57 MB (vs 159 MB R2R, 600 MB portable). Needs the VC++ tools
-       (link.exe) on the packing machine; CI's windows-latest has them.
-       Non-Windows GUI packaging is tracked in issue #57. -->
-  <Target Name="PublishGuiForPack" BeforeTargets="_GetPackageFiles">
-    <PropertyGroup>
-      <GuiPublishDir>$(MSBuildProjectDirectory)\obj\gui-publish\</GuiPublishDir>
-    </PropertyGroup>
+  <!-- Ship the GUI inside the Windows tool packages so `budiff -i` works from
+       any folder: win-x64 and win-arm64 (x64 emulation) carry it under
+       tools/<tfm>/<rid>/gui/win-x64/, where AppLauncher probes for it. The
+       publish is NativeAOT: time-to-window ~0.55s (vs ~0.7s ReadyToRun, ~1.2s
+       portable IL) and the payload is ~57 MB (vs 159 MB R2R, 600 MB
+       portable). Needs the VC++ tools (link.exe) on the packing machine; CI's
+       windows-latest has them. Non-Windows GUI packaging is tracked in issue
+       #57. -->
+  <PropertyGroup>
+    <GuiPublishDir>$(MSBuildProjectDirectory)\obj\gui-publish\</GuiPublishDir>
+    <PackGui Condition="'$(RuntimeIdentifier)' == 'win-x64' or '$(RuntimeIdentifier)' == 'win-arm64'">true</PackGui>
+  </PropertyGroup>
+
+  <!-- Once, in the pack without a RID, before it packs the platforms in
+       parallel (they would race on one publish). -->
+  <Target Name="PublishGuiForPack" BeforeTargets="_CreateRIDSpecificToolPackages" Condition="'$(RuntimeIdentifier)' == ''">
     <!-- Publish does not clean its output dir, so files from a previous pack
          (e.g. a differently-shaped publish) would silently ride along. -->
     <RemoveDir Directories="$(GuiPublishDir)" />
@@ -48,12 +65,17 @@
              Targets="Publish"
              Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x64;SelfContained=true;PublishDir=$(GuiPublishDir)"
              RemoveProperties="NoBuild" />
+  </Target>
+
+  <Target Name="PackGui" BeforeTargets="_GetPackageFiles" Condition="'$(PackGui)' == 'true'">
+    <Error Condition="!Exists('$(GuiPublishDir)Budiff.App.exe')"
+           Text="The GUI is not published. Pack without -r: that pack publishes it, then packs every platform." />
     <ItemGroup>
       <!-- NativeAOT emits huge symbol files (80+ MB); never ship them. -->
       <None Include="$(GuiPublishDir)**\*"
             Exclude="$(GuiPublishDir)**\*.pdb"
             Pack="true"
-            PackagePath="tools/$(TargetFramework)/any/gui/win-x64/%(RecursiveDir)" />
+            PackagePath="tools/$(TargetFramework)/$(RuntimeIdentifier)/gui/win-x64/%(RecursiveDir)" />
     </ItemGroup>
   </Target>
 </Project>
