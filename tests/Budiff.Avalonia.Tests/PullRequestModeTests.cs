@@ -9,6 +9,9 @@ using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
+using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 using Avalonia.VisualTree;
 using Budiff.App;
 using Budiff.Git;
@@ -120,6 +123,50 @@ public sealed class PullRequestModeTests
         Assert.Equal(2, source.PeopleCalls);
     }
 
+    // The author list is cards: a person's picture (initials until it
+    // arrives, and if it cannot), name, login and email; Mine and Anyone
+    // say what they mean. Pictures download once - pickers share them.
+    [Fact]
+    public async Task Picker_PeopleShowAsCards()
+    {
+        var source = new FakePullRequestSource(new[] { Pr(1, "victor") });
+        var picture = new FakeImage();
+        var asked = new List<string>();
+        var gate = new TaskCompletionSource<IImage?>();
+        Task<IImage?> Avatars(string url)
+        {
+            asked.Add(url);
+            return url.EndsWith("/ada", StringComparison.Ordinal) ? gate.Task : Task.FromResult<IImage?>(null);
+        }
+
+        var vm = new PullRequestPickerViewModel(source, avatars: Avatars);
+        await vm.InitializeAsync();
+        await vm.LoadPeopleAsync();
+
+        var mine = vm.AuthorOptions[0];
+        Assert.Equal(("Mine", "Pull requests you opened", true, false), (mine.Title, mine.Subtitle, mine.HasIcon, mine.HasAvatar));
+        Assert.Equal("Everyone's pull requests", vm.AuthorOptions[1].Subtitle);
+
+        var ada = vm.AuthorOptions.Single(o => o.Login == "ada");
+        Assert.Equal(("Ada Lovelace", "ada · ada@example.com", "AL"), (ada.Title, ada.Subtitle, ada.Avatar!.Initials));
+        Assert.Null(ada.Avatar.Image);
+        gate.SetResult(picture);
+        await WaitFor(() => ada.Avatar.Image == picture);
+
+        var grace = vm.AuthorOptions.Single(o => o.Login == "grace");
+        Assert.Equal(("Grace Hopper", "grace", "GH"), (grace.Title, grace.Subtitle, grace.Avatar!.Initials));
+        Assert.Null(grace.Avatar.Image);
+        var victor = vm.AuthorOptions.Single(o => o.Login == "victor");
+        Assert.Equal(("victor", "victor@example.com", "V"), (victor.Title, victor.Subtitle, victor.Avatar!.Initials));
+        Assert.Equal(new[] { "https://avatars.example/ada", "https://avatars.example/grace" }, asked);
+
+        var again = new PullRequestPickerViewModel(source, avatars: Avatars);
+        await again.InitializeAsync();
+        await again.LoadPeopleAsync();
+        Assert.Same(ada.Avatar, again.AuthorOptions.Single(o => o.Login == "ada").Avatar);
+        Assert.Equal(2, asked.Count);
+    }
+
     // The real window: Author is a drop-down; opening it lists the people
     // (a note while loading, not pickable); picking or typing searches.
     [AvaloniaFact]
@@ -127,7 +174,8 @@ public sealed class PullRequestModeTests
     {
         var gate = new TaskCompletionSource();
         var source = new FakePullRequestSource(new[] { Pr(1, "victor"), Pr(2, "ada"), Pr(3, "grace") }) { PeopleGate = gate.Task };
-        var window = new PullRequestPickerWindow(new PullRequestPickerViewModel(source, () => FakePullRequestSource.Now)) { Width = 760, Height = 560 };
+        var avatars = new Func<string, Task<IImage?>>(url => Task.FromResult<IImage?>(url.EndsWith("/ada", StringComparison.Ordinal) ? Picture() : null));
+        var window = new PullRequestPickerWindow(new PullRequestPickerViewModel(source, () => FakePullRequestSource.Now, avatars)) { Width = 760, Height = 560 };
         window.Show();
         var vm = window.ViewModel;
         WaitUntil(() => !vm.IsLoading && vm.Items.Count == 1, "first search");
@@ -561,6 +609,34 @@ public sealed class PullRequestModeTests
         UiSnapshot.Pump();
     }
 
+    // A stand-in avatar: a soft diagonal gradient.
+    private static WriteableBitmap Picture()
+    {
+        var bitmap = new WriteableBitmap(new PixelSize(64, 64), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Premul);
+        using var buffer = bitmap.Lock();
+        var pixels = new int[64 * 64];
+        for (var y = 0; y < 64; y++)
+        {
+            for (var x = 0; x < 64; x++)
+            {
+                var t = (x + y) * 255 / 126;
+                pixels[(y * 64) + x] = unchecked((int)0xFF000000) | (0x40 + (t / 3)) << 16 | (0x90 - (t / 4)) << 8 | (0xC0 + (t / 5));
+            }
+        }
+
+        System.Runtime.InteropServices.Marshal.Copy(pixels, 0, buffer.Address, pixels.Length);
+        return bitmap;
+    }
+
+    private sealed class FakeImage : IImage
+    {
+        public Size Size => new(64, 64);
+
+        public void Draw(DrawingContext context, Rect sourceRect, Rect destRect)
+        {
+        }
+    }
+
     private static List<CodeAnalysisRow> AllFiles(MainWindowViewModel vm)
         => vm.Analysis.Roots.SelectMany(r => r.SelfAndDescendants()).Where(r => r.IsFile).ToList();
 
@@ -699,7 +775,12 @@ public sealed class PullRequestModeTests
                 throw new PullRequestSourceException("rate limited");
             }
 
-            return new[] { new RepoPerson("ada", "Ada Lovelace"), new RepoPerson("grace", "Grace Hopper"), new RepoPerson("victor", null) };
+            return new[]
+            {
+                new RepoPerson("ada", "Ada Lovelace", "ada@example.com", "https://avatars.example/ada"),
+                new RepoPerson("grace", "Grace Hopper", null, "https://avatars.example/grace"),
+                new RepoPerson("victor", null, "victor@example.com"),
+            };
         }
 
         public Task<string?> GetCurrentLoginAsync(CancellationToken ct)

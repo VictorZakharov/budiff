@@ -10,13 +10,45 @@ using Budiff.Avalonia;
 using Budiff.Git;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Material.Icons;
 
 namespace Budiff.App;
 
 // One author choice: Login "@me" = the signed-in user, null = anyone. A note
-// ("Loading people...") is a list row that cannot be picked.
+// ("Loading people...") is a list row that cannot be picked. The list shows
+// each as a card: a repo person's picture, name, login and email; an icon
+// and what it means for Mine / Anyone.
 public sealed record AuthorOption(string Display, string? Login, bool IsNote = false)
 {
+    public RepoPerson? Person { get; init; }
+
+    public AvatarVm? Avatar { get; init; }
+
+    public MaterialIconKind? Icon { get; init; }
+
+    // What Mine / Anyone mean, under their name.
+    public string? Meaning { get; init; }
+
+    public bool HasAvatar => Avatar is not null;
+
+    public bool HasIcon => Icon is not null;
+
+    public MaterialIconKind IconKind => Icon ?? MaterialIconKind.Account;
+
+    public string Title => Person is { } person ? person.Name ?? person.Login : Display;
+
+    // Login and email under a name; just the email when the login is the
+    // name already.
+    public string Subtitle => Person switch
+    {
+        { Name: null } person => person.Email ?? string.Empty,
+        { Email: { } email } person => $"{person.Login} · {email}",
+        { } person => person.Login,
+        null => Meaning ?? string.Empty,
+    };
+
+    public bool HasSubtitle => Subtitle.Length > 0;
+
     public override string ToString() => Display;
 }
 
@@ -93,8 +125,8 @@ public sealed partial class PullRequestPickerViewModel : ObservableObject
     // How many recent PRs are fetched for typing to filter (see Seed).
     private const int SeedSize = 100;
 
-    public static readonly AuthorOption Mine = new("Mine", "@me");
-    public static readonly AuthorOption Anyone = new("Anyone", null);
+    public static readonly AuthorOption Mine = new("Mine", "@me") { Icon = MaterialIconKind.Account, Meaning = "Pull requests you opened" };
+    public static readonly AuthorOption Anyone = new("Anyone", null) { Icon = MaterialIconKind.AccountGroup, Meaning = "Everyone's pull requests" };
     public static readonly AuthorOption LoadingPeople = new("Loading people…", null, IsNote: true);
     public static readonly AuthorOption NoPeople = new("Could not list people - type a login", null, IsNote: true);
 
@@ -108,8 +140,12 @@ public sealed partial class PullRequestPickerViewModel : ObservableObject
     // The PRs lists have shown, per source: typing filters them at once.
     private static readonly ConditionalWeakTable<IPullRequestSource, SeenPullRequests> Seen = new();
 
+    // A picture per person, kept with the people list (pickers share both).
+    private static readonly ConditionalWeakTable<RepoPerson, AvatarVm> Avatars = new();
+
     private readonly IPullRequestSource _source;
     private readonly Func<DateTimeOffset> _now;
+    private readonly Func<string, Task<IImage?>> _avatars;
     private PullRequestQuery _query;
     private string? _cursor;
     private int _searchGen;
@@ -165,10 +201,12 @@ public sealed partial class PullRequestPickerViewModel : ObservableObject
 
     private static SeenPullRequests SeenOf(IPullRequestSource source) => Seen.GetValue(source, _ => new SeenPullRequests());
 
-    public PullRequestPickerViewModel(IPullRequestSource source, Func<DateTimeOffset>? now = null)
+    // avatars: downloads a picture by URL (null when it cannot).
+    public PullRequestPickerViewModel(IPullRequestSource source, Func<DateTimeOffset>? now = null, Func<string, Task<IImage?>>? avatars = null)
     {
         _source = source;
         _now = now ?? (() => DateTimeOffset.Now);
+        _avatars = avatars ?? AvatarImages.LoadAsync;
         _selectedState = States[0];
         _query = CurrentQuery();
         AuthorOptions.Add(Mine);
@@ -781,7 +819,7 @@ public sealed partial class PullRequestPickerViewModel : ObservableObject
             AuthorOptions.Remove(LoadingPeople);
             foreach (var person in list)
             {
-                AuthorOptions.Add(new AuthorOption(person.Display, person.Login));
+                AuthorOptions.Add(new AuthorOption(person.Display, person.Login) { Person = person, Avatar = Avatars.GetValue(person, NewAvatar) });
             }
 
             _peopleListed = true;
@@ -791,6 +829,30 @@ public sealed partial class PullRequestPickerViewModel : ObservableObject
             PeopleCache.Remove(_source);
             AuthorOptions.Remove(LoadingPeople);
             AuthorOptions.Add(NoPeople);
+        }
+    }
+
+    // Initials at once; the picture replaces them once downloaded.
+    private AvatarVm NewAvatar(RepoPerson person)
+    {
+        var avatar = new AvatarVm(person);
+        if (person.AvatarUrl is { } url)
+        {
+            _ = ShowPictureAsync(avatar, url);
+        }
+
+        return avatar;
+    }
+
+    private async Task ShowPictureAsync(AvatarVm avatar, string url)
+    {
+        try
+        {
+            avatar.Image = await _avatars(url);
+        }
+        catch (Exception)
+        {
+            // The initials stay.
         }
     }
 

@@ -97,6 +97,40 @@ public sealed class PullRequestTests : IDisposable
         Assert.Equal(new[] { "Ada Lovelace (zed)", "bob" }, people.Select(p => p.Display));
     }
 
+    // A card's details: the public profile email, else the newest address
+    // the person committed with - never GitHub's noreply one.
+    [Fact]
+    public void ParsePeople_TakesEmailsAndAvatars()
+    {
+        var people = PullRequestSearch.ParsePeople("""
+            {"data":{"repository":{
+              "mentionableUsers":{"nodes":[
+                {"login":"ada","name":"Ada Lovelace","email":"ada@example.com","avatarUrl":"https://avatars.example/ada"},
+                {"login":"bob","name":null,"email":"","avatarUrl":"https://avatars.example/bob"},
+                {"login":"cy","name":"Cy","email":""},
+                {"login":"dee","name":"Dee","email":""}
+              ]},
+              "defaultBranchRef":{"target":{"history":{"nodes":[
+                {"author":{"email":"ada@work.example","user":{"login":"ada"}}},
+                {"author":{"email":"1+cy@users.noreply.github.com","user":{"login":"cy"}}},
+                {"author":{"email":"bob@new.example","user":{"login":"bob"}}},
+                {"author":{"email":"bob@old.example","user":{"login":"bob"}}},
+                {"author":{"email":"stranger@example.com","user":null}}
+              ]}}}
+            }}}
+            """);
+
+        Assert.Equal(
+            new[] { ("ada", "ada@example.com"), ("bob", "bob@new.example"), ("cy", null), ("dee", null) },
+            people.Select(p => (p.Login, p.Email)));
+        Assert.Equal("https://avatars.example/ada", people[0].AvatarUrl);
+        Assert.Null(people[2].AvatarUrl);
+
+        // No default branch (an empty repository): profile details only.
+        var bare = PullRequestSearch.ParsePeople("""{"data":{"repository":{"mentionableUsers":{"nodes":[{"login":"ada","email":""}]},"defaultBranchRef":null}}}""");
+        Assert.Null(Assert.Single(bare).Email);
+    }
+
     [Theory]
     [InlineData("https://github.com/Owner/Repo.git", true)]
     [InlineData("git@github.com:owner/repo.git", true)]
