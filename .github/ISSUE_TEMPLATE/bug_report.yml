@@ -1,0 +1,69 @@
+name: Bug report
+description: Something in the CLI, the GUI, or the MCP server is wrong
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve budiff. Please do not attach private repositories,
+        credentials, or proprietary source - a small synthetic repository you can share
+        is the best reproduction.
+
+  - type: input
+    id: version
+    attributes:
+      label: budiff version
+      description: Run `budiff --version` and paste the result.
+      placeholder: budiff 0.1.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - Linux
+        - macOS
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where
+      options:
+        - CLI (terminal)
+        - GUI (budiff -i)
+        - --json output
+        - MCP server (budiff mcp)
+        - Library packages
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The command you ran and what you did. Redact local paths if needed.
+    validations:
+      required: true
+
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened, and what you expected
+      description: Screenshots help for GUI problems.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Public-data check
+      options:
+        - label: I removed credentials, private source, and anything else I cannot share publicly.
+          required: true
