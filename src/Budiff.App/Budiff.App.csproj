@@ -13,6 +13,12 @@
          affected - build, test, and the dev-fallback exe stay JIT. -->
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <PublishAot>true</PublishAot>
+    <!-- Smaller native code, and identical method bodies stored once: the exe
+         drops from 34.7 to 29.4 MB. Measured under AOT on budiff's own
+         sources, the line diff and TextMate highlighting run no slower
+         (highlighting time is Oniguruma's, which is native either way). -->
+    <OptimizationPreference>Size</OptimizationPreference>
+    <IlcFoldIdenticalMethodBodies>true</IlcFoldIdenticalMethodBodies>
   </PropertyGroup>
 
   <ItemGroup>

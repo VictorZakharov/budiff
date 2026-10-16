@@ -14,8 +14,9 @@ namespace Budiff.Avalonia.Tests;
 
 public sealed class AppIconTests
 {
-    // Every icon has a path, inside Material's 24x24 canvas.
-    [Fact]
+    // Every icon has a path, inside Material's 24x24 canvas. Parsing a
+    // geometry needs Avalonia's render platform, hence AvaloniaFact.
+    [AvaloniaFact]
     public void EveryIconHasAPathOnTheMaterialCanvas()
     {
         foreach (var kind in Enum.GetValues<AppIconKind>())
