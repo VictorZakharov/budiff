@@ -16,6 +16,8 @@ on:
       - Directory.Build.props
       - src/Budiff.Cli/Budiff.Cli.csproj
       - src/Budiff.App/Budiff.App.csproj
+      - src/Budiff.Core/Budiff.Core.csproj
+      - src/Budiff.Avalonia*/*.csproj
       - PACKAGE_README.md
       - THIRD-PARTY-NOTICES.md
       - LICENSE
@@ -68,49 +70,24 @@ jobs:
       - name: Pack
         run: dotnet pack Budiff.slnx -c Release -o artifacts/packages -p:Version=${{ steps.version.outputs.value }}
 
-      # The tool is a top `budiff` package that names one package per
-      # platform; the platform list is read from it, so it lives only in
-      # Budiff.Cli.csproj.
-      - name: Inspect packages
+      # One package, the tool: its notices, its natives, and the GUI.
+      - name: Inspect the package
         shell: pwsh
         run: |
           $version = "${{ steps.version.outputs.value }}"
+          $packages = @(Get-ChildItem artifacts/packages/*.nupkg)
+          if ($packages.Count -ne 1 -or $packages[0].Name -ne "budiff.$version.nupkg") {
+            throw "The pack should make budiff.$version.nupkg only, made: $($packages.Name)"
+          }
           Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $common = @("LICENSE", "PACKAGE_README.md", "assets/budiff-icon.png")
-          function Read-Package($id, $required) {
-            $package = "artifacts/packages/$id.$version.nupkg"
-            if (-not (Test-Path $package)) { throw "Missing $package" }
-            $zip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $package))
-            $entries = $zip.Entries.FullName
-            foreach ($entry in $required) {
-              if ($entries -notcontains $entry) { throw "$package is missing $entry" }
-            }
-            return @{ Zip = $zip; Entries = $entries }
-          }
-          foreach ($id in "Budiff.Core", "Budiff.Avalonia", "Budiff.Avalonia.TextMate", "Budiff.Avalonia.Markdown") {
-            (Read-Package $id $common).Zip.Dispose()
-          }
-
-          # Where the top package keeps its settings depends on the SDK:
-          # tools/net10.0/any/ (10.0.2xx), tools/any/any/ (10.0.4xx).
-          $top = Read-Package "budiff" ($common + @("THIRD-PARTY-NOTICES.md"))
-          $settingsEntry = @($top.Zip.Entries | Where-Object FullName -like "tools/*/DotnetToolSettings.xml")
-          if ($settingsEntry.Count -ne 1) { throw "The budiff package should have one DotnetToolSettings.xml, has: $($settingsEntry.FullName)" }
-          $reader = New-Object IO.StreamReader($settingsEntry[0].Open())
-          $settings = [xml]$reader.ReadToEnd()
-          $reader.Dispose()
-          $top.Zip.Dispose()
-          $rids = @($settings.DotNetCliTool.RuntimeIdentifierPackages.RuntimeIdentifierPackage | ForEach-Object { $_.RuntimeIdentifier })
-          foreach ($needed in "win-x64", "linux-x64", "osx-arm64", "any") {
-            if ($rids -notcontains $needed) { throw "The budiff package names no $needed package (it names: $rids)." }
-          }
-          foreach ($rid in $rids) {
-            $gui = "tools/net10.0/$rid/gui/win-x64/Budiff.App.exe"
-            $required = $common + @("THIRD-PARTY-NOTICES.md", "licenses/dotnet-runtime.txt", "tools/net10.0/$rid/budiff.dll")
-            if ($rid -like "win-*") { $required += $gui }
-            $package = Read-Package "budiff.$rid" $required
-            $package.Zip.Dispose()
-            if ($rid -notlike "win-*" -and $package.Entries -contains $gui) { throw "budiff.$rid carries the Windows GUI." }
+          $zip = [IO.Compression.ZipFile]::OpenRead($packages[0].FullName)
+          $entries = $zip.Entries.FullName
+          $zip.Dispose()
+          $required = @(
+            "LICENSE", "PACKAGE_README.md", "assets/budiff-icon.png", "THIRD-PARTY-NOTICES.md", "licenses/dotnet-runtime.txt",
+            "tools/net10.0/any/budiff.dll", "tools/net10.0/any/DotnetToolSettings.xml", "tools/net10.0/any/gui/win-x64/Budiff.App.exe")
+          foreach ($entry in $required) {
+            if ($entries -notcontains $entry) { throw "budiff.$version.nupkg is missing $entry" }
           }
           Get-ChildItem artifacts/packages | Format-Table Name, Length
 
@@ -124,7 +101,7 @@ jobs:
           if ($reported -ne "budiff $version") { throw "budiff --version printed '$reported'." }
           & artifacts/smoke/budiff --help | Out-Null
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          # The install picked this machine's package, GUI included.
+          # The GUI came along.
           if (-not (Get-ChildItem artifacts/smoke/.store -Recurse -Filter Budiff.App.exe)) { throw "The installed tool has no GUI." }
 
       - name: Build CLI archives
@@ -190,21 +167,12 @@ jobs:
         with:
           user: ${{ vars.NUGET_USER }}
 
-      # The top `budiff` package goes last: it names the per-platform ones, so
-      # it must not go live before them. Each .snupkg goes alongside its
-      # .nupkg.
+      # The .snupkg goes alongside the .nupkg.
       - name: Push to NuGet.org
         env:
           NUGET_API_KEY: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
           VERSION: ${{ needs.package.outputs.version }}
-        run: |
-          top="artifacts/packages/budiff.$VERSION.nupkg"
-          for package in artifacts/packages/*.nupkg; do
-            if [ "$package" != "$top" ]; then
-              dotnet nuget push "$package" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
-            fi
-          done
-          dotnet nuget push "$top" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+        run: dotnet nuget push "artifacts/packages/budiff.$VERSION.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
 
       - name: Create the GitHub release
         env:

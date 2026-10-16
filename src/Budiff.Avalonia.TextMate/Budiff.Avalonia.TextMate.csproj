@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <Description>TextMate syntax highlighter for Budiff.Avalonia.</Description>
-    <PackageTags>$(PackageTags);textmate;syntax-highlighting</PackageTags>
+    <!-- Not published: budiff ships as one NuGet package, the tool. -->
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>

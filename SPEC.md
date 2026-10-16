@@ -13,7 +13,7 @@ budiff is **`ls` for diffs**. You run it in a folder and instantly see what chan
 
 Tagline: *"ls, but for your diffs."*
 
-## 2. Components (projects / packages)
+## 2. Components (projects)
 
 - **`Budiff.Core`** - the diff engine. Pure .NET (BCL only), **no Avalonia, no git**. The diff algorithm + the row/result model + the binary/size policy.
 - **`Budiff.Avalonia`** - the side-by-side diff **control** + its view-model. Depends on Avalonia and the `ISyntaxHighlighter` / `IDocumentPreviewer` interfaces, NOT on any implementation of them.
@@ -104,7 +104,7 @@ This is the surface the README screenshots show.
 
 ## 8. CI / repo hygiene
 
-- GitHub Actions: build + `dotnet test` on Windows and Linux (exclude any `Integration` category); a version tag packs, publishes the packages to NuGet.org (trusted publishing, after approval) and attaches the CLI archives to the GitHub release - see `docs/RELEASING.md`.
+- GitHub Actions: build + `dotnet test` on Windows and Linux (exclude any `Integration` category); a version tag packs, publishes the `budiff` tool package to NuGet.org (trusted publishing, after approval) and attaches the CLI archives to the GitHub release - see `docs/RELEASING.md`.
 - `MIT` LICENSE; `THIRD-PARTY-NOTICES.md` (+ `licenses/`) for what the tool package redistributes; this `SPEC.md`; a README with GUI screenshots; `.editorconfig`.
 - **ASCII-only code comments** (no em-dashes, curly quotes, ellipses, or arrow glyphs; write `-`, `...`, `->`). Fancy Unicode is fine in on-screen UI strings.
 

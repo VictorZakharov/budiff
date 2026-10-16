@@ -3,19 +3,14 @@
 budiff is licensed under the MIT License (see `LICENSE`). It is built on, and its
 published binaries include, the third-party components below; each remains under
 its own license. This file and the `licenses/` folder ship inside the `budiff`
-tool packages and the release archives.
+tool package and the release archives.
 
-- **The `budiff` tool packages** (one per platform; `dotnet tool install` fetches
-  the one for the machine) carry the CLI (framework-dependent .NET) with that
-  platform's native libraries and, in the Windows packages under `gui/win-x64/`,
-  the desktop GUI as a Windows NativeAOT build - which compiles the .NET runtime
-  and the GUI's dependencies into one executable next to their native
-  libraries.
+- **The `budiff` tool package** carries the CLI (framework-dependent .NET) with
+  every platform's native libraries and, under `gui/win-x64/`, the desktop GUI
+  as a Windows NativeAOT build - which compiles the .NET runtime and the GUI's
+  dependencies into one executable next to their native libraries.
 - **The release archives** (`budiff-<platform>`) are self-contained, single-file
   CLI builds: the CLI's dependencies plus the .NET runtime.
-- **The library packages** (`Budiff.Core`, `Budiff.Avalonia`,
-  `Budiff.Avalonia.TextMate`, `Budiff.Avalonia.Markdown`) contain only budiff's
-  own code; their dependencies are ordinary NuGet references.
 
 Versions below are the ones pinned at the time of writing.
 

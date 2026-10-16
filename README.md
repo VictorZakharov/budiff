@@ -93,17 +93,6 @@ Or in any MCP client's config:
 | `BUDIFF_HISTORY_MAX_COMMITS` | How many recent commits the file drill-in reads for author and commit counts (default 1,000; `0` skips them). |
 | `BUDIFF_APP_PATH` | Run a different build of the desktop app for `budiff -i`. |
 
-## Libraries
-
-The diff engine and the Avalonia side-by-side control are NuGet packages too:
-
-| Package | What it is |
-| --- | --- |
-| `Budiff.Core` | The diff engine - pure .NET, no UI, no git. |
-| `Budiff.Avalonia` | The side-by-side diff control (Avalonia 12). |
-| `Budiff.Avalonia.TextMate` | Optional TextMate syntax highlighting. |
-| `Budiff.Avalonia.Markdown` | Optional formatted Markdown preview (a block-level rich diff). |
-
 ## Build
 
 ```sh
