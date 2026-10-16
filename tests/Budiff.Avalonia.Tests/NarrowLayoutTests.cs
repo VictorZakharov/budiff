@@ -45,9 +45,26 @@ public sealed class NarrowLayoutTests
         WaitUntil(() => vm.IsDiffOpen && !vm.Diff.IsPlaceholder, "diff load");
 
         UiSnapshot.Pump();
+        UiSnapshot.Pump();
         UiSnapshot.Capture(window, "narrow-diff");
 
         Assert.True(vm.ShowDiffPane);
+        AssertDiffToolbarFits(window, expectOverflow: true);
+
+        // The overflow menu drives the same settings.
+        var overflow = window.FindControl<Button>("DiffOptionsOverflow")!;
+        var menu = (MenuFlyout)overflow.Flyout!;
+        menu.ShowAt(overflow);
+        UiSnapshot.Pump();
+        var wrap = menu.Items.OfType<MenuItem>().Single(i => Equals(i.Header, "Wrap lines"));
+        Assert.True(wrap.IsVisible);
+        Assert.True(wrap.IsChecked);
+        wrap.IsChecked = false;
+        Assert.False(vm.Diff.WrapLines);
+        Assert.False(menu.Items.OfType<MenuItem>().Single(i => Equals(i.Header, "Preview")).IsVisible);
+        menu.Hide();
+        vm.Diff.WrapLines = true;
+        UiSnapshot.Pump();
 
         // Blame auto-hide: at 900 the diff (~475px) is at least half the window,
         // so blame shows; growing the window (diff column width stays fixed)
@@ -232,6 +249,20 @@ public sealed class NarrowLayoutTests
             Assert.True(Math.Abs(cellColumnRight - headerRight) <= 2,
                 $"{context}: column {column} right {cellColumnRight} vs header right {headerRight} (row text '{cell.Text}')");
         }
+    }
+
+    // Docked diff toolbar: no toggle is ever half-cut - one that does not fit
+    // is hidden and the overflow menu (holding every toggle) shows instead.
+    private static void AssertDiffToolbarFits(MainWindow window, bool expectOverflow)
+    {
+        var grid = window.FindControl<Grid>("DiffToolbarGrid")!;
+        var overflow = window.FindControl<Button>("DiffOptionsOverflow")!;
+        var toggles = grid.Children.OfType<CheckBox>().Where(c => c.IsVisible).ToList();
+        Assert.NotEmpty(toggles);
+        Assert.All(toggles.Where(t => t.Opacity > 0), t => Assert.True(t.Bounds.Right <= grid.Bounds.Width + 0.5, $"{t.Content} is cut"));
+        Assert.Equal(toggles.Any(t => t.Opacity == 0), overflow.IsVisible);
+        Assert.Equal(expectOverflow, overflow.IsVisible);
+        Assert.True(overflow.IsEffectivelyVisible == expectOverflow);
     }
 
     private static void WaitUntil(Func<bool> condition, string what)

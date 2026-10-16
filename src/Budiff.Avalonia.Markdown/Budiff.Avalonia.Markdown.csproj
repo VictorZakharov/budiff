@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Markdown preview (formatted, with changes marked) for Budiff.Avalonia.</Description>
+    <PackageTags>$(PackageTags);markdown;preview</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Markdig" Version="1.4.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Budiff.Avalonia\Budiff.Avalonia.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Budiff.Avalonia.Tests" />
+  </ItemGroup>
+</Project>

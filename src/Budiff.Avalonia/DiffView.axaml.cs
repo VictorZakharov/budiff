@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using global::Avalonia;
 using global::Avalonia.Controls;
 using global::Avalonia.Input;
@@ -12,6 +13,8 @@ public partial class DiffView : UserControl
     // Line-number column plus the code TextBlock's horizontal padding.
     private const double LineNumberWidth = 46;
     private const double TextPadding = 6;
+
+    private DiffViewModel? _model;
 
     public static readonly StyledProperty<IBrush> AddedLineBackgroundProperty =
         AvaloniaProperty.Register<DiffView, IBrush>(nameof(AddedLineBackground), Brush("#3331C36B"));
@@ -64,6 +67,7 @@ public partial class DiffView : UserControl
             ApplyThemeToViewModel();
             UpdateBlameCramped();
             UpdateVisibleTextWidth();
+            WatchModel(DataContext as DiffViewModel);
         };
 
         // LayoutUpdated (not just SizeChanged): a fixed-width docked pane gets
@@ -195,7 +199,74 @@ public partial class DiffView : UserControl
         {
             ApplyThemeToViewModel();
         }
+
+        if (change.Property == TextBrushProperty
+            || change.Property == MutedTextBrushProperty
+            || change.Property == DiffBorderBrushProperty
+            || change.Property == AddedLineBackgroundProperty
+            || change.Property == RemovedLineBackgroundProperty
+            || change.Property == FunnelAddedBrushProperty
+            || change.Property == FunnelRemovedBrushProperty)
+        {
+            RefreshPreview();
+        }
     }
+
+    private void WatchModel(DiffViewModel? model)
+    {
+        if (_model is not null)
+        {
+            _model.PropertyChanged -= OnModelPropertyChanged;
+        }
+
+        _model = model;
+        if (_model is not null)
+        {
+            _model.PropertyChanged += OnModelPropertyChanged;
+        }
+
+        RefreshPreview();
+    }
+
+    private void OnModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(DiffViewModel.IsPreviewActive) or nameof(DiffViewModel.PreviewVersion))
+        {
+            RefreshPreview();
+        }
+    }
+
+    // Each view renders its own preview (a control has one visual parent, and
+    // the docked pane and a floating window can share one model).
+    private void RefreshPreview()
+    {
+        // Brush properties can change while the XAML is still loading.
+        if (PreviewHost is null)
+        {
+            return;
+        }
+
+        if (_model is { IsPreviewActive: true, Previewer: { } previewer })
+        {
+            PreviewHost.Content = previewer.Render(_model.CreatePreviewRequest(), PreviewTheme());
+        }
+        else
+        {
+            PreviewHost.Content = null;
+        }
+    }
+
+    private DocumentPreviewTheme PreviewTheme() => new(
+        TextBrush,
+        MutedTextBrush,
+        DiffBorderBrush,
+        AddedLineBackground,
+        RemovedLineBackground,
+        Opaque(FunnelAddedBrush),
+        Opaque(FunnelRemovedBrush));
+
+    private static IBrush Opaque(IBrush brush)
+        => brush is ISolidColorBrush solid ? new ImmutableSolidColorBrush(Color.FromRgb(solid.Color.R, solid.Color.G, solid.Color.B)) : brush;
 
     private void OnGapTapped(object? sender, TappedEventArgs e)
     {

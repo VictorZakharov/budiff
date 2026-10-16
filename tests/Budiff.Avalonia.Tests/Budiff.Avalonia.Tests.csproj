@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Budiff.App\Budiff.App.csproj" />
+    <ProjectReference Include="..\..\src\Budiff.Avalonia.Markdown\Budiff.Avalonia.Markdown.csproj" />
     <ProjectReference Include="..\..\src\Budiff.Avalonia.TextMate\Budiff.Avalonia.TextMate.csproj" />
     <ProjectReference Include="..\..\src\Budiff.Avalonia\Budiff.Avalonia.csproj" />
     <ProjectReference Include="..\..\src\Budiff.Core\Budiff.Core.csproj" />

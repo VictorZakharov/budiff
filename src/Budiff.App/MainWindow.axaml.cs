@@ -48,7 +48,34 @@ public sealed partial class MainWindow : Window
         TreeArea.SizeChanged += (_, _) => FitColumns();
         BirdsEyePanel.SizeChanged += (_, _) => UpdateToolbarWrap();
         PeriodBar.SizeChanged += (_, _) => UpdateToolbarWrap();
+        DiffToolbarGrid.LayoutUpdated += (_, _) => UpdateDiffOptionsOverflow();
         ApplyDiffLayout();
+    }
+
+    // In a narrow docked pane the toggles run past the edge: a toggle that does
+    // not fully fit is hidden (opacity only - the layout stays put, so this
+    // cannot oscillate) and the overflow menu, holding every toggle, appears.
+    private void UpdateDiffOptionsOverflow()
+    {
+        var width = DiffToolbarGrid.Bounds.Width;
+        var anyCut = false;
+        foreach (var child in DiffToolbarGrid.Children)
+        {
+            if (child is not CheckBox { IsVisible: true } toggle)
+            {
+                continue;
+            }
+
+            var cut = toggle.Bounds.Right > width + 0.5;
+            anyCut |= cut;
+            toggle.Opacity = cut ? 0 : 1;
+            toggle.IsHitTestVisible = !cut;
+        }
+
+        if (DiffOptionsOverflow.IsVisible != anyCut)
+        {
+            DiffOptionsOverflow.IsVisible = anyCut;
+        }
     }
 
     // Drops optional bird's-eye columns that no longer fit the pane.

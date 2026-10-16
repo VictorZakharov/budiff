@@ -539,18 +539,61 @@
                         Padding="4,2"
                         ClipToBounds="True">
                     <!-- ONE compact control row (#47): chevron, Diff <file>, Base,
-                         Working tree, Blame, Collapse unchanged, Wrap, float, close. The title and
+                         Working tree, Blame, Collapse unchanged, Wrap, Preview - then
+                         float and close, pinned right so they never clip. The title and
                          the combo sit in shrinkable star columns (title keeps a 110px
                          floor, combo caps at 170 / floors at 90) so nothing overlaps
                          in a narrow pane. -->
-                    <Grid ColumnSpacing="6" MinHeight="26">
+                    <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" Margin="6,0,0,0">
+                        <!-- Every toggle again, for when the row above clips them
+                             (shown only then - see MainWindow.UpdateDiffOptionsOverflow). -->
+                        <Button x:Name="DiffOptionsOverflow"
+                                Classes="diffTool"
+                                IsVisible="False"
+                                ToolTip.Tip="View options">
+                            <materialIcons:MaterialIcon Kind="Tune" Width="16" Height="16"
+                                                        Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                            <Button.Flyout>
+                                <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                    <MenuItem Header="Working tree" ToggleType="CheckBox"
+                                              IsVisible="{Binding ShowCompareOptions}"
+                                              IsChecked="{Binding IncludeWorkingTree, Mode=TwoWay}" />
+                                    <MenuItem Header="Blame" ToggleType="CheckBox"
+                                              IsVisible="{Binding Diff.ShowBlameOption}"
+                                              IsChecked="{Binding Diff.ShowBlame, Mode=TwoWay}" />
+                                    <MenuItem Header="Collapse unchanged" ToggleType="CheckBox"
+                                              IsVisible="{Binding Diff.ShowDiffOptions}"
+                                              IsChecked="{Binding Diff.CollapseUnchanged, Mode=TwoWay}" />
+                                    <MenuItem Header="Wrap lines" ToggleType="CheckBox"
+                                              IsVisible="{Binding Diff.ShowWrapOption}"
+                                              IsChecked="{Binding Diff.WrapLines, Mode=TwoWay}" />
+                                    <MenuItem Header="Preview" ToggleType="CheckBox"
+                                              IsVisible="{Binding Diff.CanPreview}"
+                                              IsChecked="{Binding Diff.ShowPreview, Mode=TwoWay}" />
+                                </MenuFlyout>
+                            </Button.Flyout>
+                        </Button>
+                        <Button Classes="diffTool"
+                                Click="OnFloatDiff"
+                                ToolTip.Tip="Open diff in its own window">
+                            <materialIcons:MaterialIcon Kind="OpenInNew" Width="16" Height="16"
+                                                        Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                        </Button>
+                        <Button Classes="diffTool"
+                                Command="{Binding CloseDiffCommand}"
+                                ToolTip.Tip="Close diff">
+                            <materialIcons:MaterialIcon Kind="Close" Width="16" Height="16"
+                                                        Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                        </Button>
+                    </StackPanel>
+                    <Grid x:Name="DiffToolbarGrid" ColumnSpacing="6" MinHeight="26" ClipToBounds="True">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" MinWidth="110" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="1000*" MaxWidth="170" MinWidth="90" />
-                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
@@ -592,7 +635,7 @@
                                   Foreground="{DynamicResource BudiffTextBrush}"
                                   ToolTip.Tip="Include uncommitted working-tree changes. Off = compare to the last commit, as if your changes were not made yet." />
                         <CheckBox Grid.Column="6"
-                                  IsVisible="{Binding Diff.ShowDiffOptions}"
+                                  IsVisible="{Binding Diff.ShowBlameOption}"
                                   IsChecked="{Binding Diff.ShowBlame, Mode=TwoWay}"
                                   Content="Blame"
                                   FontSize="12"
@@ -607,26 +650,23 @@
                                   VerticalAlignment="Center"
                                   Foreground="{DynamicResource BudiffTextBrush}" />
                         <CheckBox Grid.Column="8"
+                                  IsVisible="{Binding Diff.ShowWrapOption}"
                                   IsChecked="{Binding Diff.WrapLines, Mode=TwoWay}"
                                   Content="Wrap"
                                   FontSize="12"
                                   VerticalAlignment="Center"
                                   Foreground="{DynamicResource BudiffTextBrush}"
                                   ToolTip.Tip="Wrap long lines inside each pane instead of scrolling sideways." />
-
-                        <Button Grid.Column="9" Classes="diffTool"
-                                Click="OnFloatDiff"
-                                ToolTip.Tip="Open diff in its own window">
-                            <materialIcons:MaterialIcon Kind="OpenInNew" Width="16" Height="16"
-                                                        Foreground="{DynamicResource BudiffMutedTextBrush}" />
-                        </Button>
-                        <Button Grid.Column="10" Classes="diffTool"
-                                Command="{Binding CloseDiffCommand}"
-                                ToolTip.Tip="Close diff">
-                            <materialIcons:MaterialIcon Kind="Close" Width="16" Height="16"
-                                                        Foreground="{DynamicResource BudiffMutedTextBrush}" />
-                        </Button>
+                        <CheckBox Grid.Column="9"
+                                  IsVisible="{Binding Diff.CanPreview}"
+                                  IsChecked="{Binding Diff.ShowPreview, Mode=TwoWay}"
+                                  Content="Preview"
+                                  FontSize="12"
+                                  VerticalAlignment="Center"
+                                  Foreground="{DynamicResource BudiffTextBrush}"
+                                  ToolTip.Tip="Show the document formatted, with changed blocks marked (old in red, new in green)." />
                     </Grid>
+                    </DockPanel>
                 </Border>
 
                 <!-- Thin comparison strip: just what is being compared. -->
