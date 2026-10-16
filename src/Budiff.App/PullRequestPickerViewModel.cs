@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Media;
@@ -12,8 +13,9 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace Budiff.App;
 
-// One author choice: Login "@me" = the signed-in user, null = anyone.
-public sealed record AuthorOption(string Display, string? Login)
+// One author choice: Login "@me" = the signed-in user, null = anyone. A note
+// ("Loading people...") is a list row that cannot be picked.
+public sealed record AuthorOption(string Display, string? Login, bool IsNote = false)
 {
     public override string ToString() => Display;
 }
@@ -64,6 +66,8 @@ public sealed class PullRequestRowVm(PullRequestInfo pullRequest, DateTimeOffset
 
 // The "find a pull request" popup: your PRs first, 10 at a time, more as the
 // list scrolls; narrow by author (anyone in the repo), state, and free text.
+// The repo's people are fetched the first time the author list drops down,
+// then kept per source - for its repository, until restart.
 public sealed partial class PullRequestPickerViewModel : ObservableObject
 {
     public const int PageSize = 10;
@@ -71,6 +75,11 @@ public sealed partial class PullRequestPickerViewModel : ObservableObject
 
     public static readonly AuthorOption Mine = new("Mine", "@me");
     public static readonly AuthorOption Anyone = new("Anyone", null);
+    public static readonly AuthorOption LoadingPeople = new("Loading people…", null, IsNote: true);
+    public static readonly AuthorOption NoPeople = new("Could not list people - type a login", null, IsNote: true);
+
+    private static readonly ConditionalWeakTable<IPullRequestSource, Task<IReadOnlyList<RepoPerson>>> PeopleCache = new();
+    private static readonly ConditionalWeakTable<IPullRequestSource, Task<string?>> LoginCache = new();
 
     private readonly IPullRequestSource _source;
     private readonly Func<DateTimeOffset> _now;
@@ -79,6 +88,8 @@ public sealed partial class PullRequestPickerViewModel : ObservableObject
     private int _searchGen;
     private int _debounceGen;
     private bool _initialized;
+    private Task? _peopleLoad;
+    private bool _peopleListed;
 
     public PullRequestPickerViewModel(IPullRequestSource source, Func<DateTimeOffset>? now = null)
     {
@@ -135,8 +146,8 @@ public sealed partial class PullRequestPickerViewModel : ObservableObject
 
     public bool CanShow => SelectedItem is not null;
 
-    // First search plus the people list (a convenience: typing a login works
-    // without it, so its failure is silent).
+    // First search, and who "Mine" is. The people list waits for the author
+    // list to drop down - unless an earlier picker already fetched it.
     public async Task InitializeAsync()
     {
         if (_initialized)
@@ -145,8 +156,25 @@ public sealed partial class PullRequestPickerViewModel : ObservableObject
         }
 
         _initialized = true;
-        _ = LoadPeopleAsync();
+        _ = LoadMineAsync();
+        if (PeopleCache.TryGetValue(_source, out var known) && known.IsCompletedSuccessfully)
+        {
+            _ = LoadPeopleAsync();
+        }
+
         await SearchNowAsync();
+    }
+
+    // The author list dropped down: list the repo's people (once; a failure
+    // is retried on the next drop-down).
+    public Task LoadPeopleAsync()
+    {
+        if (_peopleListed)
+        {
+            return Task.CompletedTask;
+        }
+
+        return _peopleLoad is { IsCompleted: false } running ? running : _peopleLoad = ShowPeopleAsync();
     }
 
     public Task SearchNowAsync()
@@ -232,9 +260,7 @@ public sealed partial class PullRequestPickerViewModel : ObservableObject
             _cursor = page.EndCursor;
             HasMore = page.HasNextPage && page.EndCursor is not null;
             SelectedItem ??= Items.FirstOrDefault();
-            StatusText = Items.Count == 0
-                ? "No pull requests match."
-                : $"{Items.Count:N0} of {Math.Max(page.TotalCount, Items.Count):N0}";
+            StatusText = Status(page);
         }
         catch (Exception ex)
         {
@@ -254,23 +280,68 @@ public sealed partial class PullRequestPickerViewModel : ObservableObject
         }
     }
 
-    private async Task LoadPeopleAsync()
+    // A scoped list has no total: it says what it is limited to instead (and
+    // keeps looking while nothing has turned up yet - the window asks for
+    // more while the list is short).
+    private string Status(PullRequestPage page)
     {
+        var scope = _source.Scope;
+        if (scope.Length == 0 || page.TotalCount >= 0)
+        {
+            return Items.Count == 0
+                ? "No pull requests match."
+                : $"{Items.Count:N0} of {Math.Max(page.TotalCount, Items.Count):N0}";
+        }
+
+        return Items.Count == 0
+            ? HasMore ? $"Looking for pull requests touching {scope}..." : $"No pull requests touch {scope}."
+            : $"{Items.Count:N0} touching {scope}" + (HasMore ? " - more as you scroll" : string.Empty);
+    }
+
+    private async Task LoadMineAsync()
+    {
+        var login = LoginCache.GetValue(_source, s => s.GetCurrentLoginAsync(CancellationToken.None));
         try
         {
-            if (await _source.GetCurrentLoginAsync(CancellationToken.None) is { } me)
+            if (await login is { } me)
             {
                 MineHint = $"Mine ({me})";
-            }
-
-            foreach (var person in await _source.GetPeopleAsync(CancellationToken.None))
-            {
-                AuthorOptions.Add(new AuthorOption(person.Display, person.Login));
             }
         }
         catch
         {
-            // Convenience only - a typed login still searches.
+            // Only the hint; forget the failure so a later picker asks again.
+            LoginCache.Remove(_source);
+        }
+    }
+
+    // Convenience only - typing a login works without the list, so a failure
+    // just says so in the list.
+    private async Task ShowPeopleAsync()
+    {
+        AuthorOptions.Remove(NoPeople);
+        var people = PeopleCache.GetValue(_source, s => s.GetPeopleAsync(CancellationToken.None));
+        if (!people.IsCompleted)
+        {
+            AuthorOptions.Add(LoadingPeople);
+        }
+
+        try
+        {
+            var list = await people;
+            AuthorOptions.Remove(LoadingPeople);
+            foreach (var person in list)
+            {
+                AuthorOptions.Add(new AuthorOption(person.Display, person.Login));
+            }
+
+            _peopleListed = true;
+        }
+        catch
+        {
+            PeopleCache.Remove(_source);
+            AuthorOptions.Remove(LoadingPeople);
+            AuthorOptions.Add(NoPeople);
         }
     }
 

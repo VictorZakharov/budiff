@@ -4,7 +4,9 @@ using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
+using Avalonia.VisualTree;
 using Budiff.App;
 using Budiff.Git;
 using LibGit2Sharp;
@@ -44,7 +46,7 @@ public sealed class PullRequestModeTests
         var source = new FakePullRequestSource(new[] { Pr(1, "victor"), Pr(2, "ada", "MERGED"), Pr(3, "ada"), Pr(4, "grace") });
         var vm = new PullRequestPickerViewModel(source);
         await vm.InitializeAsync();
-        await WaitFor(() => vm.AuthorOptions.Count > 2);
+        await vm.LoadPeopleAsync();
 
         // A person's name resolves to their login.
         vm.AuthorText = "Ada";
@@ -67,6 +69,93 @@ public sealed class PullRequestModeTests
         Assert.Equal("someone-else", vm.ResolveAuthor("@someone-else"));
         Assert.Equal("@me", vm.ResolveAuthor("me"));
         Assert.Equal("grace", vm.ResolveAuthor("Grace Hopper (grace)"));
+    }
+
+    // The people list waits for the first drop-down, shows that it is
+    // loading, and is kept for the source - a later picker starts with it.
+    [Fact]
+    public async Task Picker_ListsPeopleOnFirstDropDown_AndKeepsThemUntilRestart()
+    {
+        var gate = new TaskCompletionSource();
+        var source = new FakePullRequestSource(new[] { Pr(1, "victor") }) { PeopleGate = gate.Task };
+        var vm = new PullRequestPickerViewModel(source);
+        await vm.InitializeAsync();
+        Assert.Equal(0, source.PeopleCalls);
+        Assert.Equal(new[] { "Mine", "Anyone" }, vm.AuthorOptions.Select(o => o.Display));
+        Assert.Equal("Mine (victor)", vm.MineHint);
+
+        var load = vm.LoadPeopleAsync();
+        Assert.Equal(PullRequestPickerViewModel.LoadingPeople, vm.AuthorOptions[^1]);
+        gate.SetResult();
+        await load;
+        Assert.Equal(new[] { "Mine", "Anyone", "Ada Lovelace (ada)", "Grace Hopper (grace)", "victor" }, vm.AuthorOptions.Select(o => o.Display));
+        await vm.LoadPeopleAsync();
+        Assert.Equal(5, vm.AuthorOptions.Count);
+
+        var again = new PullRequestPickerViewModel(source);
+        await again.InitializeAsync();
+        await WaitFor(() => again.AuthorOptions.Count == 5);
+        await again.LoadPeopleAsync();
+        Assert.Equal(vm.AuthorOptions, again.AuthorOptions);
+        Assert.Equal(1, source.PeopleCalls);
+        Assert.Equal(1, source.LoginCalls);
+    }
+
+    [Fact]
+    public async Task Picker_PeopleFailure_SaysSo_AndRetriesOnTheNextDropDown()
+    {
+        var source = new FakePullRequestSource(new[] { Pr(1, "victor") }) { PeopleFailures = 1 };
+        var vm = new PullRequestPickerViewModel(source);
+        await vm.InitializeAsync();
+
+        await vm.LoadPeopleAsync();
+        Assert.Equal(new[] { "Mine", "Anyone", PullRequestPickerViewModel.NoPeople.Display }, vm.AuthorOptions.Select(o => o.Display));
+
+        await vm.LoadPeopleAsync();
+        Assert.Equal(5, vm.AuthorOptions.Count);
+        Assert.DoesNotContain(vm.AuthorOptions, o => o.IsNote);
+        Assert.Equal(2, source.PeopleCalls);
+    }
+
+    // The real window: Author is a drop-down; opening it lists the people
+    // (a note while loading, not pickable); picking or typing searches.
+    [AvaloniaFact]
+    public void PickerWindow_AuthorIsADropDown_ListingPeopleWhenOpened()
+    {
+        var gate = new TaskCompletionSource();
+        var source = new FakePullRequestSource(new[] { Pr(1, "victor"), Pr(2, "ada"), Pr(3, "grace") }) { PeopleGate = gate.Task };
+        var window = new PullRequestPickerWindow(new PullRequestPickerViewModel(source, () => FakePullRequestSource.Now)) { Width = 760, Height = 560 };
+        window.Show();
+        var vm = window.ViewModel;
+        WaitUntil(() => !vm.IsLoading && vm.Items.Count == 1, "first search");
+        var box = window.FindControl<ComboBox>("AuthorBox")!;
+        Assert.True(box.IsEditable);
+        Assert.Equal("Mine", box.Text);
+        Assert.Equal(0, source.PeopleCalls);
+
+        box.IsDropDownOpen = true;
+        WaitUntil(() => vm.AuthorOptions.Contains(PullRequestPickerViewModel.LoadingPeople), "loading note");
+        UiSnapshot.Pump();
+        var note = box.GetVisualDescendants().OfType<ComboBoxItem>().SingleOrDefault(i => Equals(i.DataContext, PullRequestPickerViewModel.LoadingPeople))
+            ?? box.ContainerFromItem(PullRequestPickerViewModel.LoadingPeople) as ComboBoxItem;
+        Assert.NotNull(note);
+        Assert.False(note.IsEnabled);
+
+        gate.SetResult();
+        WaitUntil(() => vm.AuthorOptions.Count == 5, "people");
+        Assert.Equal(1, source.PeopleCalls);
+        UiSnapshot.Capture(window, "pr-picker-authors");
+
+        box.SelectedItem = vm.AuthorOptions.Single(o => o.Login == "ada");
+        box.IsDropDownOpen = false;
+        Assert.Equal("Ada Lovelace (ada)", vm.AuthorText);
+        WaitUntil(() => source.Queries[^1].Author == "ada" && !vm.IsLoading, "search by the picked person");
+        Assert.Equal(2, Assert.Single(vm.Items).PullRequest.Number);
+
+        box.Text = "grace";
+        WaitUntil(() => source.Queries[^1].Author == "grace" && !vm.IsLoading, "search by a typed login");
+        Assert.Equal(3, Assert.Single(vm.Items).PullRequest.Number);
+        window.Close();
     }
 
     [Fact]
@@ -260,10 +349,38 @@ public sealed class PullRequestModeTests
             return Task.FromResult(new PullRequestPage(page, next.ToString(CultureInfo.InvariantCulture), next < matches.Count, matches.Count));
         }
 
-        public Task<IReadOnlyList<RepoPerson>> GetPeopleAsync(CancellationToken ct)
-            => Task.FromResult<IReadOnlyList<RepoPerson>>(new[] { new RepoPerson("ada", "Ada Lovelace"), new RepoPerson("grace", "Grace Hopper"), new RepoPerson("victor", null) });
+        // Held until this completes, when set.
+        public Task? PeopleGate { get; init; }
 
-        public Task<string?> GetCurrentLoginAsync(CancellationToken ct) => Task.FromResult<string?>("victor");
+        // How many people fetches fail before one succeeds.
+        public int PeopleFailures { get; set; }
+
+        public int PeopleCalls { get; private set; }
+
+        public int LoginCalls { get; private set; }
+
+        public async Task<IReadOnlyList<RepoPerson>> GetPeopleAsync(CancellationToken ct)
+        {
+            PeopleCalls++;
+            if (PeopleGate is not null)
+            {
+                await PeopleGate;
+            }
+
+            if (PeopleFailures > 0)
+            {
+                PeopleFailures--;
+                throw new PullRequestSourceException("rate limited");
+            }
+
+            return new[] { new RepoPerson("ada", "Ada Lovelace"), new RepoPerson("grace", "Grace Hopper"), new RepoPerson("victor", null) };
+        }
+
+        public Task<string?> GetCurrentLoginAsync(CancellationToken ct)
+        {
+            LoginCalls++;
+            return Task.FromResult<string?>("victor");
+        }
 
         public Task<PullRequestRange> ResolveAsync(PullRequestInfo pullRequest, CancellationToken ct)
             => Task.Run(() => PullRequestRanges.Resolve(Root!, pullRequest, () => null, 10_000, ct), ct);

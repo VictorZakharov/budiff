@@ -346,7 +346,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
         ScopeTitle = _scope.ScopePrefix.Length == 0 ? "repo root" : _scope.ScopePrefix;
         IsGitRootScope = _scope.IsGitRootScope;
         LoadRefs(_scope.RepositoryRoot);
-        Analysis.PullRequests = new GitHubCliPullRequestSource(_scope.ScopeRoot);
+        // Opened on a project folder: the PR picker lists only PRs touching it.
+        Analysis.PullRequests = new GitHubCliPullRequestSource(_scope.ScopeRoot, _scope.ScopePrefix);
         await RefreshAsync();
     }
 

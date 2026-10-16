@@ -41,6 +41,9 @@ public sealed partial class PullRequestPickerWindow : Window
             }
         };
 
+        // People are listed on demand: the first drop-down fetches them.
+        AuthorBox.DropDownOpened += (_, _) => _ = _viewModel.LoadPeopleAsync();
+
         Opened += async (_, _) =>
         {
             SearchBox.Focus();
