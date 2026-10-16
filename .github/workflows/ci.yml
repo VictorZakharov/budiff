@@ -128,7 +128,14 @@ jobs:
         shell: pwsh
         run: |
           if (-not [string]::IsNullOrWhiteSpace($env:NUGET_API_KEY)) {
-            dotnet nuget push artifacts/packages/*.nupkg --skip-duplicate --api-key $env:NUGET_API_KEY --source https://api.nuget.org/v3/index.json
+            # The top `budiff` package last: it names the per-platform ones
+            # (budiff.<rid>), so it must not go live before them.
+            $top = "budiff.$env:PACKAGE_VERSION.nupkg"
+            foreach ($package in Get-ChildItem artifacts/packages/*.nupkg | Where-Object Name -ne $top) {
+              dotnet nuget push $package.FullName --skip-duplicate --api-key $env:NUGET_API_KEY --source https://api.nuget.org/v3/index.json
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+            dotnet nuget push "artifacts/packages/$top" --skip-duplicate --api-key $env:NUGET_API_KEY --source https://api.nuget.org/v3/index.json
           }
 
       - name: Attach release artifacts
