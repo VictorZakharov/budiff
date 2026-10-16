@@ -8,8 +8,9 @@ using Xunit;
 namespace Budiff.Avalonia.Tests;
 
 // Renders the REAL Budiff.App.MainWindow (not a mockup) over a seeded git fixture
-// and captures the README screenshots: the default bird's-eye state (filters visible,
-// no diff) and the drill-in state (compressed columns + docked diff).
+// in the two main states: the default bird's-eye (filters visible, no diff) and
+// the drill-in (compressed columns + docked diff). The README's own screenshots
+// come from ReadmeGridScreenshotTests, over a real repository.
 public sealed class ReadmeScreenshotTests
 {
     [AvaloniaFact]

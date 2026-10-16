@@ -4,7 +4,7 @@
 
 budiff is a folder-scoped, read-only diff viewer. The CLI opens with a Code Analysis bird's-eye - folders or projects, line/code/blank/comment counts, file counts, period churn, commits, and authors - and prints a syntax-highlighted side-by-side diff when you drill into a file. `budiff -i` opens the desktop GUI (Windows) on the same folder.
 
-![budiff GUI diff drill-in](https://raw.githubusercontent.com/VictorZakharov/budiff/main/docs/gui-diff.png)
+![budiff's desktop app: the bird's-eye with a file's side-by-side diff](https://raw.githubusercontent.com/VictorZakharov/budiff/main/docs/screenshots/diff.png)
 
 ## Install the tool
 
@@ -22,7 +22,7 @@ budiff mcp             # a stdio MCP server for AI agents
 budiff -i              # the desktop GUI (Windows)
 ```
 
-budiff reads repositories with the `git` command, so git 2.11 or later must be on PATH.
+Needs the .NET 10 SDK and git 2.11 or later on PATH.
 
 ## Libraries
 
