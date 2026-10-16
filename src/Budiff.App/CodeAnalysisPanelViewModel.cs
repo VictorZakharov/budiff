@@ -740,6 +740,17 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         _ = ReloadHistoryAsync();
     }
 
+    // The Period entry already selected, picked again: "Pull request..."
+    // opens the picker again, as the PR button beside it does.
+    [RelayCommand]
+    private void RepickPeriod(PeriodOption? option)
+    {
+        if (option is { IsPullRequest: true } && SelectedPeriod.IsPullRequest)
+        {
+            ChoosePullRequestCommand.Execute(null);
+        }
+    }
+
     // Opens the picker (from the Period entry or the PR button beside it).
     // Cancelling the very first pick returns to the previous period.
     [RelayCommand]

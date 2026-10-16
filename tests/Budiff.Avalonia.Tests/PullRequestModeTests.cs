@@ -4,8 +4,11 @@ using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
+using Avalonia.Input;
 using Avalonia.VisualTree;
 using Budiff.App;
 using Budiff.Git;
@@ -255,6 +258,63 @@ public sealed class PullRequestModeTests
         Assert.False(vm.Analysis.IsPullRequestPeriod);
         Assert.Null(vm.Analysis.AppliedPullRequest);
         window.Close();
+    }
+
+    // The real window: picking "Pull request..." again (it is already the
+    // period) reopens the picker; just opening the drop-down does not.
+    [AvaloniaFact]
+    public void PickingPullRequestAgain_ReopensThePicker()
+    {
+        var root = ReadmeFixture.BuildFixtureRepo("pr-repick");
+        string baseSha, headSha;
+        using (var repo = new Repository(root))
+        {
+            headSha = repo.Head.Tip.Sha;
+            baseSha = repo.Head.Tip.Parents.First().Sha;
+        }
+
+        var pr = new PullRequestInfo(7, "Simplify the line diff", "MERGED", false, "ada", FakePullRequestSource.Now, "main", "feature", baseSha, headSha, 3, 2, 2);
+        var window = new MainWindow(root, gitRoot: true) { Width = 1200, Height = 520 };
+        window.Show();
+        var vm = window.ViewModel;
+        WaitUntil(() => !vm.Analysis.IsScanning && vm.Analysis.Roots.Count > 0, "bird's-eye scan");
+
+        var picks = 0;
+        vm.Analysis.PullRequests = new FakePullRequestSource(new[] { pr }) { Root = root };
+        vm.Analysis.PickPullRequest = () => Task.FromResult<PullRequestInfo?>(++picks == 1 ? pr : null);
+        var box = window.FindControl<RepickComboBox>("PeriodBox")!;
+        var pullRequest = vm.Analysis.Periods.Single(p => p.IsPullRequest);
+
+        ClickDropDownItem(box, pullRequest);
+        WaitUntil(() => vm.Analysis.AppliedPullRequest is not null && !vm.Analysis.IsScanning, "PR load");
+        Assert.Equal(1, picks);
+
+        box.IsDropDownOpen = true;
+        UiSnapshot.Pump();
+        box.IsDropDownOpen = false;
+        UiSnapshot.Pump();
+        Assert.Equal(1, picks);
+
+        // Picked again: the picker opens; cancelling it keeps the PR.
+        ClickDropDownItem(box, pullRequest);
+        WaitUntil(() => picks == 2, "picker reopened");
+        UiSnapshot.Pump();
+        Assert.Equal(7, vm.Analysis.AppliedPullRequest!.PullRequest.Number);
+        Assert.Same(pullRequest, vm.Analysis.SelectedPeriod);
+        window.Close();
+    }
+
+    // Opens the drop-down and clicks the item, as a mouse would.
+    private static void ClickDropDownItem(ComboBox box, object item)
+    {
+        box.IsDropDownOpen = true;
+        UiSnapshot.Pump();
+        var container = (Control)box.ContainerFromItem(item)!;
+        var top = TopLevel.GetTopLevel(container)!;
+        var at = container.TranslatePoint(new Point(container.Bounds.Width / 2, container.Bounds.Height / 2), top)!.Value;
+        top.MouseDown(at, MouseButton.Left);
+        top.MouseUp(at, MouseButton.Left);
+        UiSnapshot.Pump();
     }
 
     private static List<CodeAnalysisRow> AllFiles(MainWindowViewModel vm)
