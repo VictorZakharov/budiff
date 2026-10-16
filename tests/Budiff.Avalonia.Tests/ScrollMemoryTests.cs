@@ -7,7 +7,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Documents;
+using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
+using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.VisualTree;
 using Budiff;
@@ -18,8 +21,9 @@ namespace Budiff.Avalonia.Tests;
 
 // Back after following a link returns to where the reader was: the view
 // keeps DiffViewModel.ScrollSpot current, the host hands it back as
-// RestoreScroll, and the view scrolls there - holding the spot while
-// pictures above it are still loading in.
+// RestoreScroll. A recently shown preview comes back as the very same
+// control (already there, sections still unfolded); one rendered anew is
+// scrolled there out of sight, holding the spot while pictures load in.
 public sealed class ScrollMemoryTests
 {
     [AvaloniaFact]
@@ -40,16 +44,76 @@ public sealed class ScrollMemoryTests
         model.RestoreScroll = spot;
         model.SetDiff(LineDiff.Compute(doc, doc));
         UiSnapshot.Pump();
-        UiSnapshot.Pump();
-        var again = (ScrollViewer)Host(view).Content!;
-        Assert.NotSame(scroller, again);
-        Assert.Equal(900, again.Offset.Y, 0.5);
+        Assert.Same(scroller, Host(view).Content);
+        Assert.Equal(900, scroller.Offset.Y, 0.5);
+        Assert.Equal(1, scroller.Opacity);
         Assert.Null(model.RestoreScroll);
         window.Close();
     }
 
-    // A tall picture at the top loads after the first layout and pushes the
-    // text down; the spot is re-applied so the same text stays in view.
+    // Sections the reader unfolded stay unfolded when they come back.
+    [AvaloniaFact]
+    public void Preview_KeepsUnfoldedSections_OnBack()
+    {
+        var oldDoc = "Intro.\n\n" + Paragraphs(40);
+        var newDoc = "Intro changed.\n\n" + Paragraphs(40);
+        var model = new DiffViewModel { Extension = ".md", Previewer = new MarkdownPreviewer(), CollapseUnchanged = true };
+        model.SetDiff(LineDiff.Compute(oldDoc, newDoc));
+        model.ShowPreview = true;
+        var view = new DiffView { DataContext = model };
+        var window = new Window { Width = 700, Height = 500, Content = view };
+        window.Show();
+        UiSnapshot.Pump();
+        Assert.False(Shows(view, "Paragraph 30 "));
+
+        var bar = Host(view).GetVisualDescendants().OfType<TextBlock>().Single(t => t.Text?.Contains("unchanged blocks", StringComparison.Ordinal) == true);
+        var at = bar.TranslatePoint(new Point(bar.Bounds.Width / 2, bar.Bounds.Height / 2), window)!.Value;
+        window.MouseMove(at);
+        window.MouseDown(at, MouseButton.Left);
+        window.MouseUp(at, MouseButton.Left);
+        UiSnapshot.Pump();
+        Assert.True(Shows(view, "Paragraph 30 "));
+        var scroller = (ScrollViewer)Host(view).Content!;
+        scroller.Offset = new Vector(0, 600);
+        UiSnapshot.Pump();
+        var spot = model.ScrollSpot;
+        Assert.Equal(new DiffScrollSpot(true, 600), spot);
+
+        model.SetDiff(LineDiff.Compute("elsewhere\n", "elsewhere\n"));
+        UiSnapshot.Pump();
+        model.RestoreScroll = spot;
+        model.SetDiff(LineDiff.Compute(oldDoc, newDoc));
+        UiSnapshot.Pump();
+        Assert.Same(scroller, Host(view).Content);
+        Assert.True(Shows(view, "Paragraph 30 "));
+        Assert.Equal(600, scroller.Offset.Y, 0.5);
+        window.Close();
+    }
+
+    // Following a link to a document seen before starts at its top; only
+    // Back returns to a spot.
+    [AvaloniaFact]
+    public void Preview_ForwardToASeenDocument_StartsAtTheTop()
+    {
+        var doc = Paragraphs(60);
+        var (window, view, model) = Show(doc, ".md", context: null);
+        model.FileName = "a.md";
+        UiSnapshot.Pump();
+        var scroller = (ScrollViewer)Host(view).Content!;
+        scroller.Offset = new Vector(0, 900);
+        UiSnapshot.Pump();
+
+        Open(model, "b.md", "elsewhere\n");
+        Open(model, "a.md", doc);
+        Assert.Same(scroller, Host(view).Content);
+        Assert.Equal(0, scroller.Offset.Y, 0.5);
+        Assert.Equal(new DiffScrollSpot(true, 0), model.ScrollSpot);
+        window.Close();
+    }
+
+    // Not cached any more (the file changed meanwhile): rendered anew, the
+    // view stays hidden until it reaches the spot - here only once a tall
+    // picture at the top loads in and makes the document long enough.
     [AvaloniaFact]
     public void Preview_HoldsTheSpot_WhilePicturesLoad()
     {
@@ -63,20 +127,26 @@ public sealed class ScrollMemoryTests
         var (window, view, model) = Show(doc, ".md", context);
         PumpUntil(() => Host(view).GetVisualDescendants().OfType<Image>().Any(i => i.Source is not null));
         var scroller = (ScrollViewer)Host(view).Content!;
-        scroller.Offset = new Vector(0, 1500);
+        var bottom = scroller.Extent.Height - scroller.Viewport.Height;
+        scroller.Offset = new Vector(0, bottom);
         UiSnapshot.Pump();
         var spot = model.ScrollSpot!;
+        Assert.Equal(bottom, spot.Offset, 0.5);
 
         model.SetDiff(LineDiff.Compute("elsewhere\n", "elsewhere\n"));
         UiSnapshot.Pump();
         model.RestoreScroll = spot;
-        model.SetDiff(LineDiff.Compute(doc, doc));
+        var edited = doc + "One more paragraph.\n";
+        model.SetDiff(LineDiff.Compute(edited, edited));
         UiSnapshot.Pump();
         var again = (ScrollViewer)Host(view).Content!;
+        Assert.NotSame(scroller, again);
         Assert.DoesNotContain(Host(view).GetVisualDescendants().OfType<Image>(), i => i.Source is not null);
+        Assert.Equal(0, again.Opacity);
         PumpUntil(() => Host(view).GetVisualDescendants().OfType<Image>().Any(i => i.Source is not null));
         UiSnapshot.Pump();
-        Assert.Equal(1500, again.Offset.Y, 0.5);
+        Assert.Equal(bottom, again.Offset.Y, 0.5);
+        Assert.Equal(1, again.Opacity);
         window.Close();
     }
 
@@ -98,6 +168,7 @@ public sealed class ScrollMemoryTests
         UiSnapshot.Pump();
         UiSnapshot.Pump();
         Assert.Equal(1800, rows.Offset.Y, 0.5);
+        Assert.Equal(1, rows.Opacity);
         window.Close();
     }
 
@@ -118,6 +189,42 @@ public sealed class ScrollMemoryTests
         vm.Diff.GoBackCommand.Execute(null);
         Assert.Equal("README.md", vm.Diff.Title);
         Assert.Equal(new DiffScrollSpot(true, 750), vm.Diff.RestoreScroll);
+        Assert.True(vm.Diff.IsLoading);
+        Assert.Equal("README.md", vm.Diff.FileName);
+    }
+
+    // A view on screen keeps the current preview while the next file loads -
+    // the rows are still the old file's - and renders the new one on arrival.
+    [AvaloniaFact]
+    public void Preview_WaitsForTheNextFile()
+    {
+        var doc = Paragraphs(10);
+        var (window, view, model) = Show(doc, ".md", context: null);
+        model.FileName = "README.md";
+        UiSnapshot.Pump();
+        var shown = Host(view).Content;
+
+        // Checked straight away: a slow load shows "Loading diff..." soon.
+        using var gate = new ManualResetEventSlim();
+        try
+        {
+            model.BeginLoad(() =>
+            {
+                gate.Wait(5000);
+                return DiffResult.FromRows(LineDiff.Compute("MIT License\n", "MIT License\n"));
+            });
+            model.FileName = "LICENSE";
+            Assert.Same(shown, Host(view).Content);
+        }
+        finally
+        {
+            gate.Set();
+        }
+
+        PumpUntil(() => !model.IsLoading);
+        Assert.NotSame(shown, Host(view).Content);
+        Assert.True(Shows(view, "MIT License"));
+        window.Close();
     }
 
     private static string Paragraphs(int count)
@@ -145,6 +252,19 @@ public sealed class ScrollMemoryTests
     }
 
     private static ContentControl Host(DiffView view) => view.FindControl<ContentControl>("PreviewHost")!;
+
+    // The way the App opens a file: the load starts, then the name changes,
+    // then the rows land.
+    private static void Open(DiffViewModel model, string fileName, string text)
+    {
+        model.BeginLoad(() => DiffResult.FromRows(LineDiff.Compute(text, text)));
+        model.FileName = fileName;
+        PumpUntil(() => !model.IsLoading);
+    }
+
+    private static bool Shows(DiffView view, string start)
+        => Host(view).GetVisualDescendants().OfType<TextBlock>()
+            .Any(t => (t.Inlines?.Count > 0 ? string.Concat(t.Inlines.OfType<Run>().Select(r => r.Text)) : t.Text ?? string.Empty).StartsWith(start, StringComparison.Ordinal));
 
     private static void PumpUntil(Func<bool> done)
     {

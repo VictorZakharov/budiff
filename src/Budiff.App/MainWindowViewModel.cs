@@ -229,6 +229,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
 
         _blamePath = file.Path;
+        var ui = global::Avalonia.Threading.Dispatcher.UIThread;
         _ = Task.Run(() =>
         {
             var forNewSide = false;
@@ -268,7 +269,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 }
             }
 
-            global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            ui.Post(() =>
             {
                 if (gen == _blameGen)
                 {
@@ -546,9 +547,6 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         _openFile = (fullPath, relativePath);
         Diff.RestoreScroll = restore;
-        Diff.Extension = Path.GetExtension(relativePath);
-        Diff.FileName = Path.GetFileName(relativePath);
-        Diff.IsFileView = _scope is null;
         if (_scope is null)
         {
             // No git: nothing to compare against - show the file as it is now.
@@ -564,20 +562,28 @@ public sealed partial class MainWindowViewModel : ObservableObject
             Diff.BeginLoad(() => File.Exists(fullPath)
                 ? DiffLoader.BuildView(DiffLoader.ReadWorkingFile(fullPath))
                 : DiffResult.Message("File not found."));
-            return;
+        }
+        else
+        {
+            var repoPath = ToRepoPath(_scope.RepositoryRoot, fullPath);
+            var target = CurrentTarget();
+            var file = new ChangedFile(repoPath, null, fullPath, Budiff.GitFileState.Modified, new DiffChurn(0, 0), 0, 0, IsBinary: false);
+            Diff.Title = repoPath;
+            Diff.Subtitle = DescribeTarget(target);
+            _openDiffFile = file;
+            _openTarget = target;
+            Diff.PreviewContext = PreviewContext(target);
+            IsDiffOpen = true;
+            Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(_scope, file, target));
+            BeginLoadBlame(_scope, file, target);
         }
 
-        var repoPath = ToRepoPath(_scope.RepositoryRoot, fullPath);
-        var target = CurrentTarget();
-        var file = new ChangedFile(repoPath, null, fullPath, Budiff.GitFileState.Modified, new DiffChurn(0, 0), 0, 0, IsBinary: false);
-        Diff.Title = repoPath;
-        Diff.Subtitle = DescribeTarget(target);
-        _openDiffFile = file;
-        _openTarget = target;
-        Diff.PreviewContext = PreviewContext(target);
-        IsDiffOpen = true;
-        Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(_scope, file, target));
-        BeginLoadBlame(_scope, file, target);
+        // Only once the load is under way (its result lands later, on this
+        // thread): the view then waits for the file instead of rendering the
+        // previous one's rows under this name.
+        Diff.Extension = Path.GetExtension(relativePath);
+        Diff.FileName = Path.GetFileName(relativePath);
+        Diff.IsFileView = _scope is null;
     }
 
     private static string Short(string sha) => sha.Length > 7 ? sha[..7] : sha;

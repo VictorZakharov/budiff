@@ -539,8 +539,12 @@ internal sealed class MarkdownRenderer
             && _context is { } context
             && _images is { } images)
         {
+            // Taken here, on the UI thread: reaching for Dispatcher.UIThread
+            // from the loading thread could adopt that thread as the UI one
+            // while there is none (between headless tests).
+            var ui = Dispatcher.UIThread;
             images.LoadAsync(context, source.Value, _side).ContinueWith(
-                loaded => Dispatcher.UIThread.Post(() =>
+                loaded => ui.Post(() =>
                 {
                     if (loaded.IsCompletedSuccessfully && loaded.Result is { } bitmap)
                     {
