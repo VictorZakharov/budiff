@@ -53,8 +53,11 @@ public sealed partial class MainWindow : Window
     }
 
     // In a narrow docked pane the toggles run past the edge: a toggle that does
-    // not fully fit is hidden (opacity only - the layout stays put, so this
-    // cannot oscillate) and the overflow menu, holding every toggle, appears.
+    // not fully fit is hidden and the overflow menu, holding every toggle,
+    // appears. Runs on every layout pass, so it must NEVER change layout:
+    // opacity and hit-testing only. (Showing the menu button via IsVisible
+    // narrowed the row it was decided from and, at the threshold width,
+    // crashed the app with "Infinite layout loop detected".)
     private void UpdateDiffOptionsOverflow()
     {
         var width = DiffToolbarGrid.Bounds.Width;
@@ -72,10 +75,8 @@ public sealed partial class MainWindow : Window
             toggle.IsHitTestVisible = !cut;
         }
 
-        if (DiffOptionsOverflow.IsVisible != anyCut)
-        {
-            DiffOptionsOverflow.IsVisible = anyCut;
-        }
+        DiffOptionsOverflow.Opacity = anyCut ? 1 : 0;
+        DiffOptionsOverflow.IsHitTestVisible = anyCut;
     }
 
     // Drops optional bird's-eye columns that no longer fit the pane.

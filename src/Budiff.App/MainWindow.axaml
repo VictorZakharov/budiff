@@ -547,10 +547,12 @@
                     <DockPanel>
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" Margin="6,0,0,0">
                         <!-- Every toggle again, for when the row above clips them
-                             (shown only then - see MainWindow.UpdateDiffOptionsOverflow). -->
+                             (shown only then - see MainWindow.UpdateDiffOptionsOverflow).
+                             It always keeps its slot; only opacity changes. -->
                         <Button x:Name="DiffOptionsOverflow"
                                 Classes="diffTool"
-                                IsVisible="False"
+                                Opacity="0"
+                                IsHitTestVisible="False"
                                 ToolTip.Tip="View options">
                             <materialIcons:MaterialIcon Kind="Tune" Width="16" Height="16"
                                                         Foreground="{DynamicResource BudiffMutedTextBrush}" />

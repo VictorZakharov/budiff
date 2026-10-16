@@ -251,6 +251,39 @@ public sealed class NarrowLayoutTests
         }
     }
 
+    // Regression: dragging the docked diff wider used to crash the app
+    // ("Infinite layout loop detected") at the width where the toolbar's
+    // toggles start to fit - the overflow menu's show/hide changed the very
+    // width it was decided from. Sweep the pane 1px at a time through it.
+    [AvaloniaFact]
+    public void DockedDiffToolbar_SettlesAtEveryPaneWidth()
+    {
+        var root = ReadmeFixture.BuildFixtureRepo("budiff-toolbar-sweep");
+        var window = new MainWindow(root, gitRoot: true) { Width = 1800, Height = 600 };
+        window.Show();
+        var vm = window.ViewModel;
+        WaitUntil(() => !vm.Analysis.IsScanning && vm.Analysis.Roots.Count > 0, "bird's-eye scan");
+        var readme = vm.Analysis.Roots.SelectMany(r => r.SelfAndDescendants()).First(r => r.IsFile && r.Name == "README.md");
+        _ = vm.Analysis.OpenAsync(readme);
+        WaitUntil(() => vm.IsDiffOpen && !vm.Diff.IsPlaceholder, "diff load");
+        Assert.True(vm.Diff.CanPreview);
+
+        var cols = window.FindControl<Grid>("BodyGrid")!.ColumnDefinitions;
+        var overflowSeen = new System.Collections.Generic.HashSet<bool>();
+        for (var width = 560; width <= 1200; width++)
+        {
+            cols[2].Width = new global::Avalonia.Controls.GridLength(width);
+            UiSnapshot.Pump();
+            var overflow = window.FindControl<Button>("DiffOptionsOverflow")!;
+            overflowSeen.Add(overflow.Opacity > 0);
+            AssertDiffToolbarFits(window, expectOverflow: overflow.Opacity > 0);
+        }
+
+        // The sweep crossed the threshold both ways of the overflow menu.
+        Assert.Equal(2, overflowSeen.Count);
+        window.Close();
+    }
+
     // Docked diff toolbar: no toggle is ever half-cut - one that does not fit
     // is hidden and the overflow menu (holding every toggle) shows instead.
     private static void AssertDiffToolbarFits(MainWindow window, bool expectOverflow)
@@ -260,9 +293,9 @@ public sealed class NarrowLayoutTests
         var toggles = grid.Children.OfType<CheckBox>().Where(c => c.IsVisible).ToList();
         Assert.NotEmpty(toggles);
         Assert.All(toggles.Where(t => t.Opacity > 0), t => Assert.True(t.Bounds.Right <= grid.Bounds.Width + 0.5, $"{t.Content} is cut"));
-        Assert.Equal(toggles.Any(t => t.Opacity == 0), overflow.IsVisible);
-        Assert.Equal(expectOverflow, overflow.IsVisible);
-        Assert.True(overflow.IsEffectivelyVisible == expectOverflow);
+        Assert.Equal(toggles.Any(t => t.Opacity == 0), overflow.Opacity > 0);
+        Assert.Equal(expectOverflow, overflow.Opacity > 0);
+        Assert.Equal(expectOverflow, overflow.IsHitTestVisible);
     }
 
     private static void WaitUntil(Func<bool> condition, string what)
