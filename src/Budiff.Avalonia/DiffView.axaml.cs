@@ -71,6 +71,8 @@ public partial class DiffView : UserControl
             WatchModel(DataContext as DiffViewModel);
         };
 
+        RowsScroller.ScrollChanged += (_, _) => ReportScroll(RowsScroller, preview: false);
+
         // Back after following a preview link: the mouse's back button
         // anywhere over the diff, or Alt+Left.
         AddHandler(PointerPressedEvent, (_, e) =>
@@ -254,6 +256,28 @@ public partial class DiffView : UserControl
         {
             RefreshPreview();
         }
+
+        // New content arrived (PreviewVersion bumps with every diff): if the
+        // host asked to come back to a spot, scroll there - in the view that
+        // is on screen (a docked and a floating view can share one model).
+        if (e.PropertyName == nameof(DiffViewModel.PreviewVersion)
+            && _model is { IsPlaceholder: false, RestoreScroll: { } spot } model
+            && IsEffectivelyVisible)
+        {
+            model.RestoreScroll = null;
+            if (spot.Preview == model.IsPreviewActive)
+            {
+                ScrollRestore.Start(spot.Preview ? PreviewHost.Content as ScrollViewer : RowsScroller, spot.Offset);
+            }
+        }
+    }
+
+    private void ReportScroll(ScrollViewer scroller, bool preview)
+    {
+        if (_model is { IsPlaceholder: false } model && model.IsPreviewActive == preview && IsEffectivelyVisible)
+        {
+            model.ScrollSpot = new DiffScrollSpot(preview, scroller.Offset.Y);
+        }
     }
 
     // Each view renders its own preview (a control has one visual parent, and
@@ -268,7 +292,13 @@ public partial class DiffView : UserControl
 
         if (_model is { IsPreviewActive: true, Previewer: { } previewer })
         {
-            PreviewHost.Content = previewer.Render(_model.CreatePreviewRequest(), PreviewTheme());
+            var preview = previewer.Render(_model.CreatePreviewRequest(), PreviewTheme());
+            if (preview is ScrollViewer scroller)
+            {
+                scroller.ScrollChanged += (_, _) => ReportScroll(scroller, preview: true);
+            }
+
+            PreviewHost.Content = preview;
         }
         else
         {

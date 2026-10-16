@@ -91,6 +91,14 @@ public sealed partial class DiffViewModel : ObservableObject
     // with each file it opens, before that file's diff arrives.
     public DocumentPreviewContext? PreviewContext { get; set; }
 
+    // Where the open file is scrolled to now (its preview or its line diff),
+    // kept current by the view - a host remembers it to come back to.
+    public DiffScrollSpot? ScrollSpot { get; set; }
+
+    // Set by a host before opening a file: once that file shows, the view
+    // scrolls back to this spot (Back after following a link).
+    public DiffScrollSpot? RestoreScroll { get; set; }
+
     // After following a preview link, Back (header button, Alt+Left, the
     // mouse's back button) returns; the host keeps the trail.
     [ObservableProperty]
@@ -374,6 +382,9 @@ public sealed partial class DiffViewModel : ObservableObject
         // scroll - instead of rebuilding into a visible flicker.
         if (!IsPlaceholder && SameRows(_all, rows))
         {
+            // Nothing re-renders, so nothing would consume a pending restore
+            // - drop it rather than let it jump the view later.
+            RestoreScroll = null;
             return;
         }
 

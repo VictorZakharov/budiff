@@ -27,9 +27,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private string? _blamePath;
 
     // The open file (as the bird's-eye named it) and the files a preview
-    // link was followed from, newest last, for Back.
+    // link was followed from - with where each was scrolled to - for Back.
     private (string FullPath, string RelativePath)? _openFile;
-    private readonly Stack<(string FullPath, string RelativePath)> _linkTrail = new();
+    private readonly Stack<(string FullPath, string RelativePath, DiffScrollSpot? Scroll)> _linkTrail = new();
 
     // Sentinel base option: resolves to the same boundary commit the windowed
     // churn diffs from, so the drill-in shows what the Added/Removed columns
@@ -493,7 +493,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        _linkTrail.Push(current);
+        _linkTrail.Push((current.FullPath, current.RelativePath, Diff.ScrollSpot));
         Diff.CanGoBack = true;
         ShowFile(full, path);
     }
@@ -511,9 +511,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        var (fullPath, relativePath) = _linkTrail.Pop();
+        var (fullPath, relativePath, scroll) = _linkTrail.Pop();
         Diff.CanGoBack = _linkTrail.Count > 0;
-        ShowFile(fullPath, relativePath);
+        ShowFile(fullPath, relativePath, scroll);
     }
 
     private void ClearLinkTrail()
@@ -541,9 +541,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
             OpenLinkedFile);
     }
 
-    private void ShowFile(string fullPath, string relativePath)
+    // restore: where to scroll once it shows (Back), else the top.
+    private void ShowFile(string fullPath, string relativePath, DiffScrollSpot? restore = null)
     {
         _openFile = (fullPath, relativePath);
+        Diff.RestoreScroll = restore;
         Diff.Extension = Path.GetExtension(relativePath);
         Diff.FileName = Path.GetFileName(relativePath);
         Diff.IsFileView = _scope is null;

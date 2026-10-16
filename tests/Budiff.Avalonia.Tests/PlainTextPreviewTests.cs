@@ -85,7 +85,7 @@ public sealed class PlainTextPreviewTests
     {
         var (window, host) = Show(Model(Mit, Mit, "LICENSE"));
         var text = host.GetVisualDescendants().OfType<SelectableTextBlock>().Single(t => t.Text?.StartsWith("Permission", StringComparison.Ordinal) == true);
-        Assert.Contains('\n', text.Text);
+        Assert.Contains("\n", text.Text!, StringComparison.Ordinal);
         Assert.Contains("Consolas", text.FontFamily.ToString(), StringComparison.Ordinal);
         window.Close();
 

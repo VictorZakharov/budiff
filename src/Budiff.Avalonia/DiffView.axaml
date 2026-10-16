@@ -161,7 +161,8 @@
         </Border>
 
         <Grid>
-            <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+            <ScrollViewer x:Name="RowsScroller"
+                          HorizontalScrollBarVisibility="Disabled"
                           VerticalScrollBarVisibility="Auto">
                 <ScrollViewer.IsVisible>
                     <MultiBinding Converter="{x:Static BoolConverters.And}">
