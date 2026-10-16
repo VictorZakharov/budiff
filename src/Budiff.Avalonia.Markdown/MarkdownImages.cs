@@ -22,8 +22,9 @@ internal sealed class MarkdownImages
 
     private readonly ConcurrentDictionary<string, Bitmap> _decoded = new(StringComparer.Ordinal);
 
-    // Null when the file is absent on that side, too big, or not a raster
-    // image Avalonia decodes (SVG is not).
+    // Null when the file is absent on that side, too big, or SVG (Avalonia
+    // decodes raster images only); faults when it does not decode. The
+    // placeholder stays either way.
     public Task<Bitmap?> LoadAsync(DocumentPreviewContext context, string path, DocumentSide side)
         => Task.Run(() => Load(context, path, side));
 
@@ -63,43 +64,35 @@ internal sealed class MarkdownImages
             return null;
         }
 
-        try
+        var bytes = context.ReadFile(path, side);
+        if (bytes is null || bytes.Length == 0 || bytes.Length > MaxBytes)
         {
-            var bytes = context.ReadFile(path, side);
-            if (bytes is null || bytes.Length == 0 || bytes.Length > MaxBytes)
-            {
-                return null;
-            }
-
-            var key = Convert.ToHexString(SHA256.HashData(bytes));
-            if (_decoded.TryGetValue(key, out var cached))
-            {
-                return cached;
-            }
-
-            using var stream = new MemoryStream(bytes, writable: false);
-            var bitmap = new Bitmap(stream);
-            if (bitmap.PixelSize.Width > MaxPixelWidth)
-            {
-                var height = Math.Max(1, (int)Math.Round(bitmap.PixelSize.Height * (double)MaxPixelWidth / bitmap.PixelSize.Width));
-                var scaled = bitmap.CreateScaledBitmap(new PixelSize(MaxPixelWidth, height));
-                bitmap.Dispose();
-                bitmap = scaled;
-            }
-
-            // Crude bound: past capacity start over (shown images keep their
-            // own reference, so nothing on screen is disposed).
-            if (_decoded.Count >= Capacity)
-            {
-                _decoded.Clear();
-            }
-
-            return _decoded.GetOrAdd(key, bitmap);
-        }
-        catch (Exception)
-        {
-            // Unreadable or not an image: the placeholder stays.
             return null;
         }
+
+        var key = Convert.ToHexString(SHA256.HashData(bytes));
+        if (_decoded.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        using var stream = new MemoryStream(bytes, writable: false);
+        var bitmap = new Bitmap(stream);
+        if (bitmap.PixelSize.Width > MaxPixelWidth)
+        {
+            var height = Math.Max(1, (int)Math.Round(bitmap.PixelSize.Height * (double)MaxPixelWidth / bitmap.PixelSize.Width));
+            var scaled = bitmap.CreateScaledBitmap(new PixelSize(MaxPixelWidth, height));
+            bitmap.Dispose();
+            bitmap = scaled;
+        }
+
+        // Crude bound: past capacity start over (shown images keep their
+        // own reference, so nothing on screen is disposed).
+        if (_decoded.Count >= Capacity)
+        {
+            _decoded.Clear();
+        }
+
+        return _decoded.GetOrAdd(key, bitmap);
     }
 }

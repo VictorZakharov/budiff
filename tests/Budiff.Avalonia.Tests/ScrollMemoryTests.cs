@@ -125,7 +125,7 @@ public sealed class ScrollMemoryTests
         }, _ => { });
         var doc = "![tall](tall.png)\n\n" + Paragraphs(60);
         var (window, view, model) = Show(doc, ".md", context);
-        PumpUntil(() => Host(view).GetVisualDescendants().OfType<Image>().Any(i => i.Source is not null));
+        PumpUntil(() => Host(view).GetVisualDescendants().OfType<Image>().Any(i => i.Source is not null), () => PreviewPictures.Describe(Host(view)));
         var scroller = (ScrollViewer)Host(view).Content!;
         var bottom = scroller.Extent.Height - scroller.Viewport.Height;
         scroller.Offset = new Vector(0, bottom);
@@ -143,7 +143,7 @@ public sealed class ScrollMemoryTests
         Assert.NotSame(scroller, again);
         Assert.DoesNotContain(Host(view).GetVisualDescendants().OfType<Image>(), i => i.Source is not null);
         Assert.Equal(0, again.Opacity);
-        PumpUntil(() => Host(view).GetVisualDescendants().OfType<Image>().Any(i => i.Source is not null));
+        PumpUntil(() => Host(view).GetVisualDescendants().OfType<Image>().Any(i => i.Source is not null), () => PreviewPictures.Describe(Host(view)));
         UiSnapshot.Pump();
         Assert.Equal(bottom, again.Offset.Y, 0.5);
         Assert.Equal(1, again.Opacity);
@@ -303,7 +303,7 @@ public sealed class ScrollMemoryTests
         => Host(view).GetVisualDescendants().OfType<TextBlock>()
             .Any(t => (t.Inlines?.Count > 0 ? string.Concat(t.Inlines.OfType<Run>().Select(r => r.Text)) : t.Text ?? string.Empty).StartsWith(start, StringComparison.Ordinal));
 
-    private static void PumpUntil(Func<bool> done)
+    private static void PumpUntil(Func<bool> done, Func<string>? describe = null)
     {
         var watch = Stopwatch.StartNew();
         while (!done() && watch.ElapsedMilliseconds < 5000)
@@ -313,6 +313,6 @@ public sealed class ScrollMemoryTests
         }
 
         UiSnapshot.Pump();
-        Assert.True(done(), "timed out");
+        Assert.True(done(), describe is null ? "timed out" : "timed out: " + describe());
     }
 }
