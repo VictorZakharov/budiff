@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-repo="VictorZakharov/budiff"
+repo="wellscoped/budiff"
 version="${BUDIFF_VERSION:-latest}"
 install_dir="${BUDIFF_INSTALL_DIR:-$HOME/.local/bin}"
 os="$(uname -s)"
