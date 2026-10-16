@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Budiff.App/Budiff.App.csproj" />
+    <Project Path="src/Budiff.Avalonia.Markdown/Budiff.Avalonia.Markdown.csproj" />
     <Project Path="src/Budiff.Avalonia.TextMate/Budiff.Avalonia.TextMate.csproj" />
     <Project Path="src/Budiff.Avalonia/Budiff.Avalonia.csproj" />
     <Project Path="src/Budiff.Cli/Budiff.Cli.csproj" />

@@ -27,6 +27,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Budiff.Avalonia\Budiff.Avalonia.csproj" />
+    <ProjectReference Include="..\Budiff.Avalonia.Markdown\Budiff.Avalonia.Markdown.csproj" />
     <ProjectReference Include="..\Budiff.Avalonia.TextMate\Budiff.Avalonia.TextMate.csproj" />
     <ProjectReference Include="..\Budiff.Core\Budiff.Core.csproj" />
   </ItemGroup>
@@ -49,5 +50,6 @@
     <TrimmerRootAssembly Include="Budiff.Avalonia" />
     <TrimmerRootAssembly Include="Budiff.Core" />
     <TrimmerRootAssembly Include="Budiff.Avalonia.TextMate" />
+    <TrimmerRootAssembly Include="Budiff.Avalonia.Markdown" />
   </ItemGroup>
 </Project>

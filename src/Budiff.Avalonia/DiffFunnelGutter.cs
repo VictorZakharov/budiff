@@ -22,9 +22,10 @@ public sealed class DiffFunnelGutter : Control, ICustomHitTest
     // Extra grab slop either side of the 18px band.
     private const double GrabSlop = 2;
 
-    // Every diff row (content and gap) renders at this fixed height; geometry is
-    // pure index math so it works with a VIRTUALIZED items host, where off-screen
-    // rows have no container to measure.
+    // A single-line row's height. Wrapped rows are taller, so geometry comes
+    // from the realized (on-screen) containers; rows outside them - which a
+    // VIRTUALIZED host has no container for - extrapolate at the realized
+    // rows' average pitch (only off-screen funnel ends land there).
     private const double RowHeight = 18;
 
     public static readonly StyledProperty<IEnumerable?> RowsProperty =
@@ -54,9 +55,11 @@ public sealed class DiffFunnelGutter : Control, ICustomHitTest
 
     private static readonly Cursor ResizeCursor = new(StandardCursorType.SizeWestEast);
 
-    // Row geometry from the last Render, for hit testing between frames.
-    private double _hostTop;
+    // Row geometry from the last Render (sorted by index), for the funnel
+    // ends and for hit testing between frames.
+    private readonly List<RowExtent> _realized = new();
     private double _pitch = RowHeight;
+    private double _hostTop;
     private readonly List<DiffRowVm> _rows = new();
     private bool _dragging;
     private double _grabOffset;
@@ -137,8 +140,15 @@ public sealed class DiffFunnelGutter : Control, ICustomHitTest
             RebuildBlocks();
         }
 
-        var index = (int)Math.Floor((point.Y - _hostTop) / _pitch);
-        return index >= 0 && index < _rows.Count && !_rows[index].IsGap;
+        foreach (var row in _realized)
+        {
+            if (point.Y >= row.Top && point.Y < row.Bottom)
+            {
+                return row.Index < _rows.Count && !_rows[row.Index].IsGap;
+            }
+        }
+
+        return false;
     }
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
@@ -273,52 +283,15 @@ public sealed class DiffFunnelGutter : Control, ICustomHitTest
         var gutterRight = gutterLeft + GutterWidth;
         var midX = gutterLeft + GutterWidth / 2;
 
-        // Self-calibrating geometry: the virtualized panel scrolls LOGICALLY
-        // (the host itself never moves), so derive row 0's y AND the actual
-        // row pitch from realized containers instead of assuming either.
-        var hostTop = host.TranslatePoint(new Point(0, 0), this)?.Y ?? 0;
-        var pitch = RowHeight;
-        (int Index, double Top)? first = null;
-        (int Index, double Top)? last = null;
-        foreach (var container in host.GetRealizedContainers())
-        {
-            var index = host.IndexFromContainer(container);
-            if (index < 0 || container.TranslatePoint(new Point(0, 0), this) is not { } top)
-            {
-                continue;
-            }
-
-            if (first is null || index < first.Value.Index)
-            {
-                first = (index, top.Y);
-            }
-
-            if (last is null || index > last.Value.Index)
-            {
-                last = (index, top.Y);
-            }
-        }
-
-        if (first is { } f)
-        {
-            if (last is { } l && l.Index > f.Index)
-            {
-                pitch = (l.Top - f.Top) / (l.Index - f.Index);
-            }
-
-            hostTop = f.Top - f.Index * pitch;
-        }
-
-        _hostTop = hostTop;
-        _pitch = pitch > 0 ? pitch : RowHeight;
+        MeasureRealized(host);
 
         foreach (var block in _blocks)
         {
-            var blockTop = hostTop + block.Start * pitch;
-            var leftTop = block.LeftFirst >= 0 ? hostTop + block.LeftFirst * pitch : blockTop;
-            var leftBottom = block.LeftLast >= 0 ? hostTop + (block.LeftLast + 1) * pitch : blockTop;
-            var rightTop = block.RightFirst >= 0 ? hostTop + block.RightFirst * pitch : blockTop;
-            var rightBottom = block.RightLast >= 0 ? hostTop + (block.RightLast + 1) * pitch : blockTop;
+            var blockTop = RowTop(block.Start);
+            var leftTop = block.LeftFirst >= 0 ? RowTop(block.LeftFirst) : blockTop;
+            var leftBottom = block.LeftLast >= 0 ? RowBottom(block.LeftLast) : blockTop;
+            var rightTop = block.RightFirst >= 0 ? RowTop(block.RightFirst) : blockTop;
+            var rightBottom = block.RightLast >= 0 ? RowBottom(block.RightLast) : blockTop;
 
             var brush = block.Kind switch
             {
@@ -338,6 +311,98 @@ public sealed class DiffFunnelGutter : Control, ICustomHitTest
 
             context.DrawGeometry(brush, null, geometry);
         }
+    }
+
+    private readonly record struct RowExtent(int Index, double Top, double Bottom);
+
+    // The virtualized panel scrolls LOGICALLY (the host itself never moves),
+    // so every row position is read off the realized containers.
+    private void MeasureRealized(ItemsControl host)
+    {
+        _realized.Clear();
+        foreach (var container in host.GetRealizedContainers())
+        {
+            var index = host.IndexFromContainer(container);
+            if (index < 0 || !container.IsVisible || container.TranslatePoint(new Point(0, 0), this) is not { } top)
+            {
+                continue;
+            }
+
+            _realized.Add(new RowExtent(index, top.Y, top.Y + container.Bounds.Height));
+        }
+
+        _realized.Sort((a, b) => a.Index.CompareTo(b.Index));
+        _hostTop = host.TranslatePoint(new Point(0, 0), this)?.Y ?? 0;
+        _pitch = RowHeight;
+        if (_realized.Count > 0)
+        {
+            var first = _realized[0];
+            var last = _realized[^1];
+            var pitch = (last.Bottom - first.Top) / (last.Index - first.Index + 1);
+            _pitch = pitch > 0 ? pitch : RowHeight;
+        }
+    }
+
+    private double RowTop(int index)
+    {
+        if (_realized.Count == 0)
+        {
+            return _hostTop + (index * _pitch);
+        }
+
+        var first = _realized[0];
+        var last = _realized[^1];
+        if (index <= first.Index)
+        {
+            return first.Top - ((first.Index - index) * _pitch);
+        }
+
+        if (index > last.Index)
+        {
+            return last.Bottom + ((index - last.Index - 1) * _pitch);
+        }
+
+        // Inside the realized range: exact, or just past the nearest realized
+        // row above (a gap in realization is rare - e.g. a focused container).
+        var at = FindRealized(index);
+        if (at >= 0)
+        {
+            return _realized[at].Top;
+        }
+
+        var below = ~at - 1;
+        return _realized[below].Bottom + ((index - _realized[below].Index - 1) * _pitch);
+    }
+
+    private double RowBottom(int index)
+    {
+        var at = _realized.Count == 0 ? -1 : FindRealized(index);
+        return at >= 0 ? _realized[at].Bottom : RowTop(index + 1);
+    }
+
+    private int FindRealized(int index)
+    {
+        int lo = 0, hi = _realized.Count - 1;
+        while (lo <= hi)
+        {
+            var mid = (lo + hi) >>> 1;
+            var value = _realized[mid].Index;
+            if (value == index)
+            {
+                return mid;
+            }
+
+            if (value < index)
+            {
+                lo = mid + 1;
+            }
+            else
+            {
+                hi = mid - 1;
+            }
+        }
+
+        return ~lo;
     }
 
     private void RebuildBlocks()

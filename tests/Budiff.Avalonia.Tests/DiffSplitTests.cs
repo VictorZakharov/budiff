@@ -39,7 +39,7 @@ public sealed class DiffSplitTests
     [Fact]
     public void MaxScroll_FollowsTheNarrowerPanesTextWidth()
     {
-        var model = new DiffViewModel();
+        var model = new DiffViewModel { WrapLines = false };
         var longLine = new string('x', 200);
         model.SetDiff(LineDiff.Compute("a\n" + longLine + "\n", "b\n" + longLine + "\n"));
 
@@ -162,7 +162,7 @@ public sealed class DiffSplitTests
             });
         }
 
-        var model = new DiffViewModel { Title = "Split.cs", Extension = ".cs" };
+        var model = new DiffViewModel { Title = "Split.cs", Extension = ".cs", WrapLines = false };
         model.SetDiff(LineDiff.Compute(oldText.ToString(), newText.ToString()));
         Assert.Contains(model.Rows, r => r.IsGap);
 

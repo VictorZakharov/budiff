@@ -24,8 +24,9 @@ Tagline: *"ls, but for your diffs."*
 ## 2. Components (projects / packages)
 
 - **`Budiff.Core`** - the diff engine. Pure .NET (BCL only), **no Avalonia, no git**. The diff algorithm + the row/result model + the binary/size policy.
-- **`Budiff.Avalonia`** - the side-by-side diff **control** + its view-model. Depends on Avalonia and an `ISyntaxHighlighter` interface, NOT on any highlighter implementation.
+- **`Budiff.Avalonia`** - the side-by-side diff **control** + its view-model. Depends on Avalonia and the `ISyntaxHighlighter` / `IDocumentPreviewer` interfaces, NOT on any implementation of them.
 - **`Budiff.Avalonia.TextMate`** - a TextMate-backed `ISyntaxHighlighter` (the optional, heavier highlighting path).
+- **`Budiff.Avalonia.Markdown`** - a Markdig-backed `IDocumentPreviewer`: the markdown **Preview** (the document formatted, as a block-level rich diff - changed blocks' old versions red, new versions green, unchanged runs foldable).
 - **`Budiff.Cli`** - the terminal tool (`budiff`). Avalonia-free so it stays small and Native-AOT-friendly; references `Budiff.Core` + a small ANSI renderer.
 - **`Budiff.App`** - the standalone desktop GUI (the README screenshot, the primary dogfooding target).
 - A **sample** app and **test** projects.
@@ -34,6 +35,7 @@ Tagline: *"ls, but for your diffs."*
 
 - .NET 10; `Nullable` enabled.
 - Avalonia 12.0.4; Avalonia.AvaloniaEdit 12.0.0 + AvaloniaEdit.TextMate 12.0.0; TextMateSharp.Grammars 2.0.4.
+- Markdig 1.4.0 (the markdown preview).
 - CommunityToolkit.Mvvm 8.4.2.
 - LibGit2Sharp 0.31.0 (the git reader; v1 uses LibGit2Sharp across the board).
 - Material.Icons.Avalonia 3.0.2.
@@ -43,7 +45,7 @@ Tagline: *"ls, but for your diffs."*
 ## 4. What v1 includes
 
 - The **Code Analysis bird's-eye** (the `ls` surface): folder/project tree, period selector, sortable columns for Lines / Code / Blank / Comment / Files / Added / Removed / Commits / Authors, file search, extension filters, and author filters. Folder-scoped (CWD subtree) by default; `--gitroot` for the whole repo.
-- **Drill-in side-by-side diff**: syntax-highlighted, intra-line highlighted, with the Rider-style centre "funnel" connectors, collapse-unchanged, and gap expansion.
+- **Drill-in side-by-side diff**: syntax-highlighted, intra-line highlighted, with the Rider-style centre "funnel" connectors (draggable to resize the split), collapse-unchanged, gap expansion, and line wrap (on by default). Markdown files can switch to a formatted **Preview** of the change.
 - A **commit / branch picker** so you can diff points other than working-tree-vs-HEAD.
 - Both surfaces in **terminal** (CLI) and **desktop GUI** (`-i` / `Budiff.App`).
 - **MCP server** (`budiff mcp`) over stdio for AI agents, exposing `list_changes`, `get_file_diff`, and `repo_overview` from the same structured git + Core engine.

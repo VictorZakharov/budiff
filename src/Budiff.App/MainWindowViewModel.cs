@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Budiff;
 using Budiff.Avalonia;
+using Budiff.Avalonia.Markdown;
 using Budiff.Avalonia.TextMate;
 using Budiff.Git;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -34,7 +35,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         _startPath = startPath;
         _gitRoot = gitRoot;
-        Diff.SyntaxHighlighter = new TextMateSyntaxHighlighter();
+        var highlighter = new TextMateSyntaxHighlighter();
+        Diff.SyntaxHighlighter = highlighter;
+        Diff.Previewer = new MarkdownPreviewer(highlighter);
         Analysis = new CodeAnalysisPanelViewModel(OpenAnalysisFileAsync);
         Analysis.HistoryApplied += OnHistoryApplied;
         Diff.PropertyChanged += (_, e) =>

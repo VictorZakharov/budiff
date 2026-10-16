@@ -23,7 +23,7 @@ When that checkout exists, it is a valuable resource: `SPEC.md` section 5 lists 
 ## Conventions
 
 - **ASCII-only code comments** - no em-dashes, curly quotes, ellipses, or arrow glyphs; write `-`, `...`, `->`. Fancy Unicode is fine in on-screen UI strings.
-- **Strict layering** (`SPEC.md` section 2): `Budiff.Core` is pure (no Avalonia, no git); `Budiff.Avalonia` depends on Avalonia + the `ISyntaxHighlighter` interface only; git lives in the CLI / App, never in Core or Avalonia.
+- **Strict layering** (`SPEC.md` section 2): `Budiff.Core` is pure (no Avalonia, no git); `Budiff.Avalonia` depends on Avalonia + the `ISyntaxHighlighter` / `IDocumentPreviewer` interfaces only (their implementations live in `.TextMate` / `.Markdown`); git lives in the CLI / App, never in Core or Avalonia.
 - Keep the CLI's **data model separate from its ANSI rendering** (`SPEC.md` section 6) so `--json` / MCP are cheap to add later.
 - Work in the **build order** of `SPEC.md` section 10. Prefer small, reviewable commits; run the tests after each.
 - Nullable reference types on; treat warnings seriously.

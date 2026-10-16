@@ -33,6 +33,8 @@ public sealed partial class DiffViewModel : ObservableObject
     private IBrush _defaultSyntaxBrush = Brush("#D4D4D4");
     private bool _collapseUnchanged = true;
     private bool _hasChanges;
+    private DocumentPreviewMode _previewMode = DocumentPreviewMode.NewOnly;
+    private IDocumentPreviewer? _previewer;
     private double _splitRatio = 0.5;
     private int _maxLineLength;
 
@@ -52,6 +54,66 @@ public sealed partial class DiffViewModel : ObservableObject
     public BulkObservableCollection<DiffRowVm> Rows { get; } = new();
 
     public ISyntaxHighlighter? SyntaxHighlighter { get; set; }
+
+    // Optional formatted view for document types (e.g. markdown); with none,
+    // the Preview toggle never shows.
+    public IDocumentPreviewer? Previewer
+    {
+        get => _previewer;
+        set
+        {
+            if (SetProperty(ref _previewer, value))
+            {
+                NotifyPreviewState();
+            }
+        }
+    }
+
+    // The Preview toggle: sticky across files, it applies whenever the open
+    // file is a type the previewer formats.
+    [ObservableProperty]
+    private bool _showPreview;
+
+    partial void OnShowPreviewChanged(bool value) => NotifyPreviewState();
+
+    public bool CanPreview => Previewer?.CanPreview(Extension) == true;
+
+    public bool IsPreviewActive => ShowPreview && CanPreview && !IsPlaceholder;
+
+    // Blame and wrap belong to the line diff; the preview has neither.
+    public bool ShowBlameOption => ShowDiffOptions && !IsPreviewActive;
+
+    public bool ShowWrapOption => !IsPreviewActive;
+
+    // Bumped whenever what the preview shows changes (new content, collapse
+    // toggled), so a view re-renders it.
+    [ObservableProperty]
+    private int _previewVersion;
+
+    public DocumentPreviewRequest CreatePreviewRequest()
+    {
+        var (oldLines, newLines) = ReconstructSides();
+        return new DocumentPreviewRequest(
+            string.Join("\n", oldLines),
+            string.Join("\n", newLines),
+            _all,
+            _previewMode,
+            _collapseUnchanged);
+    }
+
+    private void NotifyPreviewState()
+    {
+        OnPropertyChanged(nameof(CanPreview));
+        OnPropertyChanged(nameof(IsPreviewActive));
+        OnPropertyChanged(nameof(ShowBlameOption));
+        OnPropertyChanged(nameof(ShowWrapOption));
+    }
+
+    partial void OnExtensionChanged(string value) => NotifyPreviewState();
+
+    partial void OnIsPlaceholderChanged(bool value) => NotifyPreviewState();
+
+    partial void OnIsFileViewChanged(bool value) => NotifyPreviewState();
 
     [ObservableProperty]
     private string _title = "Diff";
@@ -120,6 +182,13 @@ public sealed partial class DiffViewModel : ObservableObject
 
     public bool HasHorizontalScroll => MaxScroll > 0;
 
+    // Long lines wrap inside their pane (rows grow taller) instead of
+    // scrolling sideways. On by default, for every file type.
+    [ObservableProperty]
+    private bool _wrapLines = true;
+
+    partial void OnWrapLinesChanged(bool value) => UpdateMaxScroll();
+
     // The OLD side's share of the two-pane code width (what remains after the
     // blame column and the funnel gutter). Dragging the gutter sets it, a
     // double-click resets it; it carries over from file to file.
@@ -147,7 +216,7 @@ public sealed partial class DiffViewModel : ObservableObject
 
     private void UpdateMaxScroll()
     {
-        MaxScroll = _maxLineLength == 0 ? 0 : Math.Max(0, (_maxLineLength * CharWidth) - _visibleTextWidth);
+        MaxScroll = WrapLines || _maxLineLength == 0 ? 0 : Math.Max(0, (_maxLineLength * CharWidth) - _visibleTextWidth);
         if (HorizontalScroll > MaxScroll)
         {
             HorizontalScroll = MaxScroll;
@@ -162,6 +231,7 @@ public sealed partial class DiffViewModel : ObservableObject
             if (SetProperty(ref _collapseUnchanged, value))
             {
                 Rebuild();
+                PreviewVersion++;
             }
         }
     }
@@ -313,6 +383,9 @@ public sealed partial class DiffViewModel : ObservableObject
         // nothing folded away - collapsing would hide the whole file in a gap.
         _hasChanges = anyChange;
         IsSinglePane = !anyChange || allAdded || allRemoved;
+        _previewMode = !anyChange || allAdded ? DocumentPreviewMode.NewOnly
+            : allRemoved ? DocumentPreviewMode.OldOnly
+            : DocumentPreviewMode.Diff;
 
         var maxLen = 0;
         foreach (var row in rows)
@@ -327,6 +400,7 @@ public sealed partial class DiffViewModel : ObservableObject
         _oldRuns = Plain(oldLines);
         _newRuns = Plain(newLines);
         Rebuild();
+        PreviewVersion++;
 
         var displayed = new List<DiffRow>(Rows.Count);
         foreach (var vm in Rows)
@@ -563,7 +637,8 @@ public sealed partial class DiffViewModel : ObservableObject
         // Built as a list and swapped in with ONE reset: per-row Add events made
         // the items host (and the gutter) process thousands of changes per toggle.
         // The collapse/gap shape itself lives in DiffRowCollapser.
-        var plan = DiffRowCollapser.Build(_all, _collapseUnchanged && _hasChanges, ContextLines, _expandedGaps);
+        var collapsing = _collapseUnchanged && _hasChanges;
+        var plan = DiffRowCollapser.Build(_all, collapsing, ContextLines, _expandedGaps);
         var rows = new List<DiffRowVm>(plan.Count);
         foreach (var item in plan)
         {
@@ -574,13 +649,13 @@ public sealed partial class DiffViewModel : ObservableObject
                     GapRunStart = item.GapRunStart,
                     GapText = DiffRowCollapser.GapText(item.Hidden),
                 }
-                : Content(_all[item.Index]));
+                : Content(_all[item.Index], compact: collapsing && _all[item.Index].Kind == DiffKind.Unchanged));
         }
 
         Rows.ReplaceAll(rows);
     }
 
-    private DiffRowVm Content(DiffRow row)
+    private DiffRowVm Content(DiffRow row, bool compact)
     {
         var (oldBg, newBg) = row.Kind switch
         {
@@ -601,6 +676,7 @@ public sealed partial class DiffViewModel : ObservableObject
             NewRuns = RunsFor(_newRuns, row.NewNo),
             Blame = BlameFor(row),
             Kind = row.Kind,
+            IsCompact = compact,
             OldBackground = oldBg,
             NewBackground = newBg,
         };
