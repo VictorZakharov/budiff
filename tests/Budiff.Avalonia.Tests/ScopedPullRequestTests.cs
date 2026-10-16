@@ -115,6 +115,58 @@ public sealed class ScopedPullRequestTests
         Assert.Null(files[6]);
     }
 
+    // The repository gh would use, read from the clone instead of asking gh
+    // (~0.5 s): set-default's mark, else the only GitHub repository.
+    [Theory]
+    [InlineData("https://github.com/Ada/Engine.git", "Ada/Engine")]
+    [InlineData("https://github.com/Ada/Engine", "Ada/Engine")]
+    [InlineData("git@github.com:Ada/Engine.git", "Ada/Engine")]
+    [InlineData("ssh://git@ssh.github.com:443/Ada/Engine.git", "Ada/Engine")]
+    [InlineData("https://gitlab.com/Ada/Engine.git", null)]
+    [InlineData("https://github.com/Ada", null)]
+    [InlineData("C:/src/engine", null)]
+    public void GitHubRemote_ParsesGitHubUrls(string url, string? repo)
+        => Assert.Equal(repo, GitHubRemote.ParseUrl(url));
+
+    [Fact]
+    public void GitHubRemote_FollowsGh()
+    {
+        var (root, _) = BuildRepo();
+        using (var repo = new Repository(root))
+        {
+            repo.Network.Remotes.Add("origin", "git@github.com:me/engine.git");
+            repo.Refs.Add("refs/remotes/origin/trunk", repo.Head.Tip.Id);
+            repo.Refs.Add("refs/remotes/origin/HEAD", "refs/remotes/origin/trunk");
+        }
+
+        Assert.Equal(("me/engine", "trunk"), GitHubRemote.Resolve(Path.Combine(root, "Proj")));
+        Assert.True(GitHubRemote.HasGitHubRemote(root));
+
+        // A fork's two repositories: only set-default's mark decides.
+        using (var repo = new Repository(root))
+        {
+            repo.Network.Remotes.Add("upstream", "https://github.com/corp/engine.git");
+        }
+
+        Assert.Null(GitHubRemote.Resolve(root));
+        using (var repo = new Repository(root))
+        {
+            repo.Config.Set("remote.upstream.gh-resolved", "base");
+        }
+
+        Assert.Equal(("corp/engine", (string?)null), GitHubRemote.Resolve(root));
+
+        var plain = Directory.CreateTempSubdirectory("budiff-no-github-").FullName;
+        Repository.Init(plain);
+        using (var repo = new Repository(plain))
+        {
+            repo.Network.Remotes.Add("origin", "https://gitlab.com/me/engine.git");
+        }
+
+        Assert.Null(GitHubRemote.Resolve(plain));
+        Assert.False(GitHubRemote.HasGitHubRemote(plain));
+    }
+
     [Fact]
     public async Task Picker_SaysWhatTheListIsLimitedTo()
     {

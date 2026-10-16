@@ -96,6 +96,10 @@ public sealed partial class PullRequestPickerViewModel : ObservableObject
     private static readonly ConditionalWeakTable<IPullRequestSource, Task<IReadOnlyList<RepoPerson>>> PeopleCache = new();
     private static readonly ConditionalWeakTable<IPullRequestSource, Task<string?>> LoginCache = new();
 
+    // First pages per source and query (see FirstPage): searched ahead when
+    // the Period list opens, shown at once when a picker opens again.
+    private static readonly ConditionalWeakTable<IPullRequestSource, Dictionary<PullRequestQuery, FirstPage>> FirstPages = new();
+
     private readonly IPullRequestSource _source;
     private readonly Func<DateTimeOffset> _now;
     private PullRequestQuery _query;
@@ -105,6 +109,19 @@ public sealed partial class PullRequestPickerViewModel : ObservableObject
     private bool _initialized;
     private Task? _peopleLoad;
     private bool _peopleListed;
+
+    // What a picker opens on: Mine, any state, no text.
+    public static PullRequestQuery DefaultQuery { get; } = new(Mine.Login, PullRequestStateFilter.All, string.Empty);
+
+    // The Period list opened, so "Pull request..." may be next: start the
+    // list the picker opens on, so its rows are there (or nearly) by then.
+    public static void SearchAhead(IPullRequestSource source)
+    {
+        if (source.CanSearchAhead)
+        {
+            FirstPageOf(source, DefaultQuery).Fetch(source, DefaultQuery, () => DateTimeOffset.Now);
+        }
+    }
 
     public PullRequestPickerViewModel(IPullRequestSource source, Func<DateTimeOffset>? now = null)
     {
@@ -250,32 +267,55 @@ public sealed partial class PullRequestPickerViewModel : ObservableObject
         ErrorText = null;
         SelectedItem = null;
         Items.Clear();
-        await LoadPageAsync(gen, _query, after: null);
+
+        // The first page: a search ahead still out or just back is used as
+        // is; else one goes out, and the last answer shows meanwhile.
+        var first = FirstPageOf(_source, _query);
+        var request = first.Fetch(_source, _query, _now);
+        var showingLast = false;
+        if (!request.IsCompleted && first.Last is { } last)
+        {
+            AddRows(last);
+            SelectedItem = Items.FirstOrDefault();
+            StatusText = Status(last);
+            showingLast = true;
+        }
+
+        await LoadPageAsync(gen, request, showingLast);
     }
 
-    private async Task LoadPageAsync(int gen, PullRequestQuery query, string? after)
+    private Task LoadPageAsync(int gen, PullRequestQuery query, string? after)
+        => LoadPageAsync(gen, Ask(() => _source.SearchAsync(query, after, PageSize, CancellationToken.None)));
+
+    // showingLast: the rows on screen are the last answer to this first
+    // page; they stay if this one lists the same PRs, else it replaces them.
+    private async Task LoadPageAsync(int gen, Task<PullRequestPage> request, bool showingLast = false)
     {
         IsLoading = true;
-        StatusText = Items.Count == 0 ? "Searching..." : "Loading more...";
+        if (!showingLast)
+        {
+            StatusText = Items.Count == 0 ? "Searching..." : "Loading more...";
+        }
+
         try
         {
-            var page = await _source.SearchAsync(query, after, PageSize, CancellationToken.None);
+            var page = await request;
             if (gen != _searchGen)
             {
                 return;
             }
 
-            var now = _now();
-            var known = Items.Select(i => i.PullRequest.Number).ToHashSet();
-            var added = new List<PullRequestRowVm>();
-            foreach (var pr in page.Items.Where(pr => known.Add(pr.Number)))
+            if (!showingLast)
             {
-                var row = new PullRequestRowVm(pr, now);
-                Items.Add(row);
-                added.Add(row);
+                AddRows(page);
             }
-
-            _ = FillCountsAsync(added);
+            else if (!SameRows(page))
+            {
+                var selected = SelectedItem?.PullRequest.Number;
+                Items.Clear();
+                AddRows(page);
+                SelectedItem = Items.FirstOrDefault(r => r.PullRequest.Number == selected);
+            }
 
             _cursor = page.EndCursor;
             HasMore = page.HasNextPage && page.EndCursor is not null;
@@ -296,6 +336,102 @@ public sealed partial class PullRequestPickerViewModel : ObservableObject
             if (gen == _searchGen)
             {
                 IsLoading = false;
+            }
+        }
+    }
+
+    private void AddRows(PullRequestPage page)
+    {
+        var now = _now();
+        var known = Items.Select(i => i.PullRequest.Number).ToHashSet();
+        var added = new List<PullRequestRowVm>();
+        foreach (var pr in page.Items.Where(pr => known.Add(pr.Number)))
+        {
+            var row = new PullRequestRowVm(pr, now);
+            Items.Add(row);
+            added.Add(row);
+        }
+
+        _ = FillCountsAsync(added);
+    }
+
+    private bool SameRows(PullRequestPage page)
+        => Items.Select(r => (r.PullRequest.Number, r.PullRequest.State, r.PullRequest.UpdatedAt))
+            .SequenceEqual(page.Items.DistinctBy(p => p.Number).Select(p => (p.Number, p.State, p.UpdatedAt)));
+
+    private static FirstPage FirstPageOf(IPullRequestSource source, PullRequestQuery query)
+    {
+        var pages = FirstPages.GetValue(source, _ => new Dictionary<PullRequestQuery, FirstPage>());
+        lock (pages)
+        {
+            if (!pages.TryGetValue(query, out var page))
+            {
+                if (pages.Count >= 32)
+                {
+                    pages.Clear();
+                }
+
+                pages[query] = page = new FirstPage();
+            }
+
+            return page;
+        }
+    }
+
+    // A source that throws instead of returning a failed task still fails
+    // the task.
+    private static Task<PullRequestPage> Ask(Func<Task<PullRequestPage>> ask)
+    {
+        try
+        {
+            return ask();
+        }
+        catch (Exception ex)
+        {
+            return Task.FromException<PullRequestPage>(ex);
+        }
+    }
+
+    // One query's first page: the request out (shared while it runs, and for
+    // a few seconds after it answered) and the last answer.
+    private sealed class FirstPage
+    {
+        private static readonly TimeSpan Fresh = TimeSpan.FromSeconds(15);
+
+        private readonly object _gate = new();
+        private Task<PullRequestPage>? _request;
+        private DateTimeOffset _answeredAt;
+
+        public PullRequestPage? Last { get; private set; }
+
+        public Task<PullRequestPage> Fetch(IPullRequestSource source, PullRequestQuery query, Func<DateTimeOffset> now)
+        {
+            lock (_gate)
+            {
+                if (_request is { } request
+                    && (!request.IsCompleted || (request.IsCompletedSuccessfully && now() - _answeredAt < Fresh)))
+                {
+                    return request;
+                }
+
+                var asked = Ask(() => source.SearchAsync(query, null, PageSize, CancellationToken.None));
+                _request = asked;
+                _ = asked.ContinueWith(
+                    done =>
+                    {
+                        lock (_gate)
+                        {
+                            if (done.IsCompletedSuccessfully)
+                            {
+                                Last = done.Result;
+                                _answeredAt = now();
+                            }
+                        }
+                    },
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+                return asked;
             }
         }
     }

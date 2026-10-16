@@ -299,25 +299,93 @@ public sealed class PullRequestModeTests
         Assert.Null(vm.ErrorText);
     }
 
-    // Opening the Period list gets the PR source ready ("Pull request..."
-    // may be next), so the picker's first search does not wait for it.
+    // Opening the Period list ("Pull request..." may be next) starts the
+    // list the picker opens on - for a GitHub repository only.
     [AvaloniaFact]
-    public void OpeningThePeriodList_PreparesThePullRequestSource()
+    public void OpeningThePeriodList_SearchesAhead()
     {
-        var root = ReadmeFixture.BuildFixtureRepo("pr-prepare");
+        var root = ReadmeFixture.BuildFixtureRepo("pr-ahead");
         var window = new MainWindow(root, gitRoot: true) { Width = 1200, Height = 520 };
         window.Show();
         var vm = window.ViewModel;
         WaitUntil(() => !vm.Analysis.IsScanning && vm.Analysis.Roots.Count > 0, "bird's-eye scan");
-        var source = new FakePullRequestSource(Array.Empty<PullRequestInfo>());
-        vm.Analysis.PullRequests = source;
-
         var box = window.FindControl<RepickComboBox>("PeriodBox")!;
+
+        var elsewhere = new FakePullRequestSource(new[] { Pr(1, "victor") });
+        vm.Analysis.PullRequests = elsewhere;
         box.IsDropDownOpen = true;
         UiSnapshot.Pump();
-        Assert.Equal(1, source.PrepareCalls);
         box.IsDropDownOpen = false;
+        Assert.Empty(elsewhere.Queries);
+
+        var github = new FakePullRequestSource(new[] { Pr(1, "victor") }) { CanSearchAhead = true };
+        vm.Analysis.PullRequests = github;
+        box.IsDropDownOpen = true;
+        UiSnapshot.Pump();
+        box.IsDropDownOpen = false;
+        Assert.Equal(PullRequestPickerViewModel.DefaultQuery, Assert.Single(github.Queries));
         window.Close();
+    }
+
+    // The picker opening right after the search ahead uses its answer: no
+    // second search, rows at once.
+    [Fact]
+    public async Task Picker_UsesTheSearchAhead()
+    {
+        var gate = new TaskCompletionSource();
+        var source = new FakePullRequestSource(new[] { Pr(1, "victor"), Pr(2, "victor") }) { CanSearchAhead = true, SearchGate = gate.Task };
+
+        PullRequestPickerViewModel.SearchAhead(source);
+        var vm = new PullRequestPickerViewModel(source);
+        var opening = vm.InitializeAsync();
+        gate.SetResult();
+        await opening;
+
+        Assert.Equal(new[] { 1, 2 }, vm.Items.Select(r => r.PullRequest.Number));
+        Assert.Single(source.Queries);
+    }
+
+    // Opening again shows the last list at once while it asks again; the
+    // rows stay when the answer is the same, and are replaced (keeping the
+    // selected PR) when it differs.
+    [Fact]
+    public async Task Picker_OpeningAgain_ShowsTheLastList_ThenTheNewAnswer()
+    {
+        var clock = FakePullRequestSource.Now;
+        var source = new FakePullRequestSource(new[] { Pr(1, "victor"), Pr(2, "victor") });
+        var first = new PullRequestPickerViewModel(source, () => clock);
+        await first.InitializeAsync();
+
+        // Within seconds: the same answer, no new search.
+        var soon = new PullRequestPickerViewModel(source, () => clock);
+        await soon.InitializeAsync();
+        Assert.Single(source.Queries);
+
+        clock = clock.AddMinutes(1);
+        var gate = new TaskCompletionSource();
+        source.SearchGate = gate.Task;
+        var same = new PullRequestPickerViewModel(source, () => clock);
+        var opening = same.InitializeAsync();
+        Assert.Equal(new[] { 1, 2 }, same.Items.Select(r => r.PullRequest.Number));
+        Assert.True(same.IsLoading);
+        var shown = same.Items.ToList();
+        gate.SetResult();
+        await opening;
+        Assert.Equal(shown, same.Items);
+        Assert.False(same.IsLoading);
+        Assert.Equal(2, source.Queries.Count);
+
+        source.Replace(new[] { Pr(0, "victor"), Pr(2, "victor"), Pr(1, "victor") });
+        clock = clock.AddMinutes(1);
+        gate = new TaskCompletionSource();
+        source.SearchGate = gate.Task;
+        var changed = new PullRequestPickerViewModel(source, () => clock);
+        opening = changed.InitializeAsync();
+        changed.SelectedItem = changed.Items.Single(r => r.PullRequest.Number == 2);
+        gate.SetResult();
+        await opening;
+        Assert.Equal(new[] { 0, 1, 2 }, changed.Items.Select(r => r.PullRequest.Number));
+        Assert.Equal(2, changed.SelectedItem!.PullRequest.Number);
     }
 
     // The real window: picking "Pull request..." again (it is already the
@@ -430,7 +498,14 @@ public sealed class PullRequestModeTests
     {
         public static readonly DateTimeOffset Now = new(2026, 10, 15, 12, 0, 0, TimeSpan.Zero);
 
-        private readonly List<PullRequestInfo> _all = all.OrderByDescending(p => p.UpdatedAt).ToList();
+        private List<PullRequestInfo> _all = all.OrderByDescending(p => p.UpdatedAt).ToList();
+
+        // Searches wait for this, when set.
+        public Task? SearchGate { get; set; }
+
+        public bool CanSearchAhead { get; init; }
+
+        public void Replace(IEnumerable<PullRequestInfo> all) => _all = all.OrderByDescending(p => p.UpdatedAt).ToList();
 
         public List<PullRequestQuery> Queries { get; } = new();
 
@@ -441,6 +516,17 @@ public sealed class PullRequestModeTests
         public Task<PullRequestPage> SearchAsync(PullRequestQuery query, string? after, int pageSize, CancellationToken ct)
         {
             Queries.Add(query);
+            return SearchGate is { } gate ? AfterAsync(gate, () => Answer(query, after, pageSize)) : Answer(query, after, pageSize);
+        }
+
+        private static async Task<PullRequestPage> AfterAsync(Task gate, Func<Task<PullRequestPage>> answer)
+        {
+            await gate;
+            return await answer();
+        }
+
+        private Task<PullRequestPage> Answer(PullRequestQuery query, string? after, int pageSize)
+        {
             if (Failure is not null)
             {
                 return Task.FromException<PullRequestPage>(new PullRequestSourceException(Failure));
@@ -513,8 +599,6 @@ public sealed class PullRequestModeTests
         // The PR numbers of each counts request.
         public List<int[]> CountsAsked { get; } = new();
 
-        public int PrepareCalls { get; private set; }
-
         public async Task<IReadOnlyDictionary<int, PullRequestCounts>> GetCountsAsync(IReadOnlyList<PullRequestInfo> pullRequests, CancellationToken ct)
         {
             CountsAsked.Add(pullRequests.Select(p => p.Number).ToArray());
@@ -530,7 +614,5 @@ public sealed class PullRequestModeTests
 
             return pullRequests.ToDictionary(p => p.Number, p => new PullRequestCounts(p.Number * 1000, p.Number * 13, p.Number));
         }
-
-        public void Prepare() => PrepareCalls++;
     }
 }
