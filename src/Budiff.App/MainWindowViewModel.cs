@@ -118,6 +118,59 @@ public sealed partial class MainWindowViewModel : ObservableObject
     // Full bird's-eye (all columns + filter panes) whenever the docked diff is away.
     public bool ShowWideColumns => !ShowDiffPane;
 
+    // Bird's-eye column widths (header cell = row cell + its margins). Name,
+    // Added and Removed always show; the optional ones drop as the pane
+    // narrows, from the end of this keep order: Lines, Code, Commits, Authors,
+    // then the wide-only Blank, Comment, Files, Size.
+    internal const double NameMinWidth = 150;
+    internal const double AddedRemovedWidth = 78 + 78;
+    internal static readonly double[] OptionalColumnWidths = { 72, 72, 64, 60, 64, 76, 54, 90 };
+    private const int DockedColumnCount = 4;
+
+    // How many optional columns fit, counted along the keep order.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowLinesColumn))]
+    [NotifyPropertyChangedFor(nameof(ShowCodeColumn))]
+    [NotifyPropertyChangedFor(nameof(ShowCommitsColumn))]
+    [NotifyPropertyChangedFor(nameof(ShowAuthorsColumn))]
+    [NotifyPropertyChangedFor(nameof(ShowBlankColumn))]
+    [NotifyPropertyChangedFor(nameof(ShowCommentColumn))]
+    [NotifyPropertyChangedFor(nameof(ShowFilesColumn))]
+    [NotifyPropertyChangedFor(nameof(ShowSizeColumn))]
+    private int _fittingColumns = 8;
+
+    public bool ShowLinesColumn => FittingColumns >= 1;
+
+    public bool ShowCodeColumn => FittingColumns >= 2;
+
+    public bool ShowCommitsColumn => FittingColumns >= 3;
+
+    public bool ShowAuthorsColumn => FittingColumns >= 4;
+
+    public bool ShowBlankColumn => FittingColumns >= 5;
+
+    public bool ShowCommentColumn => FittingColumns >= 6;
+
+    public bool ShowFilesColumn => FittingColumns >= 7;
+
+    public bool ShowSizeColumn => FittingColumns >= 8;
+
+    // rowWidth = the header/row grid's width (pane minus its padding). The
+    // wide-only columns never show next to the docked diff.
+    public void FitColumns(double rowWidth)
+    {
+        var candidates = ShowWideColumns ? OptionalColumnWidths.Length : DockedColumnCount;
+        var spare = rowWidth - NameMinWidth - AddedRemovedWidth;
+        var fitting = 0;
+        while (fitting < candidates && spare >= OptionalColumnWidths[fitting])
+        {
+            spare -= OptionalColumnWidths[fitting];
+            fitting++;
+        }
+
+        FittingColumns = fitting;
+    }
+
     public MaterialIconKind TreeToggleIcon => IsTreeCollapsed ? MaterialIconKind.ChevronDoubleRight : MaterialIconKind.ChevronDoubleLeft;
 
     public string TreeToggleTip => IsTreeCollapsed ? "Show bird's-eye" : "Hide bird's-eye";
