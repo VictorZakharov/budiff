@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 using Budiff;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using global::Avalonia.Media;
 using global::Avalonia.Media.Immutable;
 using global::Avalonia.Threading;
@@ -85,6 +86,20 @@ public sealed partial class DiffViewModel : ObservableObject
 
     public bool ShowWrapOption => !IsPreviewActive;
 
+    // Where the open document lives (its images, its links); set by the host
+    // with each file it opens, before that file's diff arrives.
+    public DocumentPreviewContext? PreviewContext { get; set; }
+
+    // After following a preview link, Back (header button, Alt+Left, the
+    // mouse's back button) returns; the host keeps the trail.
+    [ObservableProperty]
+    private bool _canGoBack;
+
+    public Action? GoBackHandler { get; set; }
+
+    [RelayCommand]
+    private void GoBack() => GoBackHandler?.Invoke();
+
     // Bumped whenever what the preview shows changes (new content, collapse
     // toggled), so a view re-renders it.
     [ObservableProperty]
@@ -98,7 +113,8 @@ public sealed partial class DiffViewModel : ObservableObject
             string.Join("\n", newLines),
             _all,
             _previewMode,
-            _collapseUnchanged);
+            _collapseUnchanged,
+            PreviewContext);
     }
 
     private void NotifyPreviewState()

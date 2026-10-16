@@ -26,6 +26,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private int _blameGen;
     private string? _blamePath;
 
+    // The open file (as the bird's-eye named it) and the files a preview
+    // link was followed from, newest last, for Back.
+    private (string FullPath, string RelativePath)? _openFile;
+    private readonly Stack<(string FullPath, string RelativePath)> _linkTrail = new();
+
     // Sentinel base option: resolves to the same boundary commit the windowed
     // churn diffs from, so the drill-in shows what the Added/Removed columns
     // counted. Default while an analysis window is active.
@@ -38,6 +43,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         var highlighter = new TextMateSyntaxHighlighter();
         Diff.SyntaxHighlighter = highlighter;
         Diff.Previewer = new MarkdownPreviewer(highlighter);
+        Diff.GoBackHandler = GoBack;
         Analysis = new CodeAnalysisPanelViewModel(OpenAnalysisFileAsync);
         Analysis.HistoryApplied += OnHistoryApplied;
         Diff.PropertyChanged += (_, e) =>
@@ -185,6 +191,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
         IsTreeCollapsed = false;
         _openDiffFile = null;
         _openTarget = null;
+        _openFile = null;
+        ClearLinkTrail();
     }
 
     // Re-runs the open diff against the current base / working-tree choice.
@@ -200,6 +208,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         var target = CurrentTarget();
         _openTarget = target;
         Diff.Subtitle = DescribeTarget(target);
+        Diff.PreviewContext = PreviewContext(target);
         Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(scope, file, target));
         BeginLoadBlame(scope, file, target);
     }
@@ -449,8 +458,92 @@ public sealed partial class MainWindowViewModel : ObservableObject
         return target.HeadIsWorkingTree ? baseLabel + " vs working tree" : baseLabel + " vs HEAD";
     }
 
-    private Task OpenAnalysisFileAsync(string fullPath, string relativePath)
+    // A file picked in the bird's-eye starts a fresh trail of links.
+    internal Task OpenAnalysisFileAsync(string fullPath, string relativePath)
     {
+        ClearLinkTrail();
+        ShowFile(fullPath, relativePath);
+        return Task.CompletedTask;
+    }
+
+    // A link in the markdown preview: open that project file (Back returns).
+    internal void OpenLinkedFile(string path)
+    {
+        if (_openFile is not { } current)
+        {
+            return;
+        }
+
+        var root = _scope?.RepositoryRoot ?? DocumentFiles.Split(current.FullPath, current.RelativePath).Root;
+        var full = DocumentFiles.FullPath(root, path);
+        if (full is null)
+        {
+            return;
+        }
+
+        if (Directory.Exists(full))
+        {
+            StatusText = "Folders do not open in the diff: " + path;
+            return;
+        }
+
+        if (!LinkedFileExists(full, path))
+        {
+            StatusText = "Linked file not found: " + path;
+            return;
+        }
+
+        _linkTrail.Push(current);
+        Diff.CanGoBack = true;
+        ShowFile(full, path);
+    }
+
+    private bool LinkedFileExists(string fullPath, string path)
+        => File.Exists(fullPath)
+           || (_scope is { } scope && _openTarget is { } target
+               && (GitRepositoryReader.HasFileAtRevision(scope, path, target.HeadRef ?? "HEAD")
+                   || GitRepositoryReader.HasFileAtRevision(scope, path, target.BaseRef)));
+
+    private void GoBack()
+    {
+        if (_linkTrail.Count == 0)
+        {
+            return;
+        }
+
+        var (fullPath, relativePath) = _linkTrail.Pop();
+        Diff.CanGoBack = _linkTrail.Count > 0;
+        ShowFile(fullPath, relativePath);
+    }
+
+    private void ClearLinkTrail()
+    {
+        _linkTrail.Clear();
+        Diff.CanGoBack = false;
+    }
+
+    // What the preview of the open file can reach: the project's files as
+    // each side of this comparison has them, and links to open.
+    private DocumentPreviewContext? PreviewContext(DiffTarget? target)
+    {
+        if (_openFile is not { } open)
+        {
+            return null;
+        }
+
+        var scope = _scope;
+        var (root, documentPath) = scope is null
+            ? DocumentFiles.Split(open.FullPath, open.RelativePath)
+            : (scope.RepositoryRoot, ToRepoPath(scope.RepositoryRoot, open.FullPath));
+        return new DocumentPreviewContext(
+            documentPath,
+            (path, side) => DocumentFiles.Read(root, path, side, scope, target),
+            OpenLinkedFile);
+    }
+
+    private void ShowFile(string fullPath, string relativePath)
+    {
+        _openFile = (fullPath, relativePath);
         Diff.Extension = Path.GetExtension(relativePath);
         Diff.IsFileView = _scope is null;
         if (_scope is null)
@@ -463,11 +556,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
             Diff.SetBlame(null);
             Diff.Title = relativePath.Replace('\\', '/');
             Diff.Subtitle = "current file - no git";
+            Diff.PreviewContext = PreviewContext(null);
             IsDiffOpen = true;
             Diff.BeginLoad(() => File.Exists(fullPath)
                 ? DiffLoader.BuildView(DiffLoader.ReadWorkingFile(fullPath))
                 : DiffResult.Message("File not found."));
-            return Task.CompletedTask;
+            return;
         }
 
         var repoPath = ToRepoPath(_scope.RepositoryRoot, fullPath);
@@ -477,10 +571,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
         Diff.Subtitle = DescribeTarget(target);
         _openDiffFile = file;
         _openTarget = target;
+        Diff.PreviewContext = PreviewContext(target);
         IsDiffOpen = true;
         Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(_scope, file, target));
         BeginLoadBlame(_scope, file, target);
-        return Task.CompletedTask;
     }
 
     private static string Short(string sha) => sha.Length > 7 ? sha[..7] : sha;

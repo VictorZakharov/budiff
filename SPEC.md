@@ -26,7 +26,7 @@ Tagline: *"ls, but for your diffs."*
 - **`Budiff.Core`** - the diff engine. Pure .NET (BCL only), **no Avalonia, no git**. The diff algorithm + the row/result model + the binary/size policy.
 - **`Budiff.Avalonia`** - the side-by-side diff **control** + its view-model. Depends on Avalonia and the `ISyntaxHighlighter` / `IDocumentPreviewer` interfaces, NOT on any implementation of them.
 - **`Budiff.Avalonia.TextMate`** - a TextMate-backed `ISyntaxHighlighter` (the optional, heavier highlighting path).
-- **`Budiff.Avalonia.Markdown`** - a Markdig-backed `IDocumentPreviewer`: the markdown **Preview** (the document formatted, as a block-level rich diff - changed blocks' old versions red, new versions green, unchanged runs foldable).
+- **`Budiff.Avalonia.Markdown`** - a Markdig-backed `IDocumentPreviewer`: the markdown **Preview** (the document formatted, as a block-level rich diff - changed blocks' old versions red, new versions green, unchanged runs foldable). Pictures load from the project (each side from its own revision; web pictures are not fetched); links open project files in budiff (with Back), scroll to `#headings`, or open web addresses in the browser (marked with the external-link icon).
 - **`Budiff.Cli`** - the terminal tool (`budiff`). Avalonia-free so it stays small and Native-AOT-friendly; references `Budiff.Core` + a small ANSI renderer.
 - **`Budiff.App`** - the standalone desktop GUI (the README screenshot, the primary dogfooding target).
 - A **sample** app and **test** projects.

@@ -28,6 +28,26 @@ public sealed class GitRepositoryReaderTests
         Assert.Contains(rootChanges.Files, file => file.Path == "sub/a.txt");
     }
 
+    // The markdown preview's pictures: a file's raw bytes as each revision
+    // has it, size-capped, and whether a path is a file there at all.
+    [Fact]
+    public void ReadFileAtRevision_ReturnsThatRevisionsBytes()
+    {
+        using var repo = TempRepo.Create();
+        repo.Write("docs/shot.png", "v1");
+        var first = repo.Commit("initial", "Alice");
+        repo.Write("docs/shot.png", "v2-longer");
+        var second = repo.Commit("update", "Bob");
+
+        var scope = GitRepositoryReader.Open(repo.Root, gitRoot: true);
+        Assert.Equal("v1"u8.ToArray(), GitRepositoryReader.ReadFileAtRevision(scope, "docs/shot.png", first, 1024));
+        Assert.Equal("v2-longer"u8.ToArray(), GitRepositoryReader.ReadFileAtRevision(scope, "docs/shot.png", second, 1024));
+        Assert.Null(GitRepositoryReader.ReadFileAtRevision(scope, "docs/shot.png", second, maxBytes: 4));
+        Assert.Null(GitRepositoryReader.ReadFileAtRevision(scope, "docs/missing.png", second, 1024));
+        Assert.True(GitRepositoryReader.HasFileAtRevision(scope, "docs/shot.png", first));
+        Assert.False(GitRepositoryReader.HasFileAtRevision(scope, "docs", first));
+    }
+
     // cmd.exe keeps a typed `g:\...` cwd verbatim; libgit2 matches
     // safe.directory case-sensitively, so Open must hand it the on-disk spelling.
     [Fact]

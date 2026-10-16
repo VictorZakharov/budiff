@@ -2,6 +2,7 @@ using System.ComponentModel;
 using global::Avalonia;
 using global::Avalonia.Controls;
 using global::Avalonia.Input;
+using global::Avalonia.Interactivity;
 using global::Avalonia.Media;
 using global::Avalonia.Media.Immutable;
 using global::Avalonia.Markup.Xaml;
@@ -69,6 +70,25 @@ public partial class DiffView : UserControl
             UpdateVisibleTextWidth();
             WatchModel(DataContext as DiffViewModel);
         };
+
+        // Back after following a preview link: the mouse's back button
+        // anywhere over the diff, or Alt+Left.
+        AddHandler(PointerPressedEvent, (_, e) =>
+        {
+            if (e.GetCurrentPoint(this).Properties.IsXButton1Pressed && _model is { CanGoBack: true } model)
+            {
+                model.GoBackCommand.Execute(null);
+                e.Handled = true;
+            }
+        }, RoutingStrategies.Tunnel);
+        AddHandler(KeyDownEvent, (_, e) =>
+        {
+            if (e.Key == Key.Left && e.KeyModifiers == KeyModifiers.Alt && _model is { CanGoBack: true } model)
+            {
+                model.GoBackCommand.Execute(null);
+                e.Handled = true;
+            }
+        }, RoutingStrategies.Tunnel);
 
         // LayoutUpdated (not just SizeChanged): a fixed-width docked pane gets
         // NO SizeChanged when only the window resizes, yet "half the window"
