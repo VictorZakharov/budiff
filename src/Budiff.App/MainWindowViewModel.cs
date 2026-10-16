@@ -11,7 +11,6 @@ using Budiff.Avalonia.TextMate;
 using Budiff.Git;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Material.Icons;
 
 namespace Budiff.App;
 
@@ -180,7 +179,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         FittingColumns = fitting;
     }
 
-    public MaterialIconKind TreeToggleIcon => IsTreeCollapsed ? MaterialIconKind.ChevronDoubleRight : MaterialIconKind.ChevronDoubleLeft;
+    public AppIconKind TreeToggleIcon => IsTreeCollapsed ? AppIconKind.ChevronDoubleRight : AppIconKind.ChevronDoubleLeft;
 
     public string TreeToggleTip => IsTreeCollapsed ? "Show bird's-eye" : "Hide bird's-eye";
 

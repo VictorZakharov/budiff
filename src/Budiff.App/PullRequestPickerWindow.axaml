@@ -1,7 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:app="using:Budiff.App"
-        xmlns:materialIcons="using:Material.Icons.Avalonia"
         x:Class="Budiff.App.PullRequestPickerWindow"
         x:CompileBindings="False"
         Title="Show changes by pull request"
@@ -55,7 +54,7 @@
                             <Panel Width="28" Height="28" VerticalAlignment="Center" IsVisible="{Binding !IsNote}">
                                 <Border IsVisible="{Binding HasIcon}" CornerRadius="14"
                                         Background="{DynamicResource BudiffMutedTextBrush}" Opacity="0.25" />
-                                <materialIcons:MaterialIcon IsVisible="{Binding HasIcon}" Kind="{Binding IconKind}" Width="18" Height="18" />
+                                <app:AppIcon IsVisible="{Binding HasIcon}" Kind="{Binding IconKind}" Width="18" Height="18" />
                                 <Border IsVisible="{Binding HasAvatar}" CornerRadius="14" ClipToBounds="True"
                                         Background="{Binding Avatar.Background}">
                                     <Panel>
