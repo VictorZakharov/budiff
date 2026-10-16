@@ -99,7 +99,7 @@ public sealed class MarkdownLinksTests
         });
 
         var (window, host) = Show("# Shots\n\n![before](img/shot.png)\n\n![web](https://example.test/x.png)\n", "# Shots\n\n![after](img/shot.png)\n\n![web](https://example.test/x.png)\n", context, width: 700);
-        PumpUntil(() => Images(host).Count == 2);
+        PumpUntil(() => Images(host).Count == 2, () => PreviewPictures.Describe(host));
 
         var removed = Images(host).Single(i => Unit(i)?.Tag is BlockChange.Removed);
         var added = Images(host).Single(i => Unit(i)?.Tag is BlockChange.Added);
@@ -129,13 +129,32 @@ public sealed class MarkdownLinksTests
             | ![a](docs/a.png) | ![b](docs/missing.png) |
             """;
         var (window, host) = Show(doc, doc, context, width: 800);
-        PumpUntil(() => Images(host).Count == 2);
+        PumpUntil(() => Images(host).Count == 2, () => PreviewPictures.Describe(host));
 
         var logo = Images(host).Single(i => i.MaxWidth == 120);
         Assert.Equal(120, logo.Bounds.Width, 0.5);
         var cell = Images(host).Single(i => i != logo);
         Assert.True(cell.Bounds.Width > 100 && cell.Bounds.Width <= 400);
         Assert.Contains(Texts(host), t => t.Contains("🖼 b", StringComparison.Ordinal));
+        window.Close();
+    }
+
+    // A file that does not decode keeps its alt text like a missing one; the
+    // slot keeps why, for a test that waits on it.
+    [AvaloniaFact]
+    public void APictureThatDoesNotDecode_KeepsItsAltText()
+    {
+        var context = Context("README.md", (path, _) => path == "broken.png" ? System.Text.Encoding.ASCII.GetBytes("not a picture") : null);
+        const string doc = "![broken](broken.png)\n\n![gone](gone.png)\n";
+        var (window, host) = Show(doc, doc, context, width: 700);
+        var slots = host.GetVisualDescendants().OfType<MarkdownRenderer.PictureSlot>().ToList();
+        PumpUntil(() => slots.All(s => s.LoadState != "loading"), () => PreviewPictures.Describe(host));
+
+        Assert.StartsWith("failed: ", slots.Single(s => s.Source == "broken.png").LoadState, StringComparison.Ordinal);
+        Assert.Equal("no picture", slots.Single(s => s.Source == "gone.png").LoadState);
+        Assert.Empty(Images(host));
+        Assert.Contains(Texts(host), t => t.Contains("🖼 broken", StringComparison.Ordinal));
+        Assert.Contains(Texts(host), t => t.Contains("🖼 gone", StringComparison.Ordinal));
         window.Close();
     }
 
@@ -361,7 +380,7 @@ public sealed class MarkdownLinksTests
         UiSnapshot.Pump();
     }
 
-    private static void PumpUntil(Func<bool> done)
+    private static void PumpUntil(Func<bool> done, Func<string>? describe = null)
     {
         var watch = Stopwatch.StartNew();
         while (!done() && watch.ElapsedMilliseconds < 5000)
@@ -371,7 +390,7 @@ public sealed class MarkdownLinksTests
         }
 
         UiSnapshot.Pump();
-        Assert.True(done(), "timed out waiting for the preview");
+        Assert.True(done(), "timed out waiting for the preview" + (describe is null ? string.Empty : ": " + describe()));
     }
 
     internal static byte[] Png(int width, int height, Color color)

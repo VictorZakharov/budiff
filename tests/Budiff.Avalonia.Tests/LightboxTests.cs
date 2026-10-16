@@ -192,7 +192,7 @@ public sealed class LightboxTests
         window.Show();
         UiSnapshot.Pump();
         var host = view.FindControl<ContentControl>("PreviewHost")!;
-        PumpUntil(() => host.GetVisualDescendants().OfType<Image>().Count(i => i.Source is not null) == 5);
+        PumpUntil(() => host.GetVisualDescendants().OfType<Image>().Count(i => i.Source is not null) == 5, () => PreviewPictures.Describe(host));
         return (window, host, launched);
     }
 
@@ -243,7 +243,7 @@ public sealed class LightboxTests
         UiSnapshot.Pump();
     }
 
-    private static void PumpUntil(Func<bool> done)
+    private static void PumpUntil(Func<bool> done, Func<string>? describe = null)
     {
         var watch = Stopwatch.StartNew();
         while (!done() && watch.ElapsedMilliseconds < 5000)
@@ -253,6 +253,6 @@ public sealed class LightboxTests
         }
 
         UiSnapshot.Pump();
-        Assert.True(done(), "timed out");
+        Assert.True(done(), describe is null ? "timed out" : "timed out: " + describe());
     }
 }

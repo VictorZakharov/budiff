@@ -559,6 +559,7 @@ internal sealed class MarkdownRenderer
             && _images is { } images)
         {
             slot.Source = source.Value;
+            slot.LoadState = "loading";
             var side = _side;
 
             // Taken here, on the UI thread: reaching for Dispatcher.UIThread
@@ -566,19 +567,26 @@ internal sealed class MarkdownRenderer
             // while there is none (between headless tests).
             var ui = Dispatcher.UIThread;
             images.LoadAsync(context, source.Value, side).ContinueWith(
-                loaded => ui.Post(() =>
+                loaded =>
                 {
-                    if (loaded.IsCompletedSuccessfully && loaded.Result is { } bitmap)
+                    slot.LoadState = loaded.IsCompletedSuccessfully
+                        ? loaded.Result is null ? "no picture" : "decoded"
+                        : "failed: " + loaded.Exception?.GetBaseException().Message;
+                    ui.Post(() =>
                     {
-                        slot.Child = Fitted(bitmap, width, height);
-                        slot.Picture = bitmap;
-                        slot.LoadFull = () => MarkdownImages.LoadFullAsync(context, source.Value, side);
-                        if (zoomable && _zoom is not null)
+                        if (loaded.IsCompletedSuccessfully && loaded.Result is { } bitmap)
                         {
-                            slot.Cursor = HandCursor;
+                            slot.Child = Fitted(bitmap, width, height);
+                            slot.Picture = bitmap;
+                            slot.LoadFull = () => MarkdownImages.LoadFullAsync(context, source.Value, side);
+                            slot.LoadState = "shown";
+                            if (zoomable && _zoom is not null)
+                            {
+                                slot.Cursor = HandCursor;
+                            }
                         }
-                    }
-                }),
+                    });
+                },
                 System.Threading.Tasks.TaskScheduler.Default);
         }
 
@@ -708,6 +716,11 @@ internal sealed class MarkdownRenderer
 
         // The full-size picture when the preview shows a scaled-down copy.
         public Func<System.Threading.Tasks.Task<Bitmap?>>? LoadFull { get; set; }
+
+        // How far its picture got: loading, then (off the UI thread) decoded,
+        // no picture or failed: <why>, then shown. Tests that wait for
+        // pictures report it when they give up.
+        public string? LoadState { get; set; }
     }
 
     // A click (not a drag-select) on a link's text follows it; hovering one
