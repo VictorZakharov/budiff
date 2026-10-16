@@ -8,6 +8,30 @@ on:
     branches: [main]
 
 jobs:
+  # Pull requests keep a linear history: rebased onto main, never merged into
+  # (main gets merge commits only, from merging pull requests).
+  linear-history:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: No merge commits in the pull request
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          merges=$(git rev-list --merges "$BASE..$HEAD")
+          if [ -n "$merges" ]; then
+            echo "::error::This pull request contains merge commits. Rebase it onto main instead of merging."
+            git log --oneline --merges "$BASE..$HEAD"
+            exit 1
+          fi
+
   # The release publishes linux-x64 / osx-arm64 self-contained CLIs, so build
   # and test on Linux too. Keep the Integration filter: the runner ships Node,
   # which defeats those tests' toolchain self-skip. The tag/pack/release steps
