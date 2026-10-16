@@ -21,6 +21,12 @@
         <Style Selector="DockPanel.wrap TextBlock.code">
             <Setter Property="TextWrapping" Value="Wrap" />
         </Style>
+        <!-- Unchanged context rows stay one line (trimmed) while collapsing;
+             declared after the wrap style so it wins. -->
+        <Style Selector="DockPanel.wrap Panel.compact TextBlock.code">
+            <Setter Property="TextWrapping" Value="NoWrap" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        </Style>
         <!-- One commit-details tooltip (#54) for the blame cell of BOTH row
              layouts - two-pane and the single-pane whole-file view. -->
         <Style Selector="TextBlock.blameCell">
@@ -162,7 +168,7 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Panel>
+                                <Panel Classes.compact="{Binding IsCompact}">
                                     <Border IsVisible="{Binding IsGap}"
                                             Height="18"
                                             Cursor="Hand"

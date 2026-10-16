@@ -637,7 +637,8 @@ public sealed partial class DiffViewModel : ObservableObject
         // Built as a list and swapped in with ONE reset: per-row Add events made
         // the items host (and the gutter) process thousands of changes per toggle.
         // The collapse/gap shape itself lives in DiffRowCollapser.
-        var plan = DiffRowCollapser.Build(_all, _collapseUnchanged && _hasChanges, ContextLines, _expandedGaps);
+        var collapsing = _collapseUnchanged && _hasChanges;
+        var plan = DiffRowCollapser.Build(_all, collapsing, ContextLines, _expandedGaps);
         var rows = new List<DiffRowVm>(plan.Count);
         foreach (var item in plan)
         {
@@ -648,13 +649,13 @@ public sealed partial class DiffViewModel : ObservableObject
                     GapRunStart = item.GapRunStart,
                     GapText = DiffRowCollapser.GapText(item.Hidden),
                 }
-                : Content(_all[item.Index]));
+                : Content(_all[item.Index], compact: collapsing && _all[item.Index].Kind == DiffKind.Unchanged));
         }
 
         Rows.ReplaceAll(rows);
     }
 
-    private DiffRowVm Content(DiffRow row)
+    private DiffRowVm Content(DiffRow row, bool compact)
     {
         var (oldBg, newBg) = row.Kind switch
         {
@@ -675,6 +676,7 @@ public sealed partial class DiffViewModel : ObservableObject
             NewRuns = RunsFor(_newRuns, row.NewNo),
             Blame = BlameFor(row),
             Kind = row.Kind,
+            IsCompact = compact,
             OldBackground = oldBg,
             NewBackground = newBg,
         };

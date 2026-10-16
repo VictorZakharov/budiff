@@ -89,18 +89,47 @@ public sealed class DiffWrapTests
         window.Close();
     }
 
+    // Collapse unchanged keeps the context compact: a long UNCHANGED line next
+    // to a change (a markdown paragraph, say) stays one trimmed line instead of
+    // wrapping into a wall of text; only changed lines wrap. Collapse off
+    // wraps everything.
+    [AvaloniaFact]
+    public void Collapsing_KeepsUnchangedContextToOneLine()
+    {
+        var (window, view, model) = Open(longContext: true);
+        var host = view.FindControl<ItemsControl>("RowsHost")!;
+        int Find(string marker) => model.Rows.ToList().FindIndex(r => r.NewText?.Contains(marker, StringComparison.Ordinal) == true);
+
+        var context = Find("Context(29)");
+        var changed = Find("Extra(29)");
+        Assert.True(model.Rows[context].IsCompact);
+        Assert.False(model.Rows[changed].IsCompact);
+        Assert.Equal(18, host.ContainerFromIndex(context)!.Bounds.Height, 0.5);
+        Assert.True(host.ContainerFromIndex(changed)!.Bounds.Height >= 3 * 18);
+        UiSnapshot.Capture(window, "diff-view-wrapped-context");
+
+        model.CollapseUnchanged = false;
+        UiSnapshot.Pump();
+        UiSnapshot.Pump();
+        context = Find("Context(29)");
+        Assert.False(model.Rows[context].IsCompact);
+        Assert.True(host.ContainerFromIndex(context)!.Bounds.Height >= 3 * 18);
+        window.Close();
+    }
+
     // 60 lines, edits at 5 and 50 (line 50 is very long), collapsed with gaps.
-    private static (Window Window, DiffView View, DiffViewModel Model) Open()
+    private static (Window Window, DiffView View, DiffViewModel Model) Open(bool longContext = false)
     {
         var oldText = new StringBuilder();
         var newText = new StringBuilder();
         for (var i = 0; i < 60; i++)
         {
-            oldText.AppendLine($"    var value{i} = Compute({i});");
+            oldText.AppendLine(i == 3 && longContext ? LongContext(i) : $"    var value{i} = Compute({i});");
             newText.AppendLine(i switch
             {
                 5 => $"    var value{i} = Compute({i} + 1);",
                 50 => $"    var value{i} = Compute({i}) + " + string.Join(" + ", Enumerable.Range(0, 30).Select(n => $"Extra({n})")) + ";",
+                3 when longContext => LongContext(i),
                 _ => $"    var value{i} = Compute({i});",
             });
         }
@@ -114,6 +143,9 @@ public sealed class DiffWrapTests
         UiSnapshot.Pump();
         return (window, view, model);
     }
+
+    private static string LongContext(int i)
+        => $"    var value{i} = Compute({i}) + " + string.Join(" + ", Enumerable.Range(0, 30).Select(n => $"Context({n})")) + ";";
 
     private static double CenterY(ItemsControl host, int index, Window window)
     {

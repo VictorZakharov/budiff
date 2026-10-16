@@ -47,6 +47,11 @@ public sealed partial class DiffRowVm : ObservableObject
 
     public DiffKind Kind { get; init; }
 
+    // An unchanged line shown as context while Collapse unchanged is on: it
+    // stays one line (trimmed) even when wrapping, so a long unchanged line
+    // - a markdown paragraph - does not turn the context into a wall of text.
+    public bool IsCompact { get; init; }
+
     public IBrush OldBackground { get; init; } = Brushes.Transparent;
 
     public IBrush NewBackground { get; init; } = Brushes.Transparent;
