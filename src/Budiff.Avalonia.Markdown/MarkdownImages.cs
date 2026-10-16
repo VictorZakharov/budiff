@@ -27,6 +27,35 @@ internal sealed class MarkdownImages
     public Task<Bitmap?> LoadAsync(DocumentPreviewContext context, string path, DocumentSide side)
         => Task.Run(() => Load(context, path, side));
 
+    // The picture at full size, for a close look in the lightbox - null when
+    // the preview's copy already is one (only wide pictures are scaled down).
+    public static Task<Bitmap?> LoadFullAsync(DocumentPreviewContext context, string path, DocumentSide side)
+        => Task.Run(() =>
+        {
+            try
+            {
+                var bytes = context.ReadFile(path, side);
+                if (bytes is null || bytes.Length == 0 || bytes.Length > MaxBytes)
+                {
+                    return null;
+                }
+
+                using var stream = new MemoryStream(bytes, writable: false);
+                var bitmap = new Bitmap(stream);
+                if (bitmap.PixelSize.Width <= MaxPixelWidth)
+                {
+                    bitmap.Dispose();
+                    return null;
+                }
+
+                return bitmap;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        });
+
     private Bitmap? Load(DocumentPreviewContext context, string path, DocumentSide side)
     {
         if (path.EndsWith(".svg", StringComparison.OrdinalIgnoreCase))
