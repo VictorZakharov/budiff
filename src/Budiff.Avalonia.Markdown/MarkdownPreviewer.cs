@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Markdig.Syntax;
 using global::Avalonia;
@@ -8,6 +9,7 @@ using global::Avalonia.Input;
 using global::Avalonia.Layout;
 using global::Avalonia.Media;
 using global::Avalonia.Media.Immutable;
+using global::Avalonia.VisualTree;
 
 namespace Budiff.Avalonia.Markdown;
 
@@ -15,8 +17,9 @@ namespace Budiff.Avalonia.Markdown;
 // it is a "rich diff" - unchanged blocks plain, a changed block's old version
 // tinted red and its new version green; Collapse unchanged folds long runs of
 // untouched blocks (keeping one block of context and the nearest heading).
-// Pictures load from the project (each side from its own revision); links
-// open project files in budiff, scroll to "#headings", or open the browser.
+// Pictures load from the project (each side from its own revision) and open
+// in a lightbox; links open project files in budiff, scroll to "#headings",
+// or open the browser.
 public sealed class MarkdownPreviewer : IDocumentPreviewer
 {
     private const int ContextBlocks = 1;
@@ -159,7 +162,7 @@ public sealed class MarkdownPreviewer : IDocumentPreviewer
             _request = request;
             _theme = theme;
             _blocks = MarkdownBlockDiff.Build(request);
-            _renderer = new MarkdownRenderer(theme, owner._highlighter, request.Context, owner._images, Activate);
+            _renderer = new MarkdownRenderer(theme, owner._highlighter, request.Context, owner._images, Activate, Zoom);
             _units = new Border?[_blocks.Count];
         }
 
@@ -292,6 +295,23 @@ public sealed class MarkdownPreviewer : IDocumentPreviewer
                     break;
             }
         }
+
+        // The lightbox, stepping through the pictures on screen in document
+        // order (a folded run's pictures are not on screen).
+        private void Zoom(MarkdownRenderer.PictureSlot clicked)
+        {
+            var slots = _panel.GetVisualDescendants()
+                .OfType<MarkdownRenderer.PictureSlot>()
+                .Where(s => s.Zoomable && s.Picture is not null)
+                .ToList();
+            var items = slots
+                .Select(s => new Lightbox.Item(s.Picture!, s.Alt.Length > 0 ? s.Alt : FileName(s.Source), s.LoadFull))
+                .ToList();
+            Lightbox.Open(_scroller, items, Math.Max(0, slots.IndexOf(clicked)));
+        }
+
+        private static string FileName(string? path)
+            => path is null ? string.Empty : path[(path.LastIndexOf('/') + 1)..];
 
         private async Task OpenSafely(TopLevel top, Uri uri)
         {

@@ -55,6 +55,7 @@ internal sealed class MarkdownRenderer
     private readonly DocumentPreviewContext? _context;
     private readonly MarkdownImages? _images;
     private readonly Action<LinkTarget>? _activate;
+    private readonly Action<PictureSlot>? _zoom;
     private readonly IBrush _codeBackground;
     private readonly IBrush _rule;
     private readonly IBrush _link = new ImmutableSolidColorBrush(LinkColor);
@@ -68,13 +69,15 @@ internal sealed class MarkdownRenderer
         ISyntaxHighlighter? highlighter,
         DocumentPreviewContext? context = null,
         MarkdownImages? images = null,
-        Action<LinkTarget>? activate = null)
+        Action<LinkTarget>? activate = null,
+        Action<PictureSlot>? zoom = null)
     {
         _theme = theme;
         _highlighter = highlighter;
         _context = context;
         _images = images;
         _activate = activate;
+        _zoom = zoom;
         var text = (theme.Text as ISolidColorBrush)?.Color ?? Colors.White;
         _codeBackground = new ImmutableSolidColorBrush(Color.FromArgb(0x1A, text.R, text.G, text.B));
         _rule = new ImmutableSolidColorBrush(Color.FromArgb(0x38, text.R, text.G, text.B));
@@ -519,36 +522,61 @@ internal sealed class MarkdownRenderer
             placeholder.Inlines.Add(ExternalIcon(link, _link));
         }
 
+        // A picture linked to a picture (a screenshot wrapped in a link to
+        // itself) is looked at, not opened as a file.
+        var zoomable = link is null || IsPictureFile(link);
         var slot = new PictureSlot
         {
             Child = placeholder,
             HorizontalAlignment = HorizontalAlignment.Left,
             Margin = new Thickness(0, 2, 10, 2),
+            Alt = alt,
+            Zoomable = zoomable,
         };
 
-        if (link is not null)
+        if (!zoomable)
         {
-            Clickable(slot, link);
+            Clickable(slot, link!);
         }
-        else if (alt.Length > 0)
+        else
         {
-            ToolTip.SetTip(slot, alt);
+            if (alt.Length > 0)
+            {
+                ToolTip.SetTip(slot, alt);
+            }
+
+            OnClick(slot, () =>
+            {
+                if (slot.Picture is not null)
+                {
+                    _zoom?.Invoke(slot);
+                }
+            });
         }
 
         if (MarkdownLinks.Resolve(url, _context?.DocumentPath) is { Kind: LinkKind.File } source
             && _context is { } context
             && _images is { } images)
         {
+            slot.Source = source.Value;
+            var side = _side;
+
             // Taken here, on the UI thread: reaching for Dispatcher.UIThread
             // from the loading thread could adopt that thread as the UI one
             // while there is none (between headless tests).
             var ui = Dispatcher.UIThread;
-            images.LoadAsync(context, source.Value, _side).ContinueWith(
+            images.LoadAsync(context, source.Value, side).ContinueWith(
                 loaded => ui.Post(() =>
                 {
                     if (loaded.IsCompletedSuccessfully && loaded.Result is { } bitmap)
                     {
                         slot.Child = Fitted(bitmap, width, height);
+                        slot.Picture = bitmap;
+                        slot.LoadFull = () => MarkdownImages.LoadFullAsync(context, source.Value, side);
+                        if (zoomable && _zoom is not null)
+                        {
+                            slot.Cursor = HandCursor;
+                        }
                     }
                 }),
                 System.Threading.Tasks.TaskScheduler.Default);
@@ -556,6 +584,11 @@ internal sealed class MarkdownRenderer
 
         return slot;
     }
+
+    private static readonly string[] PictureExtensions = { ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico" };
+
+    private static bool IsPictureFile(LinkTarget link)
+        => link.Kind == LinkKind.File && PictureExtensions.Any(e => link.Value.EndsWith(e, StringComparison.OrdinalIgnoreCase));
 
     private static Image Fitted(Bitmap bitmap, double? width, double? height)
     {
@@ -571,12 +604,17 @@ internal sealed class MarkdownRenderer
         };
     }
 
-    // Press and release (not Tapped): inside running text the text block
-    // would otherwise take the press for a selection and the click with it.
     private void Clickable(Control control, LinkTarget link)
     {
         control.Cursor = HandCursor;
         ToolTip.SetTip(control, link.Display);
+        OnClick(control, () => _activate?.Invoke(link));
+    }
+
+    // Press and release (not Tapped): inside running text the text block
+    // would otherwise take the press for a selection and the click with it.
+    internal static void OnClick(Control control, Action click)
+    {
         var armed = false;
         control.PointerPressed += (_, e) =>
         {
@@ -587,7 +625,7 @@ internal sealed class MarkdownRenderer
         {
             if (armed && e.InitialPressMouseButton == MouseButton.Left && new Rect(control.Bounds.Size).Contains(e.GetPosition(control)))
             {
-                _activate?.Invoke(link);
+                click();
                 e.Handled = true;
             }
 
@@ -655,9 +693,21 @@ internal sealed class MarkdownRenderer
         return block;
     }
 
-    // Holds one picture (its placeholder until it loads).
-    private sealed class PictureSlot : Decorator
+    // Holds one picture (its placeholder until it loads); a zoomable one
+    // opens the lightbox once loaded.
+    internal sealed class PictureSlot : Decorator
     {
+        public string Alt { get; init; } = string.Empty;
+
+        public bool Zoomable { get; init; }
+
+        // The project path it loads from.
+        public string? Source { get; set; }
+
+        public Bitmap? Picture { get; set; }
+
+        // The full-size picture when the preview shows a scaled-down copy.
+        public Func<System.Threading.Tasks.Task<Bitmap?>>? LoadFull { get; set; }
     }
 
     // A click (not a drag-select) on a link's text follows it; hovering one
