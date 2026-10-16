@@ -37,8 +37,7 @@ Versions below are the ones pinned at the time of writing.
 | Skia, HarfBuzz and the libraries they bundle (SkiaSharp / HarfBuzzSharp native assets) | 3.119.4, 8.3.1.3 | BSD-3-Clause, MIT and others | Full notices: [`licenses/skiasharp-harfbuzzsharp-native.txt`](licenses/skiasharp-harfbuzzsharp-native.txt) |
 | [CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet) | 8.4.2 | MIT | Copyright (c) .NET Foundation and Contributors |
 | [Markdig](https://github.com/xoofx/markdig) | 1.4.0 | BSD-2-Clause | Copyright (c) 2016-2026, Alexandre Mutel. Full text: [`licenses/markdig.txt`](licenses/markdig.txt) |
-| [Material.Icons](https://github.com/SKProCH/Material.Icons), [Material.Icons.Avalonia](https://github.com/AvaloniaUtils/Material.Icons.Avalonia) | 3.0.2 | MIT | Copyright (c) 2021 SKProCH |
-| [Material Design Icons](https://github.com/Templarian/MaterialDesign) (icon data in Material.Icons) | - | Pictogrammers Free License (icons: Apache-2.0) | Pictogrammers. Full text: [`licenses/material-design-icons.txt`](licenses/material-design-icons.txt), [`licenses/apache-2.0.txt`](licenses/apache-2.0.txt) |
+| [Material Design Icons](https://github.com/Templarian/MaterialDesign) (the icon paths the GUI and the markdown preview draw, inlined) | - | Pictogrammers Free License (icons: Apache-2.0) | Pictogrammers. Full text: [`licenses/material-design-icons.txt`](licenses/material-design-icons.txt), [`licenses/apache-2.0.txt`](licenses/apache-2.0.txt) |
 | [MicroCom.Runtime](https://github.com/kekekeks/MicroCom) | 0.11.4 | MIT | Copyright (c) 2021 Nikita Tsukanov |
 | [Tmds.DBus.Protocol](https://github.com/tmds/Tmds.DBus) | 0.92.0 | MIT | Copyright 2006 Alp Toker; Copyright 2010 Other Contributors; Copyright 2016 Tom Deseyn |
 
