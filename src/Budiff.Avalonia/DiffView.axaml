@@ -5,6 +5,22 @@
              x:Name="Root"
              x:CompileBindings="False">
     <UserControl.Styles>
+        <!-- Line wrap (the root's "wrap" class): code wraps inside its pane and
+             rows grow taller; otherwise each code cell scrolls sideways with the
+             shared horizontal scrollbar. -->
+        <Style Selector="ScrollViewer.code">
+            <Setter Property="HorizontalScrollBarVisibility" Value="Hidden" />
+            <Setter Property="VerticalScrollBarVisibility" Value="Disabled" />
+        </Style>
+        <Style Selector="DockPanel.wrap ScrollViewer.code">
+            <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
+        </Style>
+        <Style Selector="TextBlock.code">
+            <Setter Property="TextWrapping" Value="NoWrap" />
+        </Style>
+        <Style Selector="DockPanel.wrap TextBlock.code">
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
         <!-- One commit-details tooltip (#54) for the blame cell of BOTH row
              layouts - two-pane and the single-pane whole-file view. -->
         <Style Selector="TextBlock.blameCell">
@@ -25,7 +41,8 @@
             </Setter>
         </Style>
     </UserControl.Styles>
-    <DockPanel Background="{Binding EditorBackgroundBrush, ElementName=Root}">
+    <DockPanel Background="{Binding EditorBackgroundBrush, ElementName=Root}"
+               Classes.wrap="{Binding WrapLines}">
         <!-- The title path lives in a star column and trims, so a long path or a
              narrow pane can never paint over the neighbors (a StackPanel here
              used to overflow across the checkbox). -->
@@ -42,6 +59,7 @@
                     <!-- The file name always keeps a readable minimum; past that the
                          right-side extras clip at the pane edge. -->
                     <ColumnDefinition Width="*" MinWidth="110" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
@@ -85,19 +103,27 @@
                           Content="Collapse unchanged"
                           FontSize="12.5"
                           Foreground="{Binding TextBrush, ElementName=Root}" />
-                <ContentPresenter Grid.Column="6"
+                <CheckBox Grid.Column="6"
+                          IsChecked="{Binding WrapLines}"
+                          VerticalAlignment="Center"
+                          Content="Wrap lines"
+                          FontSize="12.5"
+                          Foreground="{Binding TextBrush, ElementName=Root}" />
+                <ContentPresenter Grid.Column="7"
                                   Content="{Binding HeaderExtra, ElementName=Root}"
                                   VerticalAlignment="Center" />
             </Grid>
         </Border>
 
-        <ScrollBar DockPanel.Dock="Bottom"
-                   Orientation="Horizontal"
-                   IsVisible="{Binding HasHorizontalScroll}"
-                   Minimum="0"
-                   Maximum="{Binding MaxScroll}"
-                   ViewportSize="120"
-                   Value="{Binding HorizontalScroll, Mode=TwoWay}" />
+        <!-- The wrapper owns visibility: a ScrollBar drives its OWN IsVisible
+             from its Visibility, overriding a binding on it. -->
+        <Border DockPanel.Dock="Bottom" IsVisible="{Binding HasHorizontalScroll}">
+            <ScrollBar Orientation="Horizontal"
+                       Minimum="0"
+                       Maximum="{Binding MaxScroll}"
+                       ViewportSize="120"
+                       Value="{Binding HorizontalScroll, Mode=TwoWay}" />
+        </Border>
 
         <Grid>
             <ScrollViewer IsVisible="{Binding !IsPlaceholder}"
@@ -133,7 +159,7 @@
 
                                     <!-- Single-pane layout (#48): a wholly added/deleted diff
                                          shows only its populated side at full width. -->
-                                    <Grid Height="18" ColumnDefinitions="Auto,46,*">
+                                    <Grid MinHeight="18" ColumnDefinitions="Auto,46,*">
                                         <Grid.IsVisible>
                                             <MultiBinding Converter="{x:Static BoolConverters.And}">
                                                 <Binding Path="!IsGap" />
@@ -146,9 +172,9 @@
                                                    Text="{Binding Blame.Label}"
                                                    IsVisible="{Binding $parent[ItemsControl].DataContext.IsBlameVisible}"
                                                    TextTrimming="CharacterEllipsis"
-                                                   Padding="8,0,4,0"
+                                                   Padding="8,2,4,0"
                                                    FontSize="11"
-                                                   VerticalAlignment="Center"
+                                                   VerticalAlignment="Top"
                                                    Foreground="{Binding MutedTextBrush, ElementName=Root}" />
                                         <Border Grid.Column="1" Grid.ColumnSpan="2" Background="{Binding SingleBackground}">
                                             <Grid ColumnDefinitions="46,*">
@@ -160,11 +186,10 @@
                                                            FontSize="12.5"
                                                            Foreground="{Binding MutedTextBrush, ElementName=Root}" />
                                                 <ScrollViewer Grid.Column="1"
-                                                              HorizontalScrollBarVisibility="Hidden"
-                                                              VerticalScrollBarVisibility="Disabled"
+                                                              Classes="code"
                                                               Offset="{Binding $parent[ItemsControl].DataContext.HorizontalScroll, Converter={x:Static local:HScrollOffsetConverter.Instance}}">
                                                     <TextBlock local:DiffInlines.Runs="{Binding SingleRuns}"
-                                                               TextWrapping="NoWrap"
+                                                               Classes="code"
                                                                Padding="2,0,4,0"
                                                                FontFamily="Cascadia Code,Consolas,monospace"
                                                                FontSize="12.5"
@@ -176,7 +201,7 @@
 
                                     <!-- Columns: blame | old | funnel gutter | new; the
                                          halves are weighted by SplitRatio (drag the gutter). -->
-                                    <local:DiffSplitGrid Height="18"
+                                    <local:DiffSplitGrid MinHeight="18"
                                                          SplitRatio="{Binding $parent[ItemsControl].DataContext.SplitRatio}">
                                         <local:DiffSplitGrid.IsVisible>
                                             <MultiBinding Converter="{x:Static BoolConverters.And}">
@@ -193,9 +218,9 @@
                                                    Text="{Binding Blame.Label}"
                                                    IsVisible="{Binding $parent[ItemsControl].DataContext.IsBlameVisible}"
                                                    TextTrimming="CharacterEllipsis"
-                                                   Padding="8,0,4,0"
+                                                   Padding="8,2,4,0"
                                                    FontSize="11"
-                                                   VerticalAlignment="Center"
+                                                   VerticalAlignment="Top"
                                                    Foreground="{Binding MutedTextBrush, ElementName=Root}" />
                                         <Border Grid.Column="1"
                                                 Background="{Binding OldBackground}"
@@ -210,11 +235,10 @@
                                                            FontSize="12.5"
                                                            Foreground="{Binding MutedTextBrush, ElementName=Root}" />
                                                 <ScrollViewer Grid.Column="1"
-                                                              HorizontalScrollBarVisibility="Hidden"
-                                                              VerticalScrollBarVisibility="Disabled"
+                                                              Classes="code"
                                                               Offset="{Binding $parent[ItemsControl].DataContext.HorizontalScroll, Converter={x:Static local:HScrollOffsetConverter.Instance}}">
                                                     <TextBlock local:DiffInlines.Runs="{Binding OldRuns}"
-                                                               TextWrapping="NoWrap"
+                                                               Classes="code"
                                                                Padding="2,0,4,0"
                                                                FontFamily="Cascadia Code,Consolas,monospace"
                                                                FontSize="12.5"
@@ -233,11 +257,10 @@
                                                            FontSize="12.5"
                                                            Foreground="{Binding MutedTextBrush, ElementName=Root}" />
                                                 <ScrollViewer Grid.Column="1"
-                                                              HorizontalScrollBarVisibility="Hidden"
-                                                              VerticalScrollBarVisibility="Disabled"
+                                                              Classes="code"
                                                               Offset="{Binding $parent[ItemsControl].DataContext.HorizontalScroll, Converter={x:Static local:HScrollOffsetConverter.Instance}}">
                                                     <TextBlock local:DiffInlines.Runs="{Binding NewRuns}"
-                                                               TextWrapping="NoWrap"
+                                                               Classes="code"
                                                                Padding="2,0,4,0"
                                                                FontFamily="Cascadia Code,Consolas,monospace"
                                                                FontSize="12.5"

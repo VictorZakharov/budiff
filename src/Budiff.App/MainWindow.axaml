@@ -539,7 +539,7 @@
                         Padding="4,2"
                         ClipToBounds="True">
                     <!-- ONE compact control row (#47): chevron, Diff <file>, Base,
-                         Working tree, Collapse unchanged, float, close. The title and
+                         Working tree, Blame, Collapse unchanged, Wrap, float, close. The title and
                          the combo sit in shrinkable star columns (title keeps a 110px
                          floor, combo caps at 170 / floors at 90) so nothing overlaps
                          in a narrow pane. -->
@@ -550,6 +550,7 @@
                             <ColumnDefinition Width="*" MinWidth="110" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="1000*" MaxWidth="170" MinWidth="90" />
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
@@ -605,14 +606,21 @@
                                   FontSize="12"
                                   VerticalAlignment="Center"
                                   Foreground="{DynamicResource BudiffTextBrush}" />
+                        <CheckBox Grid.Column="8"
+                                  IsChecked="{Binding Diff.WrapLines, Mode=TwoWay}"
+                                  Content="Wrap"
+                                  FontSize="12"
+                                  VerticalAlignment="Center"
+                                  Foreground="{DynamicResource BudiffTextBrush}"
+                                  ToolTip.Tip="Wrap long lines inside each pane instead of scrolling sideways." />
 
-                        <Button Grid.Column="8" Classes="diffTool"
+                        <Button Grid.Column="9" Classes="diffTool"
                                 Click="OnFloatDiff"
                                 ToolTip.Tip="Open diff in its own window">
                             <materialIcons:MaterialIcon Kind="OpenInNew" Width="16" Height="16"
                                                         Foreground="{DynamicResource BudiffMutedTextBrush}" />
                         </Button>
-                        <Button Grid.Column="9" Classes="diffTool"
+                        <Button Grid.Column="10" Classes="diffTool"
                                 Command="{Binding CloseDiffCommand}"
                                 ToolTip.Tip="Close diff">
                             <materialIcons:MaterialIcon Kind="Close" Width="16" Height="16"

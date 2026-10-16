@@ -120,6 +120,13 @@ public sealed partial class DiffViewModel : ObservableObject
 
     public bool HasHorizontalScroll => MaxScroll > 0;
 
+    // Long lines wrap inside their pane (rows grow taller) instead of
+    // scrolling sideways. On by default, for every file type.
+    [ObservableProperty]
+    private bool _wrapLines = true;
+
+    partial void OnWrapLinesChanged(bool value) => UpdateMaxScroll();
+
     // The OLD side's share of the two-pane code width (what remains after the
     // blame column and the funnel gutter). Dragging the gutter sets it, a
     // double-click resets it; it carries over from file to file.
@@ -147,7 +154,7 @@ public sealed partial class DiffViewModel : ObservableObject
 
     private void UpdateMaxScroll()
     {
-        MaxScroll = _maxLineLength == 0 ? 0 : Math.Max(0, (_maxLineLength * CharWidth) - _visibleTextWidth);
+        MaxScroll = WrapLines || _maxLineLength == 0 ? 0 : Math.Max(0, (_maxLineLength * CharWidth) - _visibleTextWidth);
         if (HorizontalScroll > MaxScroll)
         {
             HorizontalScroll = MaxScroll;
