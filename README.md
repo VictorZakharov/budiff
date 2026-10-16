@@ -13,7 +13,7 @@
   </tr>
   <tr>
     <td width="50%"><a href="docs/screenshots/markdown.png"><img src="docs/screenshots/markdown.png" alt="A README rendered as a formatted preview, a changed paragraph shown old in red and new in green, with its screenshot"></a><br><b>Markdown preview</b> - rendered with its pictures, changed blocks marked</td>
-    <td width="50%"><a href="docs/screenshots/pull-request.png"><img src="docs/screenshots/pull-request.png" alt="Pull request mode: only the files a pull request changed, and one of them diffed from the merge-base"></a><br><b>Pull requests</b> - only what a PR changed, from its merge-base</td>
+    <td width="50%"><a href="docs/screenshots/pull-request.png"><img src="docs/screenshots/pull-request.png" alt="The pull request picker over the bird's-eye: the repository's pull requests with their state, branches, lines added and removed, and files changed"></a><br><b>Pull requests</b> - pick one (yours first, searchable) to see only what it changed</td>
   </tr>
 </table>
 

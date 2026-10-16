@@ -1,12 +1,16 @@
 using System;
+using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Threading;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
+using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using Avalonia.VisualTree;
 using Budiff.App;
 using Budiff.Avalonia.Markdown;
-using Budiff.Git;
 using Xunit;
 
 namespace Budiff.Avalonia.Tests;
@@ -20,6 +24,9 @@ public sealed class ReadmeGridScreenshotTests
 {
     private const int Width = 1440;
     private const int Height = 810;
+    private const int PickerWidth = 900;
+    private const int PickerHeight = 600;
+    private const int TitleBarHeight = 32;
 
     [AvaloniaFact]
     public void ReadmeGrid_FromARealRepository()
@@ -27,8 +34,6 @@ public sealed class ReadmeGridScreenshotTests
         var root = Environment.GetEnvironmentVariable("BUDIFF_README_REPO");
         Assert.SkipWhen(string.IsNullOrEmpty(root), "Set BUDIFF_README_REPO to a clone of VictorZakharov/last-stand.");
         var file = Environment.GetEnvironmentVariable("BUDIFF_README_DIFF") ?? "src/entities/viewModel.ts";
-        var prFile = Environment.GetEnvironmentVariable("BUDIFF_README_PR_DIFF");
-        var prNumber = int.Parse(Environment.GetEnvironmentVariable("BUDIFF_README_PR") ?? "254");
 
         var window = new MainWindow(root!, gitRoot: true) { Width = Width, Height = Height };
         window.Show();
@@ -59,23 +64,21 @@ public sealed class ReadmeGridScreenshotTests
         UiSnapshot.Capture(window, "readme-markdown");
         vm.Diff.ShowPreview = false;
 
-        // 4. A pull request: only its changes, the drill-in from merge-base to head.
-        var source = vm.Analysis.PullRequests!;
-        var pr = source.SearchAsync(new PullRequestQuery(null, PullRequestStateFilter.All, $"#{prNumber}"), null, 5, CancellationToken.None)
-            .GetAwaiter().GetResult().Items.Single(p => p.Number == prNumber);
-        vm.Analysis.PickPullRequest = () => System.Threading.Tasks.Task.FromResult<PullRequestInfo?>(pr);
-        vm.Analysis.SelectedPeriod = vm.Analysis.Periods.Single(p => p.IsPullRequest);
-        WaitUntil(() => vm.Analysis.AppliedPullRequest is not null && !vm.Analysis.IsScanning, "pull request", timeoutMs: 120_000);
-        var prRow = prFile is null
-            ? vm.Analysis.Roots.SelectMany(r => r.SelfAndDescendants()).Where(r => r.IsFile && !r.Name.EndsWith(".md", StringComparison.Ordinal)).OrderByDescending(r => r.RemovedText.Length).First()
-            : Row(vm, prFile);
-        foreach (var folder in vm.Analysis.Roots.SelectMany(r => r.SelfAndDescendants()).Where(r => !r.IsFile))
-        {
-            folder.IsExpanded = true;
-        }
-
-        Open(window, prRow.RelativePath);
-        UiSnapshot.Capture(window, "readme-pr");
+        // 4. The pull request picker - yours first, searchable - over the
+        // dimmed bird's-eye, the way it opens from the Period list.
+        vm.CloseDiffCommand.Execute(null);
+        UiSnapshot.Pump();
+        var backdrop = UiSnapshot.Capture(window, "readme-pr-backdrop");
+        var picker = new PullRequestPickerWindow(new PullRequestPickerViewModel(vm.Analysis.PullRequests!)) { Width = PickerWidth, Height = PickerHeight };
+        picker.Show();
+        var list = picker.ViewModel;
+        WaitUntil(() => !list.IsLoading && list.Items.Count > 0, "pull requests", timeoutMs: 60_000);
+        WaitUntil(() => !list.IsLoading && list.Items.All(i => i.Counts is not null || i.CountsUnavailable), "pull request counts", throwOnTimeout: false, timeoutMs: 60_000);
+        list.SelectedItem = list.Items[0];
+        UiSnapshot.Pump();
+        var dialog = UiSnapshot.Capture(picker, "readme-pr-picker");
+        picker.Close();
+        Composite(backdrop.Path, dialog.Path, picker.Title ?? string.Empty, "readme-pr");
         window.Close();
     }
 
@@ -95,6 +98,38 @@ public sealed class ReadmeGridScreenshotTests
         UiSnapshot.Pump();
         Thread.Sleep(200);
         UiSnapshot.Pump();
+    }
+
+    // Headless windows have no frame: draw the dialog's title bar, border and
+    // shadow over the dimmed main window, centered as CenterOwner would.
+    private static void Composite(string backdropPath, string dialogPath, string title, string name)
+    {
+        using var backdrop = new Bitmap(backdropPath);
+        using var dialog = new Bitmap(dialogPath);
+        var w = dialog.PixelSize.Width;
+        var h = dialog.PixelSize.Height + TitleBarHeight;
+        var x = Math.Round((Width - w) / 2.0);
+        var y = Math.Round((Height - h) / 2.0);
+        using var target = new RenderTargetBitmap(new PixelSize(Width, Height));
+        using (var dc = target.CreateDrawingContext())
+        {
+            dc.DrawImage(backdrop, new Rect(0, 0, Width, Height));
+            dc.FillRectangle(new SolidColorBrush(Color.FromArgb(0x99, 0, 0, 0)), new Rect(0, 0, Width, Height));
+            for (var i = 14; i >= 1; i--)
+            {
+                dc.DrawRectangle(new SolidColorBrush(Color.FromArgb(9, 0, 0, 0)), null, new Rect(x - i, y - i + 6, w + 2 * i, h + 2 * i), i, i);
+            }
+
+            dc.FillRectangle(new SolidColorBrush(Color.Parse("#2B2D31")), new Rect(x, y, w, TitleBarHeight));
+            var caption = new FormattedText(title, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, new Typeface(FontFamily.Default), 13, new SolidColorBrush(Color.Parse("#DFE1E5")));
+            dc.DrawText(caption, new Point(x + 14, y + Math.Round((TitleBarHeight - caption.Height) / 2)));
+            var close = new FormattedText("✕", CultureInfo.InvariantCulture, FlowDirection.LeftToRight, new Typeface(FontFamily.Default), 12, new SolidColorBrush(Color.Parse("#9DA0A8")));
+            dc.DrawText(close, new Point(x + w - 18 - close.Width, y + Math.Round((TitleBarHeight - close.Height) / 2)));
+            dc.DrawImage(dialog, new Rect(x, y + TitleBarHeight, w, dialog.PixelSize.Height));
+            dc.DrawRectangle(null, new Pen(new SolidColorBrush(Color.Parse("#4A4D55")), 1), new Rect(x - 0.5, y - 0.5, w + 1, h + 1));
+        }
+
+        target.Save(Path.Combine(UiSnapshot.OutputDir, name + ".png"));
     }
 
     private static bool PicturesSettled(MainWindow window)
