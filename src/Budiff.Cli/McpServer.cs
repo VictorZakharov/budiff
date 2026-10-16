@@ -604,8 +604,9 @@ internal sealed class McpServer
         return RepoPaths.Normalize(normalized);
     }
 
-    private static string Version()
-        => typeof(McpServer).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+    // The package version, without the source-revision suffix ("+<sha>").
+    internal static string Version()
+        => (typeof(McpServer).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion)?.Split('+')[0]
             ?? typeof(McpServer).Assembly.GetName().Version?.ToString()
             ?? "0.1.0";
 
