@@ -30,6 +30,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private (string FullPath, string RelativePath)? _openFile;
     private readonly Stack<(string FullPath, string RelativePath, DiffScrollSpot? Scroll)> _linkTrail = new();
 
+    // Where each file was last scrolled to: opening it again comes back there.
+    private readonly Dictionary<string, DiffScrollSpot> _scrollByFile = new();
+
     // Sentinel base option: resolves to the same boundary commit the windowed
     // churn diffs from, so the drill-in shows what the Added/Removed columns
     // counted. Default while an analysis window is active.
@@ -336,8 +339,18 @@ public sealed partial class MainWindowViewModel : ObservableObject
         IsTreeCollapsed = false;
         _openDiffFile = null;
         _openTarget = null;
+        RememberScroll();
         _openFile = null;
         ClearLinkTrail();
+    }
+
+    private void RememberScroll()
+    {
+        // Mid-load the spot still describes the file shown before.
+        if (_openFile is { } open && Diff is { IsLoading: false, IsPlaceholder: false, ScrollSpot: { } spot })
+        {
+            _scrollByFile[open.FullPath] = spot;
+        }
     }
 
     // Re-runs the open diff against the current base / working-tree choice.
@@ -688,11 +701,15 @@ public sealed partial class MainWindowViewModel : ObservableObject
             OpenLinkedFile);
     }
 
-    // restore: where to scroll once it shows (Back), else the top.
+    // restore: where to scroll once it shows (Back); else where this file was
+    // left, or - opened for the first time - its start. The file already open
+    // stays where it is.
     private void ShowFile(string fullPath, string relativePath, DiffScrollSpot? restore = null)
     {
+        var reopened = _openFile?.FullPath == fullPath;
+        RememberScroll();
         _openFile = (fullPath, relativePath);
-        Diff.RestoreScroll = restore;
+        Diff.RestoreScroll = restore ?? (reopened ? null : _scrollByFile.GetValueOrDefault(fullPath) ?? DiffScrollSpot.Start);
         if (_scope is null)
         {
             // No git: nothing to compare against - show the file as it is now.

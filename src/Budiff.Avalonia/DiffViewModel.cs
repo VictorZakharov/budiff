@@ -96,8 +96,58 @@ public sealed partial class DiffViewModel : ObservableObject
     public DiffScrollSpot? ScrollSpot { get; set; }
 
     // Set by a host before opening a file: once that file shows, the view
-    // scrolls back to this spot (Back after following a link).
+    // scrolls to this spot (the file's own last spot, or DiffScrollSpot.Start).
     public DiffScrollSpot? RestoreScroll { get; set; }
+
+    // The row (index into Rows) a file opened fresh starts at: past a
+    // TypeScript file's imports to its first useful line, but never past a
+    // change in a two-sided diff; 0 for everything else.
+    public int StartRow()
+    {
+        if (!ImportPreamble.AppliesTo(FileName.Length > 0 ? FileName : Extension) || _all.Count == 0)
+        {
+            return 0;
+        }
+
+        var lines = new string?[_all.Count];
+        for (var i = 0; i < _all.Count; i++)
+        {
+            lines[i] = _all[i].NewNo is not null ? _all[i].NewText : _all[i].OldText;
+        }
+
+        // A wholly added (or deleted) file is all change: skip its imports too.
+        var target = ImportPreamble.FirstUsefulLine(lines);
+        for (var i = 0; i < target && !IsSinglePane; i++)
+        {
+            if (_all[i].Kind != DiffKind.Unchanged)
+            {
+                target = i;
+                break;
+            }
+        }
+
+        if (target == 0)
+        {
+            return 0;
+        }
+
+        var index = new Dictionary<DiffRow, int>(ReferenceEqualityComparer.Instance);
+        for (var i = 0; i < _all.Count; i++)
+        {
+            index[_all[i]] = i;
+        }
+
+        for (var k = 0; k < Rows.Count; k++)
+        {
+            if (Rows[k].Source is { } source && index[source] >= target)
+            {
+                // Folded into the gap just above: start at the gap.
+                return k > 0 && Rows[k - 1] is { IsGap: true } gap && gap.GapRunStart <= target ? k - 1 : k;
+            }
+        }
+
+        return 0;
+    }
 
     // After following a preview link, Back (header button, Alt+Left, the
     // mouse's back button) returns; the host keeps the trail.

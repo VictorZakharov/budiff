@@ -184,7 +184,7 @@ public sealed class ScrollMemoryTests
         vm.Diff.ScrollSpot = new DiffScrollSpot(true, 750);
 
         vm.Diff.PreviewContext!.OpenFile("LICENSE");
-        Assert.Null(vm.Diff.RestoreScroll);
+        Assert.Equal(DiffScrollSpot.Start, vm.Diff.RestoreScroll);
 
         vm.Diff.GoBackCommand.Execute(null);
         Assert.Equal("README.md", vm.Diff.Title);
