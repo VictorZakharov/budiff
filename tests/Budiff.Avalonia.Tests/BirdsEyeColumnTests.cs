@@ -4,7 +4,6 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
 using Avalonia.Headless.XUnit;
 using Budiff.App;
 using Xunit;
@@ -24,6 +23,12 @@ public sealed class BirdsEyeColumnTests
     [Theory]
     [InlineData("Program.cs", AppIconKind.LanguageCsharp, true)]
     [InlineData("App.TSX", AppIconKind.React, true)]
+    [InlineData("models.ts", AppIconKind.LanguageTypescript, true)]
+    [InlineData("app.module.ts", AppIconKind.Puzzle, true)]
+    [InlineData("unit-ranges.spec.ts", AppIconKind.TestTube, true)]
+    [InlineData("Button.test.TSX", AppIconKind.TestTube, true)]
+    [InlineData("login.e2e-spec.ts", AppIconKind.TestTube, true)]
+    [InlineData(".spec.ts", AppIconKind.LanguageTypescript, true)]
     [InlineData("README.md", AppIconKind.LanguageMarkdown, true)]
     [InlineData("Budiff.App.csproj", AppIconKind.Xml, true)]
     [InlineData("Dockerfile", AppIconKind.Docker, true)]
@@ -131,31 +136,62 @@ public sealed class BirdsEyeColumnTests
 
         var button = window.FindControl<Button>("ColumnsButton")!;
         Assert.True(button.IsEffectivelyVisible);
-        button.Flyout!.ShowAt(button);
+        var menu = (MenuFlyout)button.Flyout!;
+        menu.ShowAt(button);
         UiSnapshot.Pump();
-        var items = OpenMenuItems(button.Flyout);
-        Assert.Equal(new[] { "Lines", "Code", "Blank", "Comment", "Files", "Commits", "Authors", "Size" }, items.Select(i => i.Header as string));
-        Assert.False(items.Single(i => (string?)i.Header == "Blank").IsChecked);
-        Assert.True(items.Single(i => (string?)i.Header == "Code").IsChecked);
+        var items = menu.Items.OfType<MenuItem>().ToList();
+        Assert.Equal(
+            new[] { "All columns", "Lines", "Code", "Blank", "Comment", "Files", "Commits", "Authors", "Size", "Reset to default" },
+            items.Select(i => i.Header as string));
+        MenuItem Item(string header) => items.Single(i => (string?)i.Header == header);
+        Assert.False(Item("Blank").IsChecked);
+        Assert.True(Item("Code").IsChecked);
+        Assert.False(Item("All columns").IsChecked);
+        Assert.True(Item("Reset to default").IsEffectivelyEnabled);
 
-        // Ticking it in the menu brings it back.
-        items.Single(i => (string?)i.Header == "Blank").IsChecked = true;
+        // Ticking it in the menu brings it back; now all are on.
+        Item("Blank").IsChecked = true;
         UiSnapshot.Pump();
         Assert.True(vm.ShowBlankColumn);
         Assert.True(blankHeader.IsEffectivelyVisible);
-        button.Flyout.Hide();
+        Assert.True(Item("All columns").IsChecked);
+        Assert.False(Item("Reset to default").IsEffectivelyEnabled);
+        menu.Hide();
+
+        // The header's right-click opens the same menu.
+        var header = (Border)blankHeader.Parent!.Parent!;
+        Assert.Same(menu, header.ContextFlyout);
         window.Close();
     }
 
-    // The open flyout's item containers. Only the flyout knows its popup
-    // (a protected property), hence the reflection.
-    private static System.Collections.Generic.List<MenuItem> OpenMenuItems(FlyoutBase flyout)
+    // The top check hides every optional column, then shows them all again;
+    // Reset goes back to the defaults and forgets the saved choices.
+    [AvaloniaFact]
+    public void AllColumns_And_Reset()
     {
-        var popup = (Popup?)typeof(PopupFlyoutBase)
-            .GetProperties(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
-            .Single(p => p.Name == "Popup" && p.PropertyType == typeof(Popup))
-            .GetValue(flyout);
-        return popup?.Child is ItemsControl presenter ? presenter.GetRealizedContainers().OfType<MenuItem>().ToList() : [];
+        var path = TempSettings();
+        var vm = new MainWindowViewModel(TempDir("budiff-all-"), gitRoot: false, AppSettings.Load(path));
+        Assert.True(vm.AllColumnsOn);
+        Assert.False(vm.ResetColumnsCommand.CanExecute(null));
+
+        vm.AllColumnsOn = false;
+        Assert.True(vm.ColumnOptions.All(o => !o.IsOn));
+        Assert.Equal(0, vm.FittingColumns);
+        Assert.Equal(8, AppSettings.Load(path).HiddenColumns.Count);
+        Assert.True(vm.ResetColumnsCommand.CanExecute(null));
+
+        vm.AllColumnsOn = true;
+        Assert.Equal(8, vm.FittingColumns);
+        Assert.Empty(AppSettings.Load(path).HiddenColumns);
+
+        Option(vm, "Files").IsOn = false;
+        Option(vm, "Size").IsOn = false;
+        Assert.False(vm.AllColumnsOn);
+        vm.ResetColumnsCommand.Execute(null);
+        Assert.True(vm.AllColumnsOn);
+        Assert.Equal(8, vm.FittingColumns);
+        Assert.Empty(AppSettings.Load(path).HiddenColumns);
+        Assert.False(vm.ResetColumnsCommand.CanExecute(null));
     }
 
     private static BirdsEyeColumnOption Option(MainWindowViewModel vm, string name) => vm.ColumnOptions.Single(o => o.Name == name);

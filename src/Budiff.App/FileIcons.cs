@@ -34,6 +34,12 @@ internal static class FileIcons
         ["Cargo.lock"] = Icon(AppIconKind.Lock, "#FFD54F"),
     };
 
+    // Compound suffixes, checked before the extension: an Angular / Nest
+    // module and a test file are not just more TypeScript.
+    private static readonly (string Suffix, FileIcon Icon)[] BySuffix = Suffixes(
+        (Icon(AppIconKind.Puzzle, "#E53935"), ["module"], ["ts", "js", "mjs"]),
+        (Icon(AppIconKind.TestTube, "#8BC34A"), ["spec", "test", "e2e-spec"], ["ts", "tsx", "js", "jsx", "mjs", "cjs"]));
+
     // Extensions without the dot.
     private static readonly Dictionary<string, FileIcon> ByExtension = Extensions(
         (Icon(AppIconKind.LanguageCsharp, "#A179DC"), ["cs", "csx"]),
@@ -86,11 +92,25 @@ internal static class FileIcons
             return ByName["Dockerfile"];
         }
 
+        foreach (var (suffix, icon) in BySuffix)
+        {
+            if (fileName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase) && fileName.Length > suffix.Length)
+            {
+                return icon;
+            }
+        }
+
         var extension = Path.GetExtension(fileName);
         return extension.Length > 1 && ByExtension.TryGetValue(extension[1..], out var typed) ? typed : Plain;
     }
 
     private static FileIcon Icon(AppIconKind kind, string color) => new(kind, new ImmutableSolidColorBrush(Color.Parse(color)));
+
+    // Every ".<kind>.<extension>" pairing, e.g. ".spec.ts".
+    private static (string, FileIcon)[] Suffixes(params (FileIcon Icon, string[] Kinds, string[] Extensions)[] groups)
+        => groups
+            .SelectMany(g => g.Kinds.SelectMany(kind => g.Extensions.Select(extension => ($".{kind}.{extension}", g.Icon))))
+            .ToArray();
 
     private static Dictionary<string, FileIcon> Extensions(params (FileIcon Icon, string[] Extensions)[] groups)
     {

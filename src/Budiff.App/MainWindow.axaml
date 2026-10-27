@@ -10,6 +10,24 @@
         MinWidth="1180"
         MinHeight="560"
         Title="{Binding WindowTitle}">
+    <Window.Resources>
+        <!-- The bird's-eye column chooser, shared by the header's right-click and
+             its corner button. Items follow MainWindowViewModel.ColumnOptions. -->
+        <MenuFlyout x:Key="ColumnMenu" Placement="BottomEdgeAlignedRight">
+            <MenuItem Header="All columns" ToggleType="CheckBox" IsChecked="{Binding AllColumnsOn, Mode=TwoWay}" />
+            <Separator />
+            <MenuItem Header="{Binding ColumnOptions[0].Name}" ToggleType="CheckBox" IsChecked="{Binding ColumnOptions[0].IsOn, Mode=TwoWay}" />
+            <MenuItem Header="{Binding ColumnOptions[1].Name}" ToggleType="CheckBox" IsChecked="{Binding ColumnOptions[1].IsOn, Mode=TwoWay}" />
+            <MenuItem Header="{Binding ColumnOptions[2].Name}" ToggleType="CheckBox" IsChecked="{Binding ColumnOptions[2].IsOn, Mode=TwoWay}" />
+            <MenuItem Header="{Binding ColumnOptions[3].Name}" ToggleType="CheckBox" IsChecked="{Binding ColumnOptions[3].IsOn, Mode=TwoWay}" />
+            <MenuItem Header="{Binding ColumnOptions[4].Name}" ToggleType="CheckBox" IsChecked="{Binding ColumnOptions[4].IsOn, Mode=TwoWay}" />
+            <MenuItem Header="{Binding ColumnOptions[5].Name}" ToggleType="CheckBox" IsChecked="{Binding ColumnOptions[5].IsOn, Mode=TwoWay}" />
+            <MenuItem Header="{Binding ColumnOptions[6].Name}" ToggleType="CheckBox" IsChecked="{Binding ColumnOptions[6].IsOn, Mode=TwoWay}" />
+            <MenuItem Header="{Binding ColumnOptions[7].Name}" ToggleType="CheckBox" IsChecked="{Binding ColumnOptions[7].IsOn, Mode=TwoWay}" />
+            <Separator />
+            <MenuItem Header="Reset to default" Command="{Binding ResetColumnsCommand}" />
+        </MenuFlyout>
+    </Window.Resources>
     <Window.Styles>
         <Style Selector="TreeViewItem">
             <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
@@ -108,12 +126,6 @@
             <Setter Property="FontSize" Value="11" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Foreground" Value="{DynamicResource BudiffMutedTextBrush}" />
-        </Style>
-        <!-- The bird's-eye column chooser: one check item per optional column. -->
-        <Style Selector="MenuFlyoutPresenter.columnMenu MenuItem">
-            <Setter Property="Header" Value="{Binding Name}" />
-            <Setter Property="ToggleType" Value="CheckBox" />
-            <Setter Property="IsChecked" Value="{Binding IsOn, Mode=TwoWay}" />
         </Style>
         <Style Selector="Button.diffTool">
             <Setter Property="Background" Value="Transparent" />
@@ -381,7 +393,7 @@
                             BorderThickness="0,0,0,1"
                             Padding="6,6,18,6">
                         <Border.ContextFlyout>
-                            <MenuFlyout ItemsSource="{Binding ColumnOptions}" FlyoutPresenterClasses="columnMenu" />
+                            <StaticResource ResourceKey="ColumnMenu" />
                         </Border.ContextFlyout>
                         <!-- Every column but Name / Added / Removed sits in an Auto column whose
                              fixed-width content can hide, collapsing the column to zero. Blank /
@@ -467,8 +479,7 @@
                                 <app:AppIcon Kind="Tune" Width="13" Height="13"
                                              Foreground="{DynamicResource BudiffMutedTextBrush}" />
                                 <Button.Flyout>
-                                    <MenuFlyout ItemsSource="{Binding ColumnOptions}" FlyoutPresenterClasses="columnMenu"
-                                                Placement="BottomEdgeAlignedRight" />
+                                    <StaticResource ResourceKey="ColumnMenu" />
                                 </Button.Flyout>
                             </Button>
                         </Grid>

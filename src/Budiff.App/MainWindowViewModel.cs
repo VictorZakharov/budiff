@@ -209,8 +209,55 @@ public sealed partial class MainWindowViewModel : ObservableObject
             _settings.HiddenColumns.Add(option.Name);
         }
 
+        if (_settingAllColumns)
+        {
+            return;
+        }
+
+        ColumnChoicesChanged();
+    }
+
+    private void ColumnChoicesChanged()
+    {
         _settings.Save();
         FitColumns(_rowWidth);
+        OnPropertyChanged(nameof(AllColumnsOn));
+        ResetColumnsCommand.NotifyCanExecuteChanged();
+    }
+
+    private bool _settingAllColumns;
+
+    // The chooser's top check: ticked while every column is on; clicking it
+    // turns them all on, or - when they already are - all off.
+    public bool AllColumnsOn
+    {
+        get => ColumnOptions.All(o => o.IsOn);
+        set => SetAllColumns(value);
+    }
+
+    // Back to the defaults (every column on), forgetting the saved choices.
+    [RelayCommand(CanExecute = nameof(CanResetColumns))]
+    private void ResetColumns() => SetAllColumns(true);
+
+    private bool CanResetColumns() => ColumnOptions.Any(o => !o.IsOn);
+
+    // One save and one refit for the lot, not one per column.
+    private void SetAllColumns(bool on)
+    {
+        _settingAllColumns = true;
+        try
+        {
+            foreach (var option in ColumnOptions)
+            {
+                option.IsOn = on;
+            }
+        }
+        finally
+        {
+            _settingAllColumns = false;
+        }
+
+        ColumnChoicesChanged();
     }
 
     // rowWidth = the header/row grid's width (pane minus its padding). The
