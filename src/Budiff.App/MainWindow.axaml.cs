@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.Linq;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
@@ -13,10 +14,8 @@ namespace Budiff.App;
 
 public sealed partial class MainWindow : Window
 {
-    // Narrowest docked bird's-eye: Name's minimum plus Added / Removed and the
-    // row padding (330) - the optional columns drop out before this is reached -
-    // rounded up to what the wrapped toolbar's first row needs.
-    private const double BirdsEyeMinWidth = 365;
+    // Left + right padding of the bird's-eye toolbar.
+    private const double ToolbarPadding = 20;
 
     // Horizontal padding around the header/row grids (6 left, 18 right).
     private const double TreeRowPadding = 24;
@@ -37,9 +36,15 @@ public sealed partial class MainWindow : Window
     }
 
     public MainWindow(string startPath, bool gitRoot)
+        : this(startPath, gitRoot, settings: null)
+    {
+    }
+
+    // settings: where the GUI's preferences live (null = the user's own).
+    internal MainWindow(string startPath, bool gitRoot, AppSettings? settings)
     {
         InitializeComponent();
-        _viewModel = new MainWindowViewModel(startPath, gitRoot);
+        _viewModel = new MainWindowViewModel(startPath, gitRoot, settings);
         DataContext = _viewModel;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         _viewModel.Analysis.PropertyChanged += OnAnalysisPropertyChanged;
@@ -58,6 +63,44 @@ public sealed partial class MainWindow : Window
         PeriodBar.SizeChanged += (_, _) => UpdateToolbarWrap();
         DiffToolbarGrid.LayoutUpdated += (_, _) => UpdateDiffOptionsOverflow();
         ApplyDiffLayout();
+        AddColumnMenuItems();
+    }
+
+    // A row's name tip shows only when the name is cut short by the ellipsis.
+    private void OnNameTipOpening(object? sender, CancelRoutedEventArgs e)
+    {
+        if (sender is TextBlock name && !name.TextLayout.TextLines.Any(line => line.HasCollapsed))
+        {
+            e.Cancel = true;
+        }
+    }
+
+    // One check item per column, between the column menu's two separators.
+    // Built here, wired to each option directly: indexer bindings
+    // (ColumnOptions[i].IsOn) came up empty in the NativeAOT build.
+    private void AddColumnMenuItems()
+    {
+        var menu = (MenuFlyout)Resources["ColumnMenu"]!;
+        var at = 2;
+        foreach (var option in _viewModel.ColumnOptions)
+        {
+            var item = new MenuItem { Header = option.Name, ToggleType = MenuItemToggleType.CheckBox, IsChecked = option.IsOn, StaysOpenOnClick = true };
+            item.PropertyChanged += (_, e) =>
+            {
+                if (e.Property == MenuItem.IsCheckedProperty)
+                {
+                    option.IsOn = item.IsChecked;
+                }
+            };
+            option.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(BirdsEyeColumnOption.IsOn))
+                {
+                    item.IsChecked = option.IsOn;
+                }
+            };
+            menu.Items.Insert(at++, item);
+        }
     }
 
     // In a narrow docked pane the toggles run past the edge: a toggle that does
@@ -96,8 +139,8 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    // A narrow bird's-eye moves the filter box and Reset under the grouping /
-    // period controls instead of squeezing the filter to nothing.
+    // A narrow bird's-eye moves the filter box under the grouping / period
+    // controls instead of squeezing it to nothing.
     private void UpdateToolbarWrap()
     {
         var available = ToolbarGrid.Bounds.Width;
@@ -106,21 +149,86 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        // PeriodBar's desired width already includes its left margin.
-        var oneRow = GroupingSwitch.DesiredSize.Width + PeriodBar.DesiredSize.Width + ToolbarGap
-            + FilterComfortWidth + FilterRow.ColumnSpacing + ResetButton.DesiredSize.Width;
-        var wrap = available < oneRow;
-        var row = wrap ? 1 : 0;
-        if (Grid.GetRow(FilterRow) == row)
+        if (GroupingSwitch.IsVisible && GroupingSwitch.DesiredSize.Width > 0)
         {
-            return;
+            _groupingSwitchWidth = GroupingSwitch.DesiredSize.Width;
         }
 
-        Grid.SetRow(FilterRow, row);
-        Grid.SetColumn(FilterRow, wrap ? 0 : 2);
-        Grid.SetColumnSpan(FilterRow, wrap ? 4 : 1);
-        FilterRow.Margin = new Thickness(wrap ? 0 : ToolbarGap, 0, 0, 0);
-        ToolbarGrid.RowSpacing = wrap ? 8 : 0;
+        // The period controls at the picker's full width, without the label
+        // and the wrap-dependent left margin.
+        var periodExtra = PeriodWithoutLabel() - PeriodBox.Width;
+        var period = periodExtra + PeriodBoxWidth;
+        var label = _periodLabelWidth + PeriodBar.Spacing;
+        var oneRow = _groupingSwitchWidth + ToolbarGap + label + period + ToolbarGap + FilterComfortWidth;
+
+        // Compact once the filter no longer fits on the first row: the filter
+        // wraps under it, the Folders / Projects switch becomes a drop-down and
+        // the "Period" label goes (the picker says it). The drop-down and the
+        // picker share a row, the picker narrowing down to its minimum; below
+        // that, the picker wraps too.
+        var compact = available < oneRow;
+        var beside = available - GroupingBox.Width - ToolbarGap - periodExtra;
+        var periodWraps = compact ? beside < PeriodBoxMinWidth : available < _groupingSwitchWidth + ToolbarGap + label + period;
+        PeriodBox.Width = compact && !periodWraps ? Math.Min(PeriodBoxWidth, Math.Floor(beside)) : PeriodBoxWidth;
+
+        var filterRow = !compact ? 0 : periodWraps ? 2 : 1;
+        var periodRow = periodWraps ? 1 : 0;
+        PeriodLabel.IsVisible = !compact;
+        GroupingSwitch.IsVisible = !compact;
+        GroupingBox.IsVisible = compact;
+        Grid.SetRow(PeriodBar, periodRow);
+        Grid.SetColumn(PeriodBar, periodWraps ? 0 : 1);
+        Grid.SetColumnSpan(PeriodBar, periodWraps ? 4 : 1);
+        PeriodBar.Margin = new Thickness(periodWraps ? 0 : ToolbarGap, 0, 0, 0);
+
+        Grid.SetRow(FilterRow, filterRow);
+        Grid.SetColumn(FilterRow, compact ? 0 : 2);
+        Grid.SetColumnSpan(FilterRow, compact ? 4 : 1);
+        FilterRow.Margin = new Thickness(compact ? 0 : ToolbarGap, 0, 0, 0);
+
+        // Only as many rows as are used: RowSpacing counts empty rows too.
+        var rows = Math.Max(filterRow, periodRow) + 1;
+        if (ToolbarGrid.RowDefinitions.Count != rows)
+        {
+            ToolbarGrid.RowDefinitions = new RowDefinitions(string.Join(",", Enumerable.Repeat("Auto", rows)));
+        }
+
+        ToolbarGrid.RowSpacing = rows > 1 ? 8 : 0;
+    }
+
+    // The period picker's width, and the narrowest it gets beside the
+    // compact toolbar's grouping drop-down.
+    private const double PeriodBoxWidth = 132;
+    private const double PeriodBoxMinWidth = 112;
+
+    // The "Period" label's and the Folders / Projects switch's widths,
+    // remembered from when they last showed.
+    private double _periodLabelWidth = 40;
+    private double _groupingSwitchWidth = 143;
+
+    // The period controls' width without the label and the left margin.
+    private double PeriodWithoutLabel()
+    {
+        var width = PeriodBar.DesiredSize.Width - PeriodBar.Margin.Left;
+        if (PeriodLabel.IsVisible && PeriodLabel.DesiredSize.Width > 0)
+        {
+            _periodLabelWidth = PeriodLabel.DesiredSize.Width;
+            width -= _periodLabelWidth + PeriodBar.Spacing;
+        }
+
+        return width;
+    }
+
+    // Narrowest docked bird's-eye: Name's minimum, the Added / Removed columns
+    // when on and the row padding (the optional columns drop out before this
+    // is reached), or the fully wrapped toolbar's widest row if that is wider.
+    private double BirdsEyeMinWidth()
+    {
+        var tree = MainWindowViewModel.NameMinWidth + TreeRowPadding
+            + (_viewModel.ShowAddedColumn ? MainWindowViewModel.ChurnColumnWidth : 0)
+            + (_viewModel.ShowRemovedColumn ? MainWindowViewModel.ChurnColumnWidth : 0);
+        var toolbar = ToolbarPadding + Math.Max(GroupingBox.Width, PeriodWithoutLabel() - PeriodBox.Width + PeriodBoxWidth);
+        return Math.Ceiling(Math.Max(tree, toolbar));
     }
 
     internal MainWindowViewModel ViewModel => _viewModel;
@@ -150,6 +258,13 @@ public sealed partial class MainWindow : Window
         if (e.PropertyName is nameof(MainWindowViewModel.ShowWideColumns))
         {
             FitColumns();
+        }
+
+        // Fewer always-on columns let the docked bird's-eye go narrower.
+        if (e.PropertyName is nameof(MainWindowViewModel.ShowAddedColumn)
+            or nameof(MainWindowViewModel.ShowRemovedColumn))
+        {
+            ClampDockedDiff();
         }
     }
 
@@ -210,7 +325,7 @@ public sealed partial class MainWindow : Window
             }
             else
             {
-                cols[0].MinWidth = BirdsEyeMinWidth;
+                cols[0].MinWidth = BirdsEyeMinWidth();
                 cols[0].Width = new GridLength(1, GridUnitType.Star);
                 cols[1].Width = new GridLength(5);
                 cols[2].MinWidth = 360;
@@ -252,7 +367,7 @@ public sealed partial class MainWindow : Window
         }
 
         var splitter = cols[1].Width.Value;
-        var treeMin = Math.Clamp(available - 360 - splitter, 0, BirdsEyeMinWidth);
+        var treeMin = Math.Clamp(available - 360 - splitter, 0, BirdsEyeMinWidth());
         var diffMin = Math.Clamp(available - treeMin - splitter, 0, 360);
         cols[0].MinWidth = treeMin;
         cols[2].MinWidth = diffMin;

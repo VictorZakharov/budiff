@@ -126,6 +126,9 @@ public sealed partial class CodeAnalysisRow : ObservableObject
 
     public AppIconKind Icon { get; init; }
 
+    // A file type's own colour; null keeps the muted text colour.
+    public IBrush? IconTint { get; init; }
+
     public string LinesText { get; init; } = string.Empty;
 
     public string CodeText { get; init; } = string.Empty;
@@ -145,6 +148,23 @@ public sealed partial class CodeAnalysisRow : ObservableObject
     public string AuthorsText { get; init; } = string.Empty;
 
     public double BarFraction { get; init; }
+
+    // What this row shows in a bird's-eye number column (1 = Lines ... 9 =
+    // Authors): the name runs on over empty ones and up to the first number
+    // (NameExtent).
+    internal string CellText(int column) => column switch
+    {
+        1 => LinesText,
+        2 => CodeText,
+        3 => BlankText,
+        4 => CommentText,
+        5 => FilesText,
+        6 => AddedText,
+        7 => RemovedText,
+        8 => CommitsText,
+        9 => AuthorsText,
+        _ => string.Empty,
+    };
 
     public ObservableCollection<CodeAnalysisRow> Children { get; } = new();
 
@@ -227,19 +247,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     private bool _isScanning;
 
     [ObservableProperty]
-    private string _summaryHead = "Scanning...";
-
-    [ObservableProperty]
-    private string _summaryCode = string.Empty;
-
-    [ObservableProperty]
-    private string _summaryBlank = string.Empty;
-
-    [ObservableProperty]
-    private string _summaryComment = string.Empty;
-
-    [ObservableProperty]
-    private string _summaryTail = string.Empty;
+    private string _summaryText = "Scanning...";
 
     [ObservableProperty]
     private bool _gitAvailable;
@@ -435,6 +443,15 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         Rebuild();
     }
 
+    // Anything ResetView would change: the filter box's X shows while true.
+    public bool CanResetView =>
+        !string.IsNullOrEmpty(SearchText)
+        || SortKey != AnalysisSortKey.Lines || SortAscending
+        || SelectedGrouping != Groupings[0]
+        || SelectedPeriod != DefaultPeriod
+        || Extensions.Any(e => !e.Included)
+        || Authors.Any(a => !a.Included);
+
     [RelayCommand]
     private void ResetView()
     {
@@ -523,6 +540,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
     private void Rebuild()
     {
+        OnPropertyChanged(nameof(CanResetView));
         if (_suspendRebuild || !_ready || _scan is null)
         {
             return;
@@ -604,6 +622,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             IsFile = node.IsFile,
             FullPath = node.IsFile ? Path.Combine(_root, node.RelativePath.Replace('/', Path.DirectorySeparatorChar)) : null,
             Icon = IconFor(node),
+            IconTint = node.IsFile ? FileIcons.For(node.Name).Tint : null,
             LinesText = node.IsBinary ? "binary" : N(node.Lines.Total),
             CodeText = node.IsBinary ? string.Empty : N(node.Lines.Code),
             BlankText = node.IsBinary ? string.Empty : N(node.Lines.Blank),
@@ -626,45 +645,33 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         return row;
     }
 
+    // Just the counts: files, lines, and (with git) commits and authors.
     private void SetSummary(AnalysisNode root)
     {
-        SummaryHead = $"{root.FileCount:N0} files - {N(root.Lines.Total)} lines (";
-        SummaryCode = $"{N(root.Lines.Code)} code";
-        SummaryBlank = $" / {N(root.Lines.Blank)} blank";
-        SummaryComment = $" / {N(root.Lines.Comment)} comment";
-
-        var tail = ")";
+        var parts = new List<string> { Count(root.FileCount, "file"), Count(root.Lines.Total, "line") };
         if (_history is not null)
         {
-            if (_appliedPullRequest is { } pr)
-            {
-                tail += $"  -  +{N(root.Added)} / -{N(root.Removed)} in PR #{pr.PullRequest.Number}";
-            }
-            else if (Historical)
-            {
-                tail += $"  -  +{N(root.Added)} / -{N(root.Removed)} in window";
-            }
-
-            tail += $"  -  {root.CommitCount:N0} commits, {root.AuthorCount:N0} authors";
+            parts.Add(Count(root.CommitCount, "commit"));
+            parts.Add(Count(root.AuthorCount, "author"));
         }
         else if (!GitAvailable)
         {
-            tail += "  -  no git repository";
+            parts.Add("no\u00A0git\u00A0repository");
         }
 
         if (_scan?.Truncated == true)
         {
-            tail += "  -  list capped";
+            parts.Add("list\u00A0capped");
         }
 
-        SummaryTail = tail;
+        SummaryText = string.Join(" - ", parts);
     }
 
-    private void ShowMessage(string message)
-    {
-        SummaryHead = message;
-        SummaryCode = SummaryBlank = SummaryComment = SummaryTail = string.Empty;
-    }
+    // A no-break space keeps a number and its word on one line when the
+    // summary wraps.
+    private static string Count(long value, string noun) => $"{N(value)}\u00A0{noun}{(value == 1 ? string.Empty : "s")}";
+
+    private void ShowMessage(string message) => SummaryText = message;
 
     private void SetAllExtensions(bool included) => SetAllFilterItems(Extensions, included, UpdateExtensionToggleState);
 
@@ -701,6 +708,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
     partial void OnSearchTextChanged(string value)
     {
+        OnPropertyChanged(nameof(CanResetView));
         if (_ready && !_suspendRebuild)
         {
             ApplySearch();
@@ -724,6 +732,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
     partial void OnSelectedPeriodChanged(PeriodOption value)
     {
+        OnPropertyChanged(nameof(CanResetView));
         IsCustomPeriod = value.IsCustom;
         IsPullRequestPeriod = value.IsPullRequest;
         if (value.IsPullRequest)
@@ -926,7 +935,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         AnalysisNodeKind.Project => AppIconKind.Package,
         AnalysisNodeKind.Ungrouped => AppIconKind.FolderQuestionOutline,
         AnalysisNodeKind.Folder => AppIconKind.FolderOutline,
-        AnalysisNodeKind.File => AppIconKind.FileOutline,
+        AnalysisNodeKind.File => FileIcons.For(node.Name).Kind,
         _ => AppIconKind.FolderOpenOutline,
     };
 

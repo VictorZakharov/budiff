@@ -36,9 +36,17 @@ public sealed partial class MainWindowViewModel : ObservableObject
     internal const string PeriodStartId = "(period-start)";
 
     public MainWindowViewModel(string startPath, bool gitRoot)
+        : this(startPath, gitRoot, settings: null)
+    {
+    }
+
+    internal MainWindowViewModel(string startPath, bool gitRoot, AppSettings? settings)
     {
         _startPath = startPath;
         _gitRoot = gitRoot;
+        _settings = settings ?? AppSettings.Load(AppSettings.DefaultPath);
+        ColumnOptions = BuildColumnOptions();
+        FitColumns(_rowWidth);
         var highlighter = new TextMateSyntaxHighlighter();
         Diff.SyntaxHighlighter = highlighter;
         Diff.Previewer = new MarkdownPreviewer(highlighter);
@@ -126,17 +134,26 @@ public sealed partial class MainWindowViewModel : ObservableObject
     // Full bird's-eye (all columns + filter panes) whenever the docked diff is away.
     public bool ShowWideColumns => !ShowDiffPane;
 
-    // Bird's-eye column widths (header cell = row cell + its margins). Name,
-    // Added and Removed always show; the optional ones drop as the pane
-    // narrows, from the end of this keep order: Lines, Code, Commits, Authors,
-    // then the wide-only Blank, Comment, Files, Size.
+    // Bird's-eye column widths (header cell = row cell + its margins). Name
+    // always shows, and Added / Removed unless turned off in the chooser; the
+    // optional ones drop as the pane narrows, from the end of this keep order:
+    // Lines, Code, Commits, Authors, then the wide-only Blank, Comment, Files,
+    // Size.
     internal const double NameMinWidth = 150;
-    internal const double AddedRemovedWidth = 78 + 78;
+    internal const double ChurnColumnWidth = 78;
+    internal const double AddedRemovedWidth = ChurnColumnWidth * 2;
+
+    // Chooser indexes of Added / Removed, after the optional columns.
+    private const int AddedIndex = 8;
+    private const int RemovedIndex = 9;
     internal static readonly double[] OptionalColumnWidths = { 72, 72, 64, 60, 64, 76, 54, 90 };
     private const int DockedColumnCount = 4;
 
-    // How many optional columns fit, counted along the keep order.
+    // The optional columns showing (bit i = OptionalColumnWidths[i]): the ones
+    // the user keeps on that also fit, counted along the keep order.
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(FittingColumns))]
+    [NotifyPropertyChangedFor(nameof(VisibleCells))]
     [NotifyPropertyChangedFor(nameof(ShowLinesColumn))]
     [NotifyPropertyChangedFor(nameof(ShowCodeColumn))]
     [NotifyPropertyChangedFor(nameof(ShowCommitsColumn))]
@@ -145,38 +162,167 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(ShowCommentColumn))]
     [NotifyPropertyChangedFor(nameof(ShowFilesColumn))]
     [NotifyPropertyChangedFor(nameof(ShowSizeColumn))]
-    private int _fittingColumns = 8;
+    private int _shownColumns = (1 << 8) - 1;
 
-    public bool ShowLinesColumn => FittingColumns >= 1;
+    // How many optional columns show.
+    public int FittingColumns => System.Numerics.BitOperations.PopCount((uint)ShownColumns);
 
-    public bool ShowCodeColumn => FittingColumns >= 2;
+    public bool ShowLinesColumn => IsShown(0);
 
-    public bool ShowCommitsColumn => FittingColumns >= 3;
+    public bool ShowCodeColumn => IsShown(1);
 
-    public bool ShowAuthorsColumn => FittingColumns >= 4;
+    public bool ShowCommitsColumn => IsShown(2);
 
-    public bool ShowBlankColumn => FittingColumns >= 5;
+    public bool ShowAuthorsColumn => IsShown(3);
 
-    public bool ShowCommentColumn => FittingColumns >= 6;
+    public bool ShowBlankColumn => IsShown(4);
 
-    public bool ShowFilesColumn => FittingColumns >= 7;
+    public bool ShowCommentColumn => IsShown(5);
 
-    public bool ShowSizeColumn => FittingColumns >= 8;
+    public bool ShowFilesColumn => IsShown(6);
 
-    // rowWidth = the header/row grid's width (pane minus its padding). The
-    // wide-only columns never show next to the docked diff.
-    public void FitColumns(double rowWidth)
+    public bool ShowSizeColumn => IsShown(7);
+
+    private bool IsShown(int column) => (ShownColumns & (1 << column)) != 0;
+
+    public bool ShowAddedColumn => IsOn(AddedIndex);
+
+    public bool ShowRemovedColumn => IsOn(RemovedIndex);
+
+    // The bird's-eye grid columns showing, bit i = grid column i (1 = Lines
+    // ... 10 = Size); a row's name runs on over the empty ones.
+    public int VisibleCells =>
+        (ShowLinesColumn ? 1 << 1 : 0) | (ShowCodeColumn ? 1 << 2 : 0) | (ShowBlankColumn ? 1 << 3 : 0)
+        | (ShowCommentColumn ? 1 << 4 : 0) | (ShowFilesColumn ? 1 << 5 : 0) | (ShowAddedColumn ? 1 << 6 : 0)
+        | (ShowRemovedColumn ? 1 << 7 : 0) | (ShowCommitsColumn ? 1 << 8 : 0) | (ShowAuthorsColumn ? 1 << 9 : 0)
+        | (ShowSizeColumn ? 1 << 10 : 0);
+
+    // The column chooser (right-click the bird's-eye header), in on-screen
+    // order: every column but Name. Turned-off columns are remembered across runs (AppSettings).
+    public IReadOnlyList<BirdsEyeColumnOption> ColumnOptions { get; }
+
+    private readonly AppSettings _settings;
+    private double _rowWidth = double.PositiveInfinity;
+
+    private IReadOnlyList<BirdsEyeColumnOption> BuildColumnOptions()
     {
-        var candidates = ShowWideColumns ? OptionalColumnWidths.Length : DockedColumnCount;
-        var spare = rowWidth - NameMinWidth - AddedRemovedWidth;
-        var fitting = 0;
-        while (fitting < candidates && spare >= OptionalColumnWidths[fitting])
+        // (setting name, keep-order index), as the header lays them out.
+        (string Name, int Index)[] columns =
         {
-            spare -= OptionalColumnWidths[fitting];
-            fitting++;
+            ("Lines", 0), ("Code", 1), ("Blank", 4), ("Comment", 5), ("Files", 6),
+            ("Added", AddedIndex), ("Removed", RemovedIndex),
+            ("Commits", 2), ("Authors", 3), ("Size", 7),
+        };
+        return columns
+            .Select(c => new BirdsEyeColumnOption(c.Name, c.Index, !_settings.HiddenColumns.Contains(c.Name), OnColumnOptionChanged))
+            .ToList();
+    }
+
+    private void OnColumnOptionChanged(BirdsEyeColumnOption option)
+    {
+        if (option.IsOn)
+        {
+            _settings.HiddenColumns.Remove(option.Name);
+        }
+        else
+        {
+            _settings.HiddenColumns.Add(option.Name);
         }
 
-        FittingColumns = fitting;
+        if (_settingAllColumns)
+        {
+            return;
+        }
+
+        ColumnChoicesChanged();
+    }
+
+    private void ColumnChoicesChanged()
+    {
+        _settings.Save();
+        FitColumns(_rowWidth);
+        OnPropertyChanged(nameof(ShowAddedColumn));
+        OnPropertyChanged(nameof(ShowRemovedColumn));
+        OnPropertyChanged(nameof(VisibleCells));
+        OnPropertyChanged(nameof(AllColumnsOn));
+        ResetColumnsCommand.NotifyCanExecuteChanged();
+    }
+
+    private bool _settingAllColumns;
+
+    // The chooser's top check: ticked while every column is on; clicking it
+    // turns them all on, or - when they already are - all off.
+    public bool AllColumnsOn
+    {
+        get => ColumnOptions.All(o => o.IsOn);
+        set => SetAllColumns(value);
+    }
+
+    // Back to the defaults (every column on), forgetting the saved choices.
+    [RelayCommand(CanExecute = nameof(CanResetColumns))]
+    private void ResetColumns() => SetAllColumns(true);
+
+    private bool CanResetColumns() => ColumnOptions.Any(o => !o.IsOn);
+
+    // One save and one refit for the lot, not one per column.
+    private void SetAllColumns(bool on)
+    {
+        _settingAllColumns = true;
+        try
+        {
+            foreach (var option in ColumnOptions)
+            {
+                option.IsOn = on;
+            }
+        }
+        finally
+        {
+            _settingAllColumns = false;
+        }
+
+        ColumnChoicesChanged();
+    }
+
+    // rowWidth = the header/row grid's width (pane minus its padding). The
+    // wide-only columns never show next to the docked diff; columns the user
+    // turned off take no room, so the next ones in the keep order move up.
+    public void FitColumns(double rowWidth)
+    {
+        _rowWidth = rowWidth;
+        var candidates = ShowWideColumns ? OptionalColumnWidths.Length : DockedColumnCount;
+        var spare = rowWidth - NameMinWidth
+            - (ShowAddedColumn ? ChurnColumnWidth : 0) - (ShowRemovedColumn ? ChurnColumnWidth : 0);
+        var shown = 0;
+        for (var column = 0; column < candidates; column++)
+        {
+            if (!IsOn(column))
+            {
+                continue;
+            }
+
+            if (spare < OptionalColumnWidths[column])
+            {
+                break;
+            }
+
+            spare -= OptionalColumnWidths[column];
+            shown |= 1 << column;
+        }
+
+        ShownColumns = shown;
+    }
+
+    private bool IsOn(int column)
+    {
+        foreach (var option in ColumnOptions)
+        {
+            if (option.Index == column)
+            {
+                return option.IsOn;
+            }
+        }
+
+        return true;
     }
 
     public AppIconKind TreeToggleIcon => IsTreeCollapsed ? AppIconKind.ChevronDoubleRight : AppIconKind.ChevronDoubleLeft;
@@ -593,4 +739,29 @@ public sealed partial class MainWindowViewModel : ObservableObject
         var rel = Path.GetRelativePath(repositoryRoot, fullPath);
         return rel == "." ? string.Empty : rel.Replace('\\', '/');
     }
+}
+
+// One entry of the bird's-eye column chooser.
+public sealed partial class BirdsEyeColumnOption : ObservableObject
+{
+    private readonly Action<BirdsEyeColumnOption> _changed;
+
+    internal BirdsEyeColumnOption(string name, int index, bool isOn, Action<BirdsEyeColumnOption> changed)
+    {
+        Name = name;
+        Index = index;
+        _isOn = isOn;
+        _changed = changed;
+    }
+
+    public string Name { get; }
+
+    // Its place in MainWindowViewModel.OptionalColumnWidths (the keep order),
+    // or AddedIndex / RemovedIndex.
+    internal int Index { get; }
+
+    [ObservableProperty]
+    private bool _isOn;
+
+    partial void OnIsOnChanged(bool value) => _changed(this);
 }

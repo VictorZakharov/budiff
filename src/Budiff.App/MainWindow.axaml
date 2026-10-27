@@ -10,6 +10,18 @@
         MinWidth="1180"
         MinHeight="560"
         Title="{Binding WindowTitle}">
+    <Window.Resources>
+        <!-- The bird's-eye column chooser, shared by the header's right-click and
+             its corner button. One check item per column goes between the
+             separators, added in code (MainWindow.AddColumnMenuItems). The checks
+             keep the menu open to pick several; Reset closes it. -->
+        <MenuFlyout x:Key="ColumnMenu" Placement="BottomEdgeAlignedRight">
+            <MenuItem Header="All columns" ToggleType="CheckBox" StaysOpenOnClick="True" IsChecked="{Binding AllColumnsOn, Mode=TwoWay}" />
+            <Separator />
+            <Separator />
+            <MenuItem Header="Reset to default" Command="{Binding ResetColumnsCommand}" />
+        </MenuFlyout>
+    </Window.Resources>
     <Window.Styles>
         <Style Selector="TreeViewItem">
             <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
@@ -188,8 +200,9 @@
                         ClipToBounds="True">
                     <StackPanel Spacing="8">
                         <!-- When the filter box would get too narrow, it wraps (with
-                             Reset) to a second row (MainWindow.UpdateToolbarWrap). Past
-                             that the toolbar clips at the pane edge instead of controls
+                             Reset) to a second row; narrower still, the period controls
+                             wrap under the grouping switch too (MainWindow.UpdateToolbarWrap).
+                             Past that the toolbar clips at the pane edge instead of controls
                              painting over each other. Gaps are left margins, not
                              ColumnSpacing, so empty columns cost no width. -->
                         <Grid x:Name="ToolbarGrid" RowDefinitions="Auto,Auto">
@@ -220,9 +233,24 @@
                                             CommandParameter="{Binding Analysis.Groupings[1]}" />
                                 </StackPanel>
                             </Border>
+                            <!-- The compact toolbar's stand-in for the switch: a drop-down,
+                                 so the period picker still fits beside it. -->
+                            <ComboBox x:Name="GroupingBox"
+                                      Width="100"
+                                      IsVisible="False"
+                                      VerticalAlignment="Center"
+                                      ItemsSource="{Binding Analysis.Groupings}"
+                                      SelectedItem="{Binding Analysis.SelectedGrouping, Mode=TwoWay}">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Label}" />
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
 
                             <StackPanel Grid.Column="1" x:Name="PeriodBar" Margin="10,0,0,0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                <TextBlock Text="Period" Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
+                                <!-- Hidden in the compact (wrapped) toolbar: the picker says it. -->
+                                <TextBlock x:Name="PeriodLabel" Text="Period" Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
                                 <!-- Picking "Pull request..." again reopens the picker. -->
                                 <app:RepickComboBox x:Name="PeriodBox"
                                                     Width="132"
@@ -268,18 +296,27 @@
                                 </Button>
                             </StackPanel>
 
-                            <Grid Grid.Column="2" x:Name="FilterRow" Margin="10,0,0,0" ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                            <!-- Reset lives inside the filter box: an X that shows once the
+                                 view differs from its defaults (filter, extension / author
+                                 checks, sort, grouping, period) and puts them all back. -->
+                            <Grid Grid.Column="2" x:Name="FilterRow" Margin="10,0,0,0">
                                 <TextBox x:Name="FilterBox"
                                          MinWidth="84"
                                          PlaceholderText="Filter files..."
                                          Text="{Binding Analysis.SearchText, Mode=TwoWay}"
-                                         VerticalAlignment="Center" />
-
-                                <Button Grid.Column="1"
-                                        x:Name="ResetButton"
-                                        Content="Reset"
-                                        Command="{Binding Analysis.ResetViewCommand}"
-                                        Padding="10,5" />
+                                         VerticalAlignment="Center">
+                                    <TextBox.InnerRightContent>
+                                        <Button x:Name="ResetButton"
+                                                Classes="diffTool"
+                                                Margin="0,0,4,0"
+                                                IsVisible="{Binding Analysis.CanResetView}"
+                                                Command="{Binding Analysis.ResetViewCommand}"
+                                                ToolTip.Tip="Reset the view: filter, extensions, authors, sort, grouping and period">
+                                            <app:AppIcon Kind="Close" Width="14" Height="14"
+                                                         Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                                        </Button>
+                                    </TextBox.InnerRightContent>
+                                </TextBox>
                             </Grid>
 
                             <StackPanel Grid.Column="3" x:Name="ScanIndicator" Margin="10,0,0,0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"
@@ -289,13 +326,9 @@
                             </StackPanel>
                         </Grid>
 
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="{Binding Analysis.SummaryHead}" FontSize="12" Foreground="{DynamicResource BudiffMutedTextBrush}" />
-                            <TextBlock Text="{Binding Analysis.SummaryCode}" FontSize="12" Foreground="{DynamicResource BudiffTextBrush}" />
-                            <TextBlock Text="{Binding Analysis.SummaryBlank}" FontSize="12" Foreground="#6E747E" />
-                            <TextBlock Text="{Binding Analysis.SummaryComment}" FontSize="12" Foreground="#5E8C5E" />
-                            <TextBlock Text="{Binding Analysis.SummaryTail}" FontSize="12" Foreground="{DynamicResource BudiffMutedTextBrush}" />
-                        </StackPanel>
+                        <!-- Wraps in a narrow pane instead of running off its edge. -->
+                        <TextBlock x:Name="SummaryLine" Text="{Binding Analysis.SummaryText}" FontSize="12" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource BudiffMutedTextBrush}" />
                     </StackPanel>
                 </Border>
 
@@ -368,16 +401,23 @@
                      very narrow pane; clip them at the pane edge instead of letting
                      the header/rows paint under the filter panes. -->
                 <DockPanel x:Name="TreeArea" ClipToBounds="True">
+                    <!-- Right-click the header (or the button in its corner) to pick columns. -->
                     <Border DockPanel.Dock="Top"
+                            Background="Transparent"
                             BorderBrush="{DynamicResource BudiffBorderBrush}"
                             BorderThickness="0,0,0,1"
                             Padding="6,6,18,6">
-                        <!-- Every column but Name / Added / Removed sits in an Auto column whose
-                             fixed-width content can hide, collapsing the column to zero. Blank /
+                        <Border.ContextFlyout>
+                            <StaticResource ResourceKey="ColumnMenu" />
+                        </Border.ContextFlyout>
+                        <!-- Every column but Name sits in an Auto column whose fixed-width
+                             content can hide, collapsing the column to zero. Added / Removed
+                             hide only when turned off in the chooser. Blank /
                              Comment / Files / Size only show without the docked diff; as the pane
                              narrows, columns drop Size, Files, Comment, Blank, then Authors,
-                             Commits, Code and Lines (see MainWindowViewModel.FitColumns). Header
-                             and row cells use matching total widths so the columns stay aligned. -->
+                             Commits, Code and Lines (see MainWindowViewModel.FitColumns); columns
+                             turned off in the chooser never show. Header and row cells use matching
+                             total widths so the columns stay aligned. -->
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <!-- Name keeps a readable minimum; below even the
@@ -390,8 +430,8 @@
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="78" />
-                                <ColumnDefinition Width="78" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
@@ -427,12 +467,12 @@
                                     <TextBlock Text="Files" /><TextBlock Text="{Binding Analysis.FilesGlyph}" FontSize="9" />
                                 </StackPanel>
                             </Button>
-                            <Button Grid.Column="6" Classes="colHeader" Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Added}">
+                            <Button Grid.Column="6" Classes="colHeader" Width="78" IsVisible="{Binding ShowAddedColumn}" Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Added}">
                                 <StackPanel Orientation="Horizontal" Spacing="3" HorizontalAlignment="Right">
                                     <TextBlock Text="Added" /><TextBlock Text="{Binding Analysis.AddedGlyph}" FontSize="9" />
                                 </StackPanel>
                             </Button>
-                            <Button Grid.Column="7" Classes="colHeader" Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Removed}">
+                            <Button Grid.Column="7" Classes="colHeader" Width="78" IsVisible="{Binding ShowRemovedColumn}" Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Removed}">
                                 <StackPanel Orientation="Horizontal" Spacing="3" HorizontalAlignment="Right">
                                     <TextBlock Text="Removed" /><TextBlock Text="{Binding Analysis.RemovedGlyph}" FontSize="9" />
                                 </StackPanel>
@@ -449,6 +489,15 @@
                             </Button>
                             <TextBlock Grid.Column="10" Text="Size" FontSize="11" FontWeight="SemiBold" Width="78" IsVisible="{Binding ShowSizeColumn}"
                                        Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" Margin="12,0,0,0" />
+                            <!-- Sits in the header's right padding, above the rows' scrollbar. -->
+                            <Button x:Name="ColumnsButton" Grid.ColumnSpan="11" Classes="diffTool" HorizontalAlignment="Right"
+                                    Width="18" Margin="0,0,-18,0" Padding="0" ToolTip.Tip="Columns">
+                                <app:AppIcon Kind="Tune" Width="13" Height="13"
+                                             Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                                <Button.Flyout>
+                                    <StaticResource ResourceKey="ColumnMenu" />
+                                </Button.Flyout>
+                            </Button>
                         </Grid>
                     </Border>
 
@@ -475,8 +524,8 @@
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="78" />
-                                        <ColumnDefinition Width="78" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
@@ -484,7 +533,21 @@
                                     <!-- Auto,Auto,Auto,* (not a StackPanel) so the name TRIMS
                                          when the cell is tight instead of pushing the row wider.
                                          Indent + chevron live here (chromeless TreeViewItem). -->
+                                    <!-- The name runs on over the empty cells to its right and up to
+                                         the next number, keeping clear of it (NameExtent). -->
                                     <Grid Grid.Column="0" ColumnDefinitions="Auto,Auto,Auto,*" VerticalAlignment="Center">
+                                        <Grid.ColumnSpan>
+                                            <MultiBinding Converter="{x:Static app:NameSpanConverter.Instance}">
+                                                <Binding />
+                                                <Binding Path="$parent[Window].DataContext.VisibleCells" />
+                                            </MultiBinding>
+                                        </Grid.ColumnSpan>
+                                        <Grid.Margin>
+                                            <MultiBinding Converter="{x:Static app:NameReserveConverter.Instance}">
+                                                <Binding />
+                                                <Binding Path="$parent[Window].DataContext.VisibleCells" />
+                                            </MultiBinding>
+                                        </Grid.Margin>
                                         <Border Width="{Binding IndentWidth}" />
                                         <Panel Grid.Column="1" Width="18">
                                             <Button Classes="chevron" Click="OnToggleExpand" IsVisible="{Binding !IsFile}">
@@ -492,13 +555,15 @@
                                                              Foreground="{DynamicResource BudiffMutedTextBrush}" />
                                             </Button>
                                         </Panel>
-                                        <app:AppIcon Grid.Column="2" Kind="{Binding Icon}" Width="15" Height="15"
+                                        <app:AppIcon Grid.Column="2" Kind="{Binding Icon}" Tint="{Binding IconTint}" Width="15" Height="15"
                                                      Foreground="{DynamicResource BudiffMutedTextBrush}" />
                                         <TextBlock Grid.Column="3" app:NameInlines.Runs="{Binding NameRuns}" Padding="2,0" Margin="6,0,0,0"
                                                    HorizontalAlignment="Left"
                                                    VerticalAlignment="Center"
                                                    Foreground="{DynamicResource BudiffTextBrush}"
-                                                   TextTrimming="CharacterEllipsis" />
+                                                   TextTrimming="CharacterEllipsis"
+                                                   ToolTip.Tip="{Binding Name}"
+                                                   ToolTip.ToolTipOpening="OnNameTipOpening" />
                                     </Grid>
                                     <TextBlock Grid.Column="1" Classes="num" Width="56" TextAlignment="Right" Text="{Binding LinesText}" Foreground="{DynamicResource BudiffTextBrush}"
                                                IsVisible="{Binding $parent[Window].DataContext.ShowLinesColumn}" />
@@ -510,8 +575,10 @@
                                                IsVisible="{Binding $parent[Window].DataContext.ShowCommentColumn}" />
                                     <TextBlock Grid.Column="5" Classes="num" Width="38" TextAlignment="Right" Text="{Binding FilesText}" Foreground="{DynamicResource BudiffMutedTextBrush}"
                                                IsVisible="{Binding $parent[Window].DataContext.ShowFilesColumn}" />
-                                    <TextBlock Grid.Column="6" Classes="num" Text="{Binding AddedText}" Foreground="#6BB36B" />
-                                    <TextBlock Grid.Column="7" Classes="num" Text="{Binding RemovedText}" Foreground="#D16969" />
+                                    <TextBlock Grid.Column="6" Classes="num" Width="62" TextAlignment="Right" Text="{Binding AddedText}" Foreground="#6BB36B"
+                                               IsVisible="{Binding $parent[Window].DataContext.ShowAddedColumn}" />
+                                    <TextBlock Grid.Column="7" Classes="num" Width="62" TextAlignment="Right" Text="{Binding RemovedText}" Foreground="#D16969"
+                                               IsVisible="{Binding $parent[Window].DataContext.ShowRemovedColumn}" />
                                     <TextBlock Grid.Column="8" Classes="num" Width="48" TextAlignment="Right" Text="{Binding CommitsText}" Foreground="{DynamicResource BudiffMutedTextBrush}"
                                                IsVisible="{Binding $parent[Window].DataContext.ShowCommitsColumn}" />
                                     <TextBlock Grid.Column="9" Classes="num" Width="44" TextAlignment="Right" Text="{Binding AuthorsText}" Foreground="{DynamicResource BudiffMutedTextBrush}"
