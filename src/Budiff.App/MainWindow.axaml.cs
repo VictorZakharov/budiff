@@ -139,8 +139,8 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    // A narrow bird's-eye moves the filter box and Reset under the grouping /
-    // period controls instead of squeezing the filter to nothing.
+    // A narrow bird's-eye moves the filter box under the grouping / period
+    // controls instead of squeezing it to nothing.
     private void UpdateToolbarWrap()
     {
         var available = ToolbarGrid.Bounds.Width;
@@ -149,25 +149,33 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        // Widths without the wrap-dependent left margins and the label.
-        var grouping = GroupingSwitch.DesiredSize.Width;
-        var period = PeriodWithoutLabel();
-        var label = _periodLabelWidth + PeriodBar.Spacing;
-        var oneRow = grouping + ToolbarGap + label + period + ToolbarGap + FilterComfortWidth;
-
-        // Compact once the filter no longer fits on the first row: the filter
-        // wraps under it and the "Period" label goes (the picker says it); if
-        // even then the picker does not fit beside the switch, it wraps too.
-        var compact = available < oneRow;
-        var periodWraps = available < grouping + ToolbarGap + period + (compact ? 0 : label);
-        var filterRow = !compact ? 0 : periodWraps ? 2 : 1;
-        var periodRow = periodWraps ? 1 : 0;
-        if (Grid.GetRow(FilterRow) == filterRow && Grid.GetRow(PeriodBar) == periodRow && PeriodLabel.IsVisible != compact)
+        if (GroupingSwitch.IsVisible && GroupingSwitch.DesiredSize.Width > 0)
         {
-            return;
+            _groupingSwitchWidth = GroupingSwitch.DesiredSize.Width;
         }
 
+        // The period controls at the picker's full width, without the label
+        // and the wrap-dependent left margin.
+        var periodExtra = PeriodWithoutLabel() - PeriodBox.Width;
+        var period = periodExtra + PeriodBoxWidth;
+        var label = _periodLabelWidth + PeriodBar.Spacing;
+        var oneRow = _groupingSwitchWidth + ToolbarGap + label + period + ToolbarGap + FilterComfortWidth;
+
+        // Compact once the filter no longer fits on the first row: the filter
+        // wraps under it, the Folders / Projects switch becomes a drop-down and
+        // the "Period" label goes (the picker says it). The drop-down and the
+        // picker share a row, the picker narrowing down to its minimum; below
+        // that, the picker wraps too.
+        var compact = available < oneRow;
+        var beside = available - GroupingBox.Width - ToolbarGap - periodExtra;
+        var periodWraps = compact ? beside < PeriodBoxMinWidth : available < _groupingSwitchWidth + ToolbarGap + label + period;
+        PeriodBox.Width = compact && !periodWraps ? Math.Min(PeriodBoxWidth, Math.Floor(beside)) : PeriodBoxWidth;
+
+        var filterRow = !compact ? 0 : periodWraps ? 2 : 1;
+        var periodRow = periodWraps ? 1 : 0;
         PeriodLabel.IsVisible = !compact;
+        GroupingSwitch.IsVisible = !compact;
+        GroupingBox.IsVisible = compact;
         Grid.SetRow(PeriodBar, periodRow);
         Grid.SetColumn(PeriodBar, periodWraps ? 0 : 1);
         Grid.SetColumnSpan(PeriodBar, periodWraps ? 4 : 1);
@@ -180,12 +188,23 @@ public sealed partial class MainWindow : Window
 
         // Only as many rows as are used: RowSpacing counts empty rows too.
         var rows = Math.Max(filterRow, periodRow) + 1;
-        ToolbarGrid.RowDefinitions = new RowDefinitions(string.Join(",", Enumerable.Repeat("Auto", rows)));
+        if (ToolbarGrid.RowDefinitions.Count != rows)
+        {
+            ToolbarGrid.RowDefinitions = new RowDefinitions(string.Join(",", Enumerable.Repeat("Auto", rows)));
+        }
+
         ToolbarGrid.RowSpacing = rows > 1 ? 8 : 0;
     }
 
-    // The "Period" label's width, remembered from when it last showed.
+    // The period picker's width, and the narrowest it gets beside the
+    // compact toolbar's grouping drop-down.
+    private const double PeriodBoxWidth = 132;
+    private const double PeriodBoxMinWidth = 112;
+
+    // The "Period" label's and the Folders / Projects switch's widths,
+    // remembered from when they last showed.
     private double _periodLabelWidth = 40;
+    private double _groupingSwitchWidth = 143;
 
     // The period controls' width without the label and the left margin.
     private double PeriodWithoutLabel()
@@ -208,7 +227,7 @@ public sealed partial class MainWindow : Window
         var tree = MainWindowViewModel.NameMinWidth + TreeRowPadding
             + (_viewModel.ShowAddedColumn ? MainWindowViewModel.ChurnColumnWidth : 0)
             + (_viewModel.ShowRemovedColumn ? MainWindowViewModel.ChurnColumnWidth : 0);
-        var toolbar = ToolbarPadding + Math.Max(GroupingSwitch.DesiredSize.Width, PeriodWithoutLabel());
+        var toolbar = ToolbarPadding + Math.Max(GroupingBox.Width, PeriodWithoutLabel() - PeriodBox.Width + PeriodBoxWidth);
         return Math.Ceiling(Math.Max(tree, toolbar));
     }
 

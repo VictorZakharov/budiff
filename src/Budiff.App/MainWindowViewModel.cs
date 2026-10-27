@@ -153,6 +153,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     // the user keeps on that also fit, counted along the keep order.
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(FittingColumns))]
+    [NotifyPropertyChangedFor(nameof(VisibleCells))]
     [NotifyPropertyChangedFor(nameof(ShowLinesColumn))]
     [NotifyPropertyChangedFor(nameof(ShowCodeColumn))]
     [NotifyPropertyChangedFor(nameof(ShowCommitsColumn))]
@@ -187,6 +188,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public bool ShowAddedColumn => IsOn(AddedIndex);
 
     public bool ShowRemovedColumn => IsOn(RemovedIndex);
+
+    // The bird's-eye grid columns showing, bit i = grid column i (1 = Lines
+    // ... 10 = Size); a row's name runs on over the empty ones.
+    public int VisibleCells =>
+        (ShowLinesColumn ? 1 << 1 : 0) | (ShowCodeColumn ? 1 << 2 : 0) | (ShowBlankColumn ? 1 << 3 : 0)
+        | (ShowCommentColumn ? 1 << 4 : 0) | (ShowFilesColumn ? 1 << 5 : 0) | (ShowAddedColumn ? 1 << 6 : 0)
+        | (ShowRemovedColumn ? 1 << 7 : 0) | (ShowCommitsColumn ? 1 << 8 : 0) | (ShowAuthorsColumn ? 1 << 9 : 0)
+        | (ShowSizeColumn ? 1 << 10 : 0);
 
     // The column chooser (right-click the bird's-eye header), in on-screen
     // order: every column but Name. Turned-off columns are remembered across runs (AppSettings).
@@ -234,6 +243,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         FitColumns(_rowWidth);
         OnPropertyChanged(nameof(ShowAddedColumn));
         OnPropertyChanged(nameof(ShowRemovedColumn));
+        OnPropertyChanged(nameof(VisibleCells));
         OnPropertyChanged(nameof(AllColumnsOn));
         ResetColumnsCommand.NotifyCanExecuteChanged();
     }

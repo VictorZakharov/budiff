@@ -233,6 +233,20 @@
                                             CommandParameter="{Binding Analysis.Groupings[1]}" />
                                 </StackPanel>
                             </Border>
+                            <!-- The compact toolbar's stand-in for the switch: a drop-down,
+                                 so the period picker still fits beside it. -->
+                            <ComboBox x:Name="GroupingBox"
+                                      Width="100"
+                                      IsVisible="False"
+                                      VerticalAlignment="Center"
+                                      ItemsSource="{Binding Analysis.Groupings}"
+                                      SelectedItem="{Binding Analysis.SelectedGrouping, Mode=TwoWay}">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Label}" />
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
 
                             <StackPanel Grid.Column="1" x:Name="PeriodBar" Margin="10,0,0,0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                                 <!-- Hidden in the compact (wrapped) toolbar: the picker says it. -->
@@ -519,7 +533,14 @@
                                     <!-- Auto,Auto,Auto,* (not a StackPanel) so the name TRIMS
                                          when the cell is tight instead of pushing the row wider.
                                          Indent + chevron live here (chromeless TreeViewItem). -->
+                                    <!-- The name runs on over the empty cells to its right (NameSpanConverter). -->
                                     <Grid Grid.Column="0" ColumnDefinitions="Auto,Auto,Auto,*" VerticalAlignment="Center">
+                                        <Grid.ColumnSpan>
+                                            <MultiBinding Converter="{x:Static app:NameSpanConverter.Instance}">
+                                                <Binding />
+                                                <Binding Path="$parent[Window].DataContext.VisibleCells" />
+                                            </MultiBinding>
+                                        </Grid.ColumnSpan>
                                         <Border Width="{Binding IndentWidth}" />
                                         <Panel Grid.Column="1" Width="18">
                                             <Button Classes="chevron" Click="OnToggleExpand" IsVisible="{Binding !IsFile}">

@@ -225,6 +225,8 @@ public sealed class BirdsEyeColumnTests
     public void NameTooltip_OnlyWhenTrimmed()
     {
         var root = ReadmeFixture.BuildFixtureRepo("budiff-name-tips");
+        const string LongName = "a-component-with-a-really-quite-long-and-descriptive-name.component.scss";
+        File.WriteAllText(Path.Combine(root, LongName), "a { }\n");
         var window = new MainWindow(root, gitRoot: true, AppSettings.Load(TempSettings())) { MinWidth = 0, Width = 1440, Height = 640 };
         window.Show();
         var vm = window.ViewModel;
@@ -247,11 +249,13 @@ public sealed class BirdsEyeColumnTests
         Assert.Equal("AnsiRenderer.cs", ToolTip.GetTip(NameOf("AnsiRenderer.cs")));
         Assert.False(TipOpens(NameOf("AnsiRenderer.cs")));
 
-        // Squeeze the Name column until the long name trims.
+        // Squeeze the pane until the long name trims, even running on over
+        // the empty cells.
         window.Width = 480;
         UiSnapshot.Pump();
         UiSnapshot.Pump();
-        Assert.True(TipOpens(NameOf("AnsiRenderer.cs")));
+        Assert.True(TipOpens(NameOf(LongName)));
+        Assert.False(TipOpens(NameOf("AnsiRenderer.cs")));
         window.Close();
     }
 
@@ -291,6 +295,16 @@ public sealed class BirdsEyeColumnTests
         AssertToolbarFits(window, pane);
         UiSnapshot.Capture(window, "birdseye-docked-narrow");
 
+        // At this width the period picker fits beside the drop-down, and the
+        // drop-down switches the grouping.
+        Assert.Equal(0, Grid.GetRow(window.FindControl<Control>("PeriodBar")!));
+        var groupingBox = window.FindControl<ComboBox>("GroupingBox")!;
+        groupingBox.SelectedIndex = 1;
+        UiSnapshot.Pump();
+        Assert.True(vm.Analysis.IsProjectsGrouping);
+        groupingBox.SelectedIndex = 0;
+        UiSnapshot.Pump();
+
         // Without Added either, only Name's minimum is left (the compact
         // toolbar's widest row is narrower still).
         Option(vm, "Added").IsOn = false;
@@ -315,11 +329,13 @@ public sealed class BirdsEyeColumnTests
         WaitUntil(() => !vm.Analysis.IsScanning && vm.Analysis.Roots.Count > 0, "bird's-eye scan");
         var x = window.FindControl<Button>("ResetButton")!;
         Assert.True(window.FindControl<Control>("PeriodLabel")!.IsVisible);
+        Assert.True(window.FindControl<Control>("GroupingSwitch")!.IsVisible);
+        Assert.False(window.FindControl<Control>("GroupingBox")!.IsVisible);
         Assert.Equal(0, Grid.GetRow(window.FindControl<Control>("FilterRow")!));
         Assert.Null(global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(window).OfType<Button>()
             .FirstOrDefault(b => Equals(b.Content, "Reset")));
         Assert.False(x.IsEffectivelyVisible);
-        Assert.Matches(@"^\d+ files - [\d,]+ lines - \d+ commits? - \d+ authors?$", vm.Analysis.SummaryText);
+        Assert.Matches(@"^\d+\u00A0files - [\d,]+\u00A0lines - \d+\u00A0commits? - \d+\u00A0authors?$", vm.Analysis.SummaryText);
 
         vm.Analysis.SearchText = "Line";
         UiSnapshot.Pump();
@@ -341,11 +357,84 @@ public sealed class BirdsEyeColumnTests
         window.Close();
     }
 
+    // A name runs on over the empty cells to its right - not over a number,
+    // and without pushing any column wider than the header's.
+    [AvaloniaFact]
+    public void Names_RunOnOverEmptyCells()
+    {
+        var root = ReadmeFixture.BuildFixtureRepo("budiff-name-span");
+        File.WriteAllText(Path.Combine(root, "theme.component.scss"), "a { }\n");
+        var settings = AppSettings.Load(TempSettings());
+        settings.HiddenColumns.Add("Removed");
+        var window = new MainWindow(root, gitRoot: true, settings) { Width = 1400, Height = 700 };
+        window.Show();
+        var vm = window.ViewModel;
+        WaitUntil(() => !vm.Analysis.IsScanning && vm.Analysis.Roots.Count > 0, "bird's-eye scan");
+        var file = vm.Analysis.Roots.SelectMany(r => r.SelfAndDescendants()).First(r => r.IsFile && r.Name == "Program.cs");
+        _ = vm.Analysis.OpenAsync(file);
+        WaitUntil(() => vm.IsDiffOpen && vm.ShowDiffPane, "diff open");
+        window.FindControl<Grid>("BodyGrid")!.ColumnDefinitions[2].Width = new GridLength(5000);
+        UiSnapshot.Pump();
+        UiSnapshot.Pump();
+        UiSnapshot.Pump();
+        Assert.True(vm.ShowAddedColumn && !vm.ShowLinesColumn);
+        UiSnapshot.Capture(window, "birdseye-name-span");
+
+        Grid NameCell(string name) => global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(window).OfType<TextBlock>()
+            .Where(b => b.TextTrimming == global::Avalonia.Media.TextTrimming.CharacterEllipsis && (b.DataContext as CodeAnalysisRow)?.Name == name)
+            .Select(b => (Grid)b.Parent!)
+            .Single();
+
+        // README.md has Added churn: its name stops before Added. build.ps1 has
+        // none: its name runs to the end of the row.
+        Assert.Equal(6, Grid.GetColumnSpan(NameCell("README.md")));
+        Assert.Equal(NameSpanConverter.ColumnCount, Grid.GetColumnSpan(NameCell("build.ps1")));
+
+        // The long name is not trimmed where the row has the room.
+        var longName = NameCell("theme.component.scss");
+        var text = longName.Children.OfType<TextBlock>().Single();
+        var rowGrid = (Grid)longName.Parent!;
+        var added = rowGrid.Children.OfType<TextBlock>().Single(b => Grid.GetColumn(b) == 6);
+        if (added.Text is { Length: > 0 })
+        {
+            Assert.Equal(6, Grid.GetColumnSpan(longName));
+        }
+        else
+        {
+            Assert.DoesNotContain(text.TextLayout.TextLines, line => line.HasCollapsed);
+        }
+
+        // Columns stay where the header has them: hidden ones zero wide, and
+        // Added's right edge on the header's.
+        var header = global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(window).OfType<Button>()
+            .Single(b => b.Classes.Contains("colHeader") && Equals(b.CommandParameter, global::Budiff.CodeAnalysis.AnalysisSortKey.Added));
+        var headerRight = global::Avalonia.VisualExtensions.TranslatePoint(header, new global::Avalonia.Point(header.Bounds.Width, 0), window)!.Value.X;
+        foreach (var row in global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(window).OfType<TextBlock>()
+                     .Where(b => b.Classes.Contains("num") && Grid.GetColumn(b) == 6 && b.Text is { Length: > 0 }))
+        {
+            var right = global::Avalonia.VisualExtensions.TranslatePoint(row, new global::Avalonia.Point(row.Bounds.Width, 0), window)!.Value.X + row.Margin.Right;
+            Assert.True(Math.Abs(right - headerRight) <= 2, $"Added cell '{row.Text}' ends at {right}, header at {headerRight}");
+            var defs = ((Grid)row.Parent!).ColumnDefinitions;
+            Assert.All(new[] { 1, 2, 3, 4, 5, 7, 8, 9, 10 }, c => Assert.Equal(0, ((Grid)row.Parent!).ColumnDefinitions[c].ActualWidth, 0.5));
+        }
+
+        window.Close();
+    }
+
     private static void AssertToolbarFits(MainWindow window, Control pane)
     {
-        // Compact: the filter on a row of its own, the "Period" label gone.
+        // Compact: the filter on a row of its own, the "Period" label gone and
+        // Folders / Projects a drop-down instead of the two-button switch.
         Assert.True(Grid.GetRow(window.FindControl<Control>("FilterRow")!) > 0);
         Assert.False(window.FindControl<Control>("PeriodLabel")!.IsVisible);
+        Assert.False(window.FindControl<Control>("GroupingSwitch")!.IsVisible);
+        Assert.True(window.FindControl<Control>("GroupingBox")!.IsVisible);
+        foreach (var name in new[] { "GroupingBox", "PeriodBar" })
+        {
+            var control = window.FindControl<Control>(name)!;
+            var right = global::Avalonia.VisualExtensions.TranslatePoint(control, new global::Avalonia.Point(control.Bounds.Width, 0), pane)!.Value.X;
+            Assert.True(right <= pane.Bounds.Width + 0.5, $"{name} ends at {right}, pane is {pane.Bounds.Width}");
+        }
 
         // The summary wraps rather than running off the pane edge.
         var summary = window.FindControl<TextBlock>("SummaryLine")!;

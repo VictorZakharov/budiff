@@ -149,6 +149,22 @@ public sealed partial class CodeAnalysisRow : ObservableObject
 
     public double BarFraction { get; init; }
 
+    // Whether this row shows nothing in a bird's-eye grid column (1 = Lines
+    // ... 10 = Size): the name may run on over it (NameSpanConverter).
+    internal bool IsCellEmpty(int column) => column switch
+    {
+        1 => LinesText.Length == 0,
+        2 => CodeText.Length == 0,
+        3 => BlankText.Length == 0,
+        4 => CommentText.Length == 0,
+        5 => FilesText.Length == 0,
+        6 => AddedText.Length == 0,
+        7 => RemovedText.Length == 0,
+        8 => CommitsText.Length == 0,
+        9 => AuthorsText.Length == 0,
+        _ => false,
+    };
+
     public ObservableCollection<CodeAnalysisRow> Children { get; } = new();
 
     public IEnumerable<CodeAnalysisRow> SelfAndDescendants()
@@ -639,18 +655,20 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         }
         else if (!GitAvailable)
         {
-            parts.Add("no git repository");
+            parts.Add("no\u00A0git\u00A0repository");
         }
 
         if (_scan?.Truncated == true)
         {
-            parts.Add("list capped");
+            parts.Add("list\u00A0capped");
         }
 
         SummaryText = string.Join(" - ", parts);
     }
 
-    private static string Count(long value, string noun) => $"{N(value)} {noun}{(value == 1 ? string.Empty : "s")}";
+    // A no-break space keeps a number and its word on one line when the
+    // summary wraps.
+    private static string Count(long value, string noun) => $"{N(value)}\u00A0{noun}{(value == 1 ? string.Empty : "s")}";
 
     private void ShowMessage(string message) => SummaryText = message;
 
