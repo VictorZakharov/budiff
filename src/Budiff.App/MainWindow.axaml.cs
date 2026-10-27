@@ -86,7 +86,7 @@ public sealed partial class MainWindow : Window
         var at = 2;
         foreach (var option in _viewModel.ColumnOptions)
         {
-            var item = new MenuItem { Header = option.Name, ToggleType = MenuItemToggleType.CheckBox, IsChecked = option.IsOn };
+            var item = new MenuItem { Header = option.Name, ToggleType = MenuItemToggleType.CheckBox, IsChecked = option.IsOn, StaysOpenOnClick = true };
             item.PropertyChanged += (_, e) =>
             {
                 if (e.Property == MenuItem.IsCheckedProperty)

@@ -13,9 +13,10 @@
     <Window.Resources>
         <!-- The bird's-eye column chooser, shared by the header's right-click and
              its corner button. One check item per column goes between the
-             separators, added in code (MainWindow.AddColumnMenuItems). -->
+             separators, added in code (MainWindow.AddColumnMenuItems). The checks
+             keep the menu open to pick several; Reset closes it. -->
         <MenuFlyout x:Key="ColumnMenu" Placement="BottomEdgeAlignedRight">
-            <MenuItem Header="All columns" ToggleType="CheckBox" IsChecked="{Binding AllColumnsOn, Mode=TwoWay}" />
+            <MenuItem Header="All columns" ToggleType="CheckBox" StaysOpenOnClick="True" IsChecked="{Binding AllColumnsOn, Mode=TwoWay}" />
             <Separator />
             <Separator />
             <MenuItem Header="Reset to default" Command="{Binding ResetColumnsCommand}" />

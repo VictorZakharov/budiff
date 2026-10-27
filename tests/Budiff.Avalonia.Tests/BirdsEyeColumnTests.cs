@@ -149,6 +149,10 @@ public sealed class BirdsEyeColumnTests
         Assert.False(Item("All columns").IsChecked);
         Assert.True(Item("Reset to default").IsEffectivelyEnabled);
 
+        // The checks keep the menu open to pick several columns; Reset closes it.
+        Assert.All(items.Where(i => i.ToggleType == MenuItemToggleType.CheckBox), i => Assert.True(i.StaysOpenOnClick, (string?)i.Header));
+        Assert.False(Item("Reset to default").StaysOpenOnClick);
+
         // Ticking it in the menu brings it back; now all are on.
         Item("Blank").IsChecked = true;
         UiSnapshot.Pump();
