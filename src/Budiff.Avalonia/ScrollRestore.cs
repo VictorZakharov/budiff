@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using global::Avalonia;
 using global::Avalonia.Controls;
 using global::Avalonia.Input;
@@ -17,6 +18,9 @@ internal sealed class ScrollRestore
 
     // Shown anyway after this, placed or not (content shorter than the spot).
     private static readonly TimeSpan RevealAfter = TimeSpan.FromMilliseconds(400);
+
+    // One at a time per scroller: the next file's spot replaces the last one's.
+    private static readonly ConditionalWeakTable<ScrollViewer, ScrollRestore> Active = new();
 
     private readonly ScrollViewer _scroller;
     private readonly double _offset;
@@ -49,7 +53,9 @@ internal sealed class ScrollRestore
             return;
         }
 
+        Cancel(scroller);
         var restore = new ScrollRestore(scroller, offset);
+        Active.AddOrUpdate(scroller, restore);
         scroller.ScrollChanged += restore.OnScrollChanged;
         scroller.DetachedFromVisualTree += restore._detached;
         scroller.AddHandler(InputElement.PointerWheelChangedEvent, restore._wheel, RoutingStrategies.Tunnel, handledEventsToo: true);
@@ -62,6 +68,15 @@ internal sealed class ScrollRestore
         }
 
         restore.Put();
+    }
+
+    // Stops holding a spot on this scroller, if one is held.
+    public static void Cancel(ScrollViewer scroller)
+    {
+        if (Active.TryGetValue(scroller, out var running))
+        {
+            running.Stop();
+        }
     }
 
     private void OnScrollChanged(object? sender, ScrollChangedEventArgs e)
@@ -100,6 +115,11 @@ internal sealed class ScrollRestore
 
     private void Stop()
     {
+        if (Active.TryGetValue(_scroller, out var running) && running == this)
+        {
+            Active.Remove(_scroller);
+        }
+
         Reveal();
         _scroller.ScrollChanged -= OnScrollChanged;
         _scroller.DetachedFromVisualTree -= _detached;

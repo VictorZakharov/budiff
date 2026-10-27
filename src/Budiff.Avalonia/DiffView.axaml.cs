@@ -16,6 +16,9 @@ public partial class DiffView : UserControl
     private const double LineNumberWidth = 46;
     private const double TextPadding = 6;
 
+    // Every line diff row is this tall (DiffView.axaml), wrapped lines aside.
+    private const double RowHeight = 18;
+
     // Recently shown previews, by what they show. Going Back re-attaches the
     // very same control - its scroll position, unfolded sections and loaded
     // pictures intact - instead of rendering anew and visibly scrolling.
@@ -277,14 +280,38 @@ public partial class DiffView : UserControl
             && IsEffectivelyVisible)
         {
             model.RestoreScroll = null;
-            if (spot.Preview && model.IsPreviewActive && _reusedPreview && PreviewHost.Content is ScrollViewer kept)
+            var scroller = model.IsPreviewActive ? PreviewHost.Content as ScrollViewer : RowsScroller;
+            if (spot.FileStart)
+            {
+                // The top needs no holding; a row further down does while
+                // the rows above it are still being measured.
+                var start = model.IsPreviewActive ? 0 : model.StartRow() * RowHeight;
+                if (start > 0)
+                {
+                    ScrollRestore.Start(scroller, start);
+                }
+                else if (scroller is not null)
+                {
+                    ScrollRestore.Cancel(scroller);
+                    scroller.Offset = new Vector(scroller.Offset.X, 0);
+                }
+            }
+            else if (spot.Preview && model.IsPreviewActive && _reusedPreview && scroller is not null)
             {
                 // The same control came back: it is already there.
-                kept.Offset = new Vector(kept.Offset.X, spot.Offset);
+                scroller.Offset = new Vector(scroller.Offset.X, spot.Offset);
             }
             else if (spot.Preview == model.IsPreviewActive)
             {
-                ScrollRestore.Start(spot.Preview ? PreviewHost.Content as ScrollViewer : RowsScroller, spot.Offset);
+                ScrollRestore.Start(scroller, spot.Offset);
+            }
+
+            // No scroll event comes when the spot was already the offset (the
+            // line diff kept from an earlier file): report it, or the spot
+            // still describes the file shown before.
+            if (scroller is not null)
+            {
+                ReportScroll(scroller, model.IsPreviewActive);
             }
         }
     }
