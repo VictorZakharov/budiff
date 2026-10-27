@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 using Budiff.Avalonia;
 using global::Avalonia.Media;
 using global::Avalonia.Media.Immutable;
@@ -25,8 +26,10 @@ public sealed class TextMateSyntaxHighlighter : ISyntaxHighlighter
     }
 }
 
-internal sealed class TextMateSyntaxHighlightSession(IGrammar grammar) : ISyntaxHighlightSession
+internal sealed partial class TextMateSyntaxHighlightSession(IGrammar grammar) : ISyntaxHighlightSession
 {
+    private readonly bool _html = grammar.GetScopeName()?.StartsWith("text.html", StringComparison.Ordinal) == true;
+
     public SyntaxHighlightResult HighlightLine(string text, object? state)
     {
         text ??= string.Empty;
@@ -55,7 +58,15 @@ internal sealed class TextMateSyntaxHighlightSession(IGrammar grammar) : ISyntax
                         runs.Add(new DiffRun(text[cursor..start], TextMatePalette.DefaultBrush));
                     }
 
-                    runs.Add(new DiffRun(text[start..end], TextMatePalette.Foreground(token.Scopes)));
+                    if (token.Scopes.Count > 0 && token.Scopes[^1].StartsWith("invalid.", StringComparison.Ordinal))
+                    {
+                        AddInvalid(runs, text[start..end], token.Scopes);
+                    }
+                    else
+                    {
+                        runs.Add(new DiffRun(text[start..end], TextMatePalette.Foreground(token.Scopes)));
+                    }
+
                     cursor = end;
                 }
 
@@ -78,6 +89,52 @@ internal sealed class TextMateSyntaxHighlightSession(IGrammar grammar) : ISyntax
 
         return new SyntaxHighlightResult(runs, stack);
     }
+
+    // A grammar's "invalid" is not ours to judge in a diff - and the HTML one
+    // calls every attribute of an <svg> element, or Angular's [prop] / (event)
+    // / #ref bindings, invalid, painting valid templates red. Such a run gets
+    // the colours of what it holds: name="value" attributes in HTML, else the
+    // text around it.
+    private void AddInvalid(List<DiffRun> runs, string text, List<string> scopes)
+    {
+        var outer = scopes.FindAll(s => !s.StartsWith("invalid.", StringComparison.Ordinal));
+        var plain = TextMatePalette.Foreground(outer);
+        if (!_html)
+        {
+            runs.Add(new DiffRun(text, plain));
+            return;
+        }
+
+        var cursor = 0;
+        foreach (Match attribute in HtmlAttribute().Matches(text))
+        {
+            if (attribute.Index > cursor)
+            {
+                runs.Add(new DiffRun(text[cursor..attribute.Index], plain));
+            }
+
+            Add(runs, attribute.Groups["name"], outer, "entity.other.attribute-name.html");
+            Add(runs, attribute.Groups["eq"], outer, "punctuation.separator.key-value.html");
+            Add(runs, attribute.Groups["value"], outer, "string.quoted.double.html");
+            cursor = attribute.Index + attribute.Length;
+        }
+
+        if (cursor < text.Length)
+        {
+            runs.Add(new DiffRun(text[cursor..], plain));
+        }
+    }
+
+    private static void Add(List<DiffRun> runs, Group part, List<string> outer, string scope)
+    {
+        if (part.Success && part.Length > 0)
+        {
+            runs.Add(new DiffRun(part.Value, TextMatePalette.Foreground([.. outer, scope])));
+        }
+    }
+
+    [GeneratedRegex(@"(?<name>[^\s=""'/>]+)(?:(?<eq>\s*=\s*)(?<value>""[^""]*""?|'[^']*'?|[^\s>]+))?")]
+    private static partial Regex HtmlAttribute();
 }
 
 internal static class TextMatePalette

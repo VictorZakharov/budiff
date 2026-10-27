@@ -285,10 +285,10 @@ public partial class DiffView : UserControl
             {
                 // The top needs no holding; a row further down does while
                 // the rows above it are still being measured.
-                var start = model.IsPreviewActive ? 0 : model.StartRow() * RowHeight;
-                if (start > 0)
+                var row = model.IsPreviewActive ? 0 : model.StartRow();
+                if (row > 0)
                 {
-                    ScrollRestore.Start(scroller, start);
+                    ScrollRestore.Start(scroller, row * RowHeight, () => RowTop(row));
                 }
                 else if (scroller is not null)
                 {
@@ -314,6 +314,24 @@ public partial class DiffView : UserControl
                 ReportScroll(scroller, model.IsPreviewActive);
             }
         }
+    }
+
+    // Where a line diff row starts in the scrolled content, once it has a
+    // container: wrapped rows above it make that more than index * RowHeight.
+    private double? RowTop(int index)
+    {
+        if (RowsHost.ContainerFromIndex(index) is not { } container)
+        {
+            RowsHost.ScrollIntoView(index);
+            if (RowsHost.ContainerFromIndex(index) is not { } brought)
+            {
+                return null;
+            }
+
+            container = brought;
+        }
+
+        return container.TranslatePoint(default, RowsScroller) is { } at ? RowsScroller.Offset.Y + at.Y : null;
     }
 
     private void ReportScroll(ScrollViewer scroller, bool preview)

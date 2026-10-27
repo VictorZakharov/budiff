@@ -71,6 +71,47 @@ public sealed class FileScrollMemoryTests
         window.Close();
     }
 
+    // Wrapped imports make the rows above taller than 18 px: the start row
+    // itself must still land on the top line, at every pane width.
+    [AvaloniaTheory]
+    [InlineData(1600)]
+    [InlineData(1100)]
+    [InlineData(850)]
+    public void TypeScriptStart_LandsOnTheRow_WhenImportsWrap(int width)
+    {
+        var root = ReadmeFixture.BuildFixtureRepo("budiff-wrapped-imports-" + width);
+        var long1 = "import { " + string.Join(", ", Enumerable.Range(0, 14).Select(i => "SomeLongExportName" + i)) + " } from './a-module-with-a-long-name';\n";
+        var long2 = long1.Replace("./a-module", "./another-module", StringComparison.Ordinal);
+        using (var repo = new Repository(root))
+        {
+            ReadmeFixture.Commit(repo, ReadmeFixture.Sig("Ada Lovelace", "ada@example.com", daysAgo: 2), "Add a spec", new()
+            {
+                ["web/wrapped.spec.ts"] = long1 + long2 + long1 + "\ndescribe('wrapped', () => {\n" + string.Concat(Enumerable.Range(0, 120).Select(i => $"  it('case {i}', () => {{}});\n")) + "});\n",
+            });
+        }
+
+        var window = new MainWindow(root, gitRoot: true) { Width = width, Height = 700 };
+        window.Show();
+        var vm = window.ViewModel;
+        WaitUntil(() => !vm.Analysis.IsScanning && vm.Analysis.Roots.Count > 0, "bird's-eye scan");
+        Assert.True(vm.Diff.WrapLines);
+
+        Open(window, "wrapped.spec.ts");
+        for (var i = 0; i < 10; i++)
+        {
+            Thread.Sleep(25);
+            UiSnapshot.Pump();
+        }
+
+        var scroller = RowsScroller(window);
+        var host = window.GetVisualDescendants().OfType<ItemsControl>().Single(h => h.Name == "RowsHost" && h.IsEffectivelyVisible);
+        var row = host.ContainerFromIndex(4);
+        Assert.NotNull(row);
+        Assert.Equal(0, global::Avalonia.VisualExtensions.TranslatePoint(row!, default, scroller)!.Value.Y, 1);
+        Assert.Equal(1, scroller.Opacity);
+        window.Close();
+    }
+
     // In a two-sided diff the start never skips past a change, even one
     // among the imports.
     [AvaloniaFact]
