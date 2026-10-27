@@ -27,16 +27,16 @@ Versions below are the ones pinned at the time of writing.
 
 | Component | Version | License | Notice |
 | --- | --- | --- | --- |
-| [Avalonia](https://github.com/AvaloniaUI/Avalonia) (Avalonia, .Desktop, .Win32, .Skia, .HarfBuzz, .Themes.Fluent, .FreeDesktop, .Remote.Protocol, .Fonts.Inter) | 12.0.4 | MIT | Copyright (c) AvaloniaUI OÜ |
+| [Avalonia](https://github.com/AvaloniaUI/Avalonia) (Avalonia, .Desktop, .Win32, .Skia, .HarfBuzz, .Themes.Fluent, .FreeDesktop, .FreeDesktop.AtSpi, .Remote.Protocol, .Fonts.Inter) | 12.1.4 | MIT | Copyright (c) AvaloniaUI OÜ |
 | [Inter](https://github.com/rsms/inter) typeface (in Avalonia.Fonts.Inter) | - | SIL Open Font License 1.1 | Copyright (c) 2016 The Inter Project Authors. Full text: [`licenses/inter-ofl.txt`](licenses/inter-ofl.txt) |
 | [ANGLE](https://chromium.googlesource.com/angle/angle) (Avalonia.Angle.Windows.Natives) | 2.1.27548.20260419 | BSD-3-Clause | Copyright 2018 The ANGLE Project Authors. Full text: [`licenses/angle.txt`](licenses/angle.txt) |
 | [SkiaSharp](https://github.com/mono/SkiaSharp), HarfBuzzSharp | 3.119.4, 8.3.1.3 | MIT | Copyright (c) 2015-2016 Xamarin, Inc.; Copyright (c) 2017-2018 Microsoft Corporation |
 | Skia, HarfBuzz and the libraries they bundle (SkiaSharp / HarfBuzzSharp native assets) | 3.119.4, 8.3.1.3 | BSD-3-Clause, MIT and others | Full notices: [`licenses/skiasharp-harfbuzzsharp-native.txt`](licenses/skiasharp-harfbuzzsharp-native.txt) |
 | [CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet) | 8.4.2 | MIT | Copyright (c) .NET Foundation and Contributors |
-| [Markdig](https://github.com/xoofx/markdig) | 1.4.0 | BSD-2-Clause | Copyright (c) 2016-2026, Alexandre Mutel. Full text: [`licenses/markdig.txt`](licenses/markdig.txt) |
+| [Markdig](https://github.com/xoofx/markdig) | 1.5.0 | BSD-2-Clause | Copyright (c) 2016-2026, Alexandre Mutel. Full text: [`licenses/markdig.txt`](licenses/markdig.txt) |
 | [Material Design Icons](https://github.com/Templarian/MaterialDesign) (the icon paths the GUI and the markdown preview draw, inlined) | - | Pictogrammers Free License (icons: Apache-2.0) | Pictogrammers. Full text: [`licenses/material-design-icons.txt`](licenses/material-design-icons.txt), [`licenses/apache-2.0.txt`](licenses/apache-2.0.txt) |
-| [MicroCom.Runtime](https://github.com/kekekeks/MicroCom) | 0.11.4 | MIT | Copyright (c) 2021 Nikita Tsukanov |
-| [Tmds.DBus.Protocol](https://github.com/tmds/Tmds.DBus) | 0.92.0 | MIT | Copyright 2006 Alp Toker; Copyright 2010 Other Contributors; Copyright 2016 Tom Deseyn |
+| [MicroCom.Runtime](https://github.com/kekekeks/MicroCom) | 0.11.6 | MIT | Copyright (c) 2021 Nikita Tsukanov |
+| [Tmds.DBus.Protocol](https://github.com/tmds/Tmds.DBus) | 0.94.1 | MIT | Copyright 2006 Alp Toker; Copyright 2010 Other Contributors; Copyright 2016 Tom Deseyn |
 
 ## TextMate grammars and themes
 

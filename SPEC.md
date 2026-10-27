@@ -26,12 +26,12 @@ Tagline: *"ls, but for your diffs."*
 ## 3. Stack
 
 - .NET 10; `Nullable` enabled.
-- Avalonia 12.0.4; Avalonia.AvaloniaEdit 12.0.0 + AvaloniaEdit.TextMate 12.0.0; TextMateSharp.Grammars 2.0.4.
-- Markdig 1.4.0 (the markdown preview).
+- Avalonia 12.1.4; Avalonia.AvaloniaEdit 12.0.0 + AvaloniaEdit.TextMate 12.0.0; TextMateSharp.Grammars 2.0.4.
+- Markdig 1.5.0 (the markdown preview).
 - CommunityToolkit.Mvvm 8.4.2.
 - The `git` command (2.11 or later, on PATH) is the git reader: status, diffs, file contents through one long-running `git cat-file --batch`, history, blame. No git library ships.
 - Icons: the Material Design icons the app uses, inlined as path data (`AppIcon` in `Budiff.App`; the markdown preview keeps its own few). No icon package ships.
-- Tests: xunit v3 (`xunit.v3`), with Avalonia.Headless.XUnit for UI snapshot tests; LibGit2Sharp 0.31.0 builds the test fixture repositories (tests only).
+- Tests: xunit v3 (`xunit.v3`), with Avalonia.Headless.XUnit for UI snapshot tests; LibGit2Sharp 0.32.0 builds the test fixture repositories (tests only).
 - License: MIT.
 
 ## 4. What v1 includes
