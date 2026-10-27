@@ -126,6 +126,9 @@ public sealed partial class CodeAnalysisRow : ObservableObject
 
     public AppIconKind Icon { get; init; }
 
+    // A file type's own colour; null keeps the muted text colour.
+    public IBrush? IconTint { get; init; }
+
     public string LinesText { get; init; } = string.Empty;
 
     public string CodeText { get; init; } = string.Empty;
@@ -604,6 +607,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             IsFile = node.IsFile,
             FullPath = node.IsFile ? Path.Combine(_root, node.RelativePath.Replace('/', Path.DirectorySeparatorChar)) : null,
             Icon = IconFor(node),
+            IconTint = node.IsFile ? FileIcons.For(node.Name).Tint : null,
             LinesText = node.IsBinary ? "binary" : N(node.Lines.Total),
             CodeText = node.IsBinary ? string.Empty : N(node.Lines.Code),
             BlankText = node.IsBinary ? string.Empty : N(node.Lines.Blank),
@@ -926,7 +930,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         AnalysisNodeKind.Project => AppIconKind.Package,
         AnalysisNodeKind.Ungrouped => AppIconKind.FolderQuestionOutline,
         AnalysisNodeKind.Folder => AppIconKind.FolderOutline,
-        AnalysisNodeKind.File => AppIconKind.FileOutline,
+        AnalysisNodeKind.File => FileIcons.For(node.Name).Kind,
         _ => AppIconKind.FolderOpenOutline,
     };
 

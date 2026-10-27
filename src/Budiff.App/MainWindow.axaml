@@ -109,6 +109,12 @@
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Foreground" Value="{DynamicResource BudiffMutedTextBrush}" />
         </Style>
+        <!-- The bird's-eye column chooser: one check item per optional column. -->
+        <Style Selector="MenuFlyoutPresenter.columnMenu MenuItem">
+            <Setter Property="Header" Value="{Binding Name}" />
+            <Setter Property="ToggleType" Value="CheckBox" />
+            <Setter Property="IsChecked" Value="{Binding IsOn, Mode=TwoWay}" />
+        </Style>
         <Style Selector="Button.diffTool">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
@@ -368,16 +374,22 @@
                      very narrow pane; clip them at the pane edge instead of letting
                      the header/rows paint under the filter panes. -->
                 <DockPanel x:Name="TreeArea" ClipToBounds="True">
+                    <!-- Right-click the header (or the button in its corner) to pick columns. -->
                     <Border DockPanel.Dock="Top"
+                            Background="Transparent"
                             BorderBrush="{DynamicResource BudiffBorderBrush}"
                             BorderThickness="0,0,0,1"
                             Padding="6,6,18,6">
+                        <Border.ContextFlyout>
+                            <MenuFlyout ItemsSource="{Binding ColumnOptions}" FlyoutPresenterClasses="columnMenu" />
+                        </Border.ContextFlyout>
                         <!-- Every column but Name / Added / Removed sits in an Auto column whose
                              fixed-width content can hide, collapsing the column to zero. Blank /
                              Comment / Files / Size only show without the docked diff; as the pane
                              narrows, columns drop Size, Files, Comment, Blank, then Authors,
-                             Commits, Code and Lines (see MainWindowViewModel.FitColumns). Header
-                             and row cells use matching total widths so the columns stay aligned. -->
+                             Commits, Code and Lines (see MainWindowViewModel.FitColumns); columns
+                             turned off in the chooser never show. Header and row cells use matching
+                             total widths so the columns stay aligned. -->
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <!-- Name keeps a readable minimum; below even the
@@ -449,6 +461,16 @@
                             </Button>
                             <TextBlock Grid.Column="10" Text="Size" FontSize="11" FontWeight="SemiBold" Width="78" IsVisible="{Binding ShowSizeColumn}"
                                        Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" Margin="12,0,0,0" />
+                            <!-- Sits in the header's right padding, above the rows' scrollbar. -->
+                            <Button x:Name="ColumnsButton" Grid.ColumnSpan="11" Classes="diffTool" HorizontalAlignment="Right"
+                                    Width="18" Margin="0,0,-18,0" Padding="0" ToolTip.Tip="Columns">
+                                <app:AppIcon Kind="Tune" Width="13" Height="13"
+                                             Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                                <Button.Flyout>
+                                    <MenuFlyout ItemsSource="{Binding ColumnOptions}" FlyoutPresenterClasses="columnMenu"
+                                                Placement="BottomEdgeAlignedRight" />
+                                </Button.Flyout>
+                            </Button>
                         </Grid>
                     </Border>
 
@@ -492,7 +514,7 @@
                                                              Foreground="{DynamicResource BudiffMutedTextBrush}" />
                                             </Button>
                                         </Panel>
-                                        <app:AppIcon Grid.Column="2" Kind="{Binding Icon}" Width="15" Height="15"
+                                        <app:AppIcon Grid.Column="2" Kind="{Binding Icon}" Tint="{Binding IconTint}" Width="15" Height="15"
                                                      Foreground="{DynamicResource BudiffMutedTextBrush}" />
                                         <TextBlock Grid.Column="3" app:NameInlines.Runs="{Binding NameRuns}" Padding="2,0" Margin="6,0,0,0"
                                                    HorizontalAlignment="Left"

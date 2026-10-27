@@ -37,9 +37,15 @@ public sealed partial class MainWindow : Window
     }
 
     public MainWindow(string startPath, bool gitRoot)
+        : this(startPath, gitRoot, settings: null)
+    {
+    }
+
+    // settings: where the GUI's preferences live (null = the user's own).
+    internal MainWindow(string startPath, bool gitRoot, AppSettings? settings)
     {
         InitializeComponent();
-        _viewModel = new MainWindowViewModel(startPath, gitRoot);
+        _viewModel = new MainWindowViewModel(startPath, gitRoot, settings);
         DataContext = _viewModel;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         _viewModel.Analysis.PropertyChanged += OnAnalysisPropertyChanged;
