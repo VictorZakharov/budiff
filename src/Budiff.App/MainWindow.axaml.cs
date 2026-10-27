@@ -14,10 +14,8 @@ namespace Budiff.App;
 
 public sealed partial class MainWindow : Window
 {
-    // Narrowest docked bird's-eye: Name's minimum plus Added / Removed and the
-    // row padding (330) - the optional columns drop out before this is reached -
-    // rounded up to what the wrapped toolbar's first row needs.
-    private const double BirdsEyeMinWidth = 365;
+    // Left + right padding of the bird's-eye toolbar.
+    private const double ToolbarPadding = 20;
 
     // Horizontal padding around the header/row grids (6 left, 18 right).
     private const double TreeRowPadding = 24;
@@ -151,21 +149,47 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        // PeriodBar's desired width already includes its left margin.
-        var oneRow = GroupingSwitch.DesiredSize.Width + PeriodBar.DesiredSize.Width + ToolbarGap
+        // Widths without the wrap-dependent left margins.
+        var grouping = GroupingSwitch.DesiredSize.Width;
+        var period = PeriodBar.DesiredSize.Width - PeriodBar.Margin.Left;
+        var oneRow = grouping + ToolbarGap + period + ToolbarGap
             + FilterComfortWidth + FilterRow.ColumnSpacing + ResetButton.DesiredSize.Width;
-        var wrap = available < oneRow;
-        var row = wrap ? 1 : 0;
-        if (Grid.GetRow(FilterRow) == row)
+        var filterWraps = available < oneRow;
+        var periodWraps = available < grouping + ToolbarGap + period;
+        var filterRow = !filterWraps ? 0 : periodWraps ? 2 : 1;
+        var periodRow = periodWraps ? 1 : 0;
+        if (Grid.GetRow(FilterRow) == filterRow && Grid.GetRow(PeriodBar) == periodRow)
         {
             return;
         }
 
-        Grid.SetRow(FilterRow, row);
-        Grid.SetColumn(FilterRow, wrap ? 0 : 2);
-        Grid.SetColumnSpan(FilterRow, wrap ? 4 : 1);
-        FilterRow.Margin = new Thickness(wrap ? 0 : ToolbarGap, 0, 0, 0);
-        ToolbarGrid.RowSpacing = wrap ? 8 : 0;
+        Grid.SetRow(PeriodBar, periodRow);
+        Grid.SetColumn(PeriodBar, periodWraps ? 0 : 1);
+        Grid.SetColumnSpan(PeriodBar, periodWraps ? 4 : 1);
+        PeriodBar.Margin = new Thickness(periodWraps ? 0 : ToolbarGap, 0, 0, 0);
+
+        Grid.SetRow(FilterRow, filterRow);
+        Grid.SetColumn(FilterRow, filterWraps ? 0 : 2);
+        Grid.SetColumnSpan(FilterRow, filterWraps ? 4 : 1);
+        FilterRow.Margin = new Thickness(filterWraps ? 0 : ToolbarGap, 0, 0, 0);
+
+        // Only as many rows as are used: RowSpacing counts empty rows too.
+        var rows = Math.Max(filterRow, periodRow) + 1;
+        ToolbarGrid.RowDefinitions = new RowDefinitions(string.Join(",", Enumerable.Repeat("Auto", rows)));
+        ToolbarGrid.RowSpacing = rows > 1 ? 8 : 0;
+    }
+
+    // Narrowest docked bird's-eye: Name's minimum, the Added / Removed columns
+    // when on and the row padding (the optional columns drop out before this
+    // is reached), or the fully wrapped toolbar's widest row if that is wider.
+    private double BirdsEyeMinWidth()
+    {
+        var tree = MainWindowViewModel.NameMinWidth + TreeRowPadding
+            + (_viewModel.ShowAddedColumn ? MainWindowViewModel.ChurnColumnWidth : 0)
+            + (_viewModel.ShowRemovedColumn ? MainWindowViewModel.ChurnColumnWidth : 0);
+        var toolbar = ToolbarPadding
+            + Math.Max(GroupingSwitch.DesiredSize.Width, PeriodBar.DesiredSize.Width - PeriodBar.Margin.Left);
+        return Math.Ceiling(Math.Max(tree, toolbar));
     }
 
     internal MainWindowViewModel ViewModel => _viewModel;
@@ -195,6 +219,13 @@ public sealed partial class MainWindow : Window
         if (e.PropertyName is nameof(MainWindowViewModel.ShowWideColumns))
         {
             FitColumns();
+        }
+
+        // Fewer always-on columns let the docked bird's-eye go narrower.
+        if (e.PropertyName is nameof(MainWindowViewModel.ShowAddedColumn)
+            or nameof(MainWindowViewModel.ShowRemovedColumn))
+        {
+            ClampDockedDiff();
         }
     }
 
@@ -255,7 +286,7 @@ public sealed partial class MainWindow : Window
             }
             else
             {
-                cols[0].MinWidth = BirdsEyeMinWidth;
+                cols[0].MinWidth = BirdsEyeMinWidth();
                 cols[0].Width = new GridLength(1, GridUnitType.Star);
                 cols[1].Width = new GridLength(5);
                 cols[2].MinWidth = 360;
@@ -297,7 +328,7 @@ public sealed partial class MainWindow : Window
         }
 
         var splitter = cols[1].Width.Value;
-        var treeMin = Math.Clamp(available - 360 - splitter, 0, BirdsEyeMinWidth);
+        var treeMin = Math.Clamp(available - 360 - splitter, 0, BirdsEyeMinWidth());
         var diffMin = Math.Clamp(available - treeMin - splitter, 0, 360);
         cols[0].MinWidth = treeMin;
         cols[2].MinWidth = diffMin;

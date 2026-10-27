@@ -255,6 +255,68 @@ public sealed class BirdsEyeColumnTests
         window.Close();
     }
 
+    // Next to the docked diff the bird's-eye goes as narrow as what it still
+    // shows: Name plus the Added / Removed columns that are on, with the period
+    // controls and the filter wrapping to rows of their own - and nothing
+    // in the toolbar cut off.
+    [AvaloniaFact]
+    public void DockedBirdsEye_NarrowsToItsShownColumns()
+    {
+        var root = ReadmeFixture.BuildFixtureRepo("budiff-pane-min");
+        var window = new MainWindow(root, gitRoot: true, AppSettings.Load(TempSettings())) { Width = 1400, Height = 700 };
+        window.Show();
+        var vm = window.ViewModel;
+        WaitUntil(() => !vm.Analysis.IsScanning && vm.Analysis.Roots.Count > 0, "bird's-eye scan");
+        var file = vm.Analysis.Roots.SelectMany(r => r.SelfAndDescendants()).First(r => r.IsFile && r.Name == "Program.cs");
+        _ = vm.Analysis.OpenAsync(file);
+        WaitUntil(() => vm.IsDiffOpen && vm.ShowDiffPane, "diff open");
+
+        // Drag the diff as wide as it goes: the bird's-eye sits at its minimum.
+        var cols = window.FindControl<Grid>("BodyGrid")!.ColumnDefinitions;
+        var pane = window.FindControl<DockPanel>("BirdsEyePanel")!;
+        double Narrowest()
+        {
+            cols[2].Width = new GridLength(5000);
+            UiSnapshot.Pump();
+            UiSnapshot.Pump();
+            UiSnapshot.Pump();
+            return pane.Bounds.Width;
+        }
+
+        Assert.Equal(330, Narrowest(), 0.5);
+        AssertToolbarFits(window, pane);
+
+        Option(vm, "Removed").IsOn = false;
+        Assert.Equal(252, Narrowest(), 0.5);
+        AssertToolbarFits(window, pane);
+        UiSnapshot.Capture(window, "birdseye-docked-narrow");
+
+        // Without Added either, the wrapped toolbar's widest row sets it.
+        Option(vm, "Added").IsOn = false;
+        var bare = Narrowest();
+        Assert.InRange(bare, 180, 230);
+        AssertToolbarFits(window, pane);
+
+        // Back on: the pane widens to fit them again.
+        vm.ResetColumnsCommand.Execute(null);
+        Assert.Equal(330, Narrowest(), 0.5);
+        window.Close();
+    }
+
+    private static void AssertToolbarFits(MainWindow window, Control pane)
+    {
+        var period = window.FindControl<Control>("PeriodBar")!;
+        var filter = window.FindControl<Control>("FilterRow")!;
+        Assert.Equal(1, Grid.GetRow(period));
+        Assert.Equal(2, Grid.GetRow(filter));
+        foreach (var name in new[] { "GroupingSwitch", "PeriodBar", "ResetButton" })
+        {
+            var control = window.FindControl<Control>(name)!;
+            var right = global::Avalonia.VisualExtensions.TranslatePoint(control, new global::Avalonia.Point(control.Bounds.Width, 0), pane)!.Value.X;
+            Assert.True(right <= pane.Bounds.Width + 0.5, $"{name} ends at {right}, pane is {pane.Bounds.Width}");
+        }
+    }
+
     private static BirdsEyeColumnOption Option(MainWindowViewModel vm, string name) => vm.ColumnOptions.Single(o => o.Name == name);
 
     private static string TempDir(string prefix) => Directory.CreateTempSubdirectory(prefix).FullName;

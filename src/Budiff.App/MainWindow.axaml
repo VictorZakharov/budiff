@@ -200,8 +200,9 @@
                         ClipToBounds="True">
                     <StackPanel Spacing="8">
                         <!-- When the filter box would get too narrow, it wraps (with
-                             Reset) to a second row (MainWindow.UpdateToolbarWrap). Past
-                             that the toolbar clips at the pane edge instead of controls
+                             Reset) to a second row; narrower still, the period controls
+                             wrap under the grouping switch too (MainWindow.UpdateToolbarWrap).
+                             Past that the toolbar clips at the pane edge instead of controls
                              painting over each other. Gaps are left margins, not
                              ColumnSpacing, so empty columns cost no width. -->
                         <Grid x:Name="ToolbarGrid" RowDefinitions="Auto,Auto">
