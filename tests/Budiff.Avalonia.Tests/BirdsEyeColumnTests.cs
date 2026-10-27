@@ -364,6 +364,16 @@ public sealed class BirdsEyeColumnTests
     {
         var root = ReadmeFixture.BuildFixtureRepo("budiff-name-span");
         File.WriteAllText(Path.Combine(root, "theme.component.scss"), "a { }\n");
+
+        // Long names WITH churn, like an Angular folder: they run up to the number.
+        using (var repo = new LibGit2Sharp.Repository(root))
+        {
+            ReadmeFixture.Commit(repo, ReadmeFixture.Sig("Ada Lovelace", "ada@example.com", daysAgo: 2), "Add the activity components", new()
+            {
+                ["activity-chart.component.ts"] = string.Concat(Enumerable.Repeat("export const x = 1;\n", 82)),
+                ["activity-chart.component.spec.ts"] = string.Concat(Enumerable.Repeat("it('works');\n", 8)),
+            });
+        }
         var settings = AppSettings.Load(TempSettings());
         settings.HiddenColumns.Add("Removed");
         var window = new MainWindow(root, gitRoot: true, settings) { Width = 1400, Height = 700 };
@@ -385,10 +395,31 @@ public sealed class BirdsEyeColumnTests
             .Select(b => (Grid)b.Parent!)
             .Single();
 
-        // README.md has Added churn: its name stops before Added. build.ps1 has
-        // none: its name runs to the end of the row.
-        Assert.Equal(6, Grid.GetColumnSpan(NameCell("README.md")));
-        Assert.Equal(NameSpanConverter.ColumnCount, Grid.GetColumnSpan(NameCell("build.ps1")));
+        // README.md has Added churn: its name runs into the Added cell but
+        // keeps clear of the number. build.ps1 has none: its name runs to the
+        // end of the row.
+        var readme = NameCell("README.md");
+        Assert.Equal(7, Grid.GetColumnSpan(readme));
+        Assert.True(readme.Margin.Right > 8);
+        Assert.Equal(NameExtent.ColumnCount, Grid.GetColumnSpan(NameCell("build.ps1")));
+        Assert.Equal(0, NameCell("build.ps1").Margin.Right);
+
+        // No name cell reaches into the number it stops at.
+        foreach (var cell in global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(window).OfType<TextBlock>()
+                     .Where(b => b.TextTrimming == global::Avalonia.Media.TextTrimming.CharacterEllipsis && b.DataContext is CodeAnalysisRow)
+                     .Select(b => (Grid)b.Parent!))
+        {
+            var number = ((Grid)cell.Parent!).Children.OfType<TextBlock>()
+                .SingleOrDefault(b => b.Classes.Contains("num") && Grid.GetColumn(b) == 6 && b.Text is { Length: > 0 });
+            if (number is null)
+            {
+                continue;
+            }
+
+            var nameRight = global::Avalonia.VisualExtensions.TranslatePoint(cell, new global::Avalonia.Point(cell.Bounds.Width, 0), window)!.Value.X;
+            var numberLeft = global::Avalonia.VisualExtensions.TranslatePoint(number, new global::Avalonia.Point(number.Bounds.Width - number.TextLayout.WidthIncludingTrailingWhitespace, 0), window)!.Value.X;
+            Assert.True(nameRight <= numberLeft - 4, $"{((CodeAnalysisRow)cell.DataContext!).Name}: name ends at {nameRight}, number starts at {numberLeft}");
+        }
 
         // The long name is not trimmed where the row has the room.
         var longName = NameCell("theme.component.scss");
@@ -397,7 +428,7 @@ public sealed class BirdsEyeColumnTests
         var added = rowGrid.Children.OfType<TextBlock>().Single(b => Grid.GetColumn(b) == 6);
         if (added.Text is { Length: > 0 })
         {
-            Assert.Equal(6, Grid.GetColumnSpan(longName));
+            Assert.Equal(7, Grid.GetColumnSpan(longName));
         }
         else
         {

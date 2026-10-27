@@ -109,10 +109,10 @@ internal static class ReadmeFixture
         return root;
     }
 
-    private static Signature Sig(string name, string email, int daysAgo)
+    internal static Signature Sig(string name, string email, int daysAgo)
         => new(name, email, DateTimeOffset.Now.AddDays(-daysAgo));
 
-    private static void Commit(Repository repo, Signature author, string message, Dictionary<string, string> files)
+    internal static void Commit(Repository repo, Signature author, string message, Dictionary<string, string> files)
     {
         foreach (var (path, content) in files)
         {

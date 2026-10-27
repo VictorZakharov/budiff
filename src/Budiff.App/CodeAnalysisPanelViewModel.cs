@@ -149,20 +149,21 @@ public sealed partial class CodeAnalysisRow : ObservableObject
 
     public double BarFraction { get; init; }
 
-    // Whether this row shows nothing in a bird's-eye grid column (1 = Lines
-    // ... 10 = Size): the name may run on over it (NameSpanConverter).
-    internal bool IsCellEmpty(int column) => column switch
+    // What this row shows in a bird's-eye number column (1 = Lines ... 9 =
+    // Authors): the name runs on over empty ones and up to the first number
+    // (NameExtent).
+    internal string CellText(int column) => column switch
     {
-        1 => LinesText.Length == 0,
-        2 => CodeText.Length == 0,
-        3 => BlankText.Length == 0,
-        4 => CommentText.Length == 0,
-        5 => FilesText.Length == 0,
-        6 => AddedText.Length == 0,
-        7 => RemovedText.Length == 0,
-        8 => CommitsText.Length == 0,
-        9 => AuthorsText.Length == 0,
-        _ => false,
+        1 => LinesText,
+        2 => CodeText,
+        3 => BlankText,
+        4 => CommentText,
+        5 => FilesText,
+        6 => AddedText,
+        7 => RemovedText,
+        8 => CommitsText,
+        9 => AuthorsText,
+        _ => string.Empty,
     };
 
     public ObservableCollection<CodeAnalysisRow> Children { get; } = new();

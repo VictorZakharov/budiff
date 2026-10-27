@@ -533,7 +533,8 @@
                                     <!-- Auto,Auto,Auto,* (not a StackPanel) so the name TRIMS
                                          when the cell is tight instead of pushing the row wider.
                                          Indent + chevron live here (chromeless TreeViewItem). -->
-                                    <!-- The name runs on over the empty cells to its right (NameSpanConverter). -->
+                                    <!-- The name runs on over the empty cells to its right and up to
+                                         the next number, keeping clear of it (NameExtent). -->
                                     <Grid Grid.Column="0" ColumnDefinitions="Auto,Auto,Auto,*" VerticalAlignment="Center">
                                         <Grid.ColumnSpan>
                                             <MultiBinding Converter="{x:Static app:NameSpanConverter.Instance}">
@@ -541,6 +542,12 @@
                                                 <Binding Path="$parent[Window].DataContext.VisibleCells" />
                                             </MultiBinding>
                                         </Grid.ColumnSpan>
+                                        <Grid.Margin>
+                                            <MultiBinding Converter="{x:Static app:NameReserveConverter.Instance}">
+                                                <Binding />
+                                                <Binding Path="$parent[Window].DataContext.VisibleCells" />
+                                            </MultiBinding>
+                                        </Grid.Margin>
                                         <Border Width="{Binding IndentWidth}" />
                                         <Panel Grid.Column="1" Width="18">
                                             <Button Classes="chevron" Click="OnToggleExpand" IsVisible="{Binding !IsFile}">
