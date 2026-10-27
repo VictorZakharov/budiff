@@ -182,10 +182,10 @@ public sealed class NarrowLayoutTests
         }
 
         Assert.Equal(new[] { 4, 3, 2, 1, 0 }, seen);
-        Assert.Equal(1, global::Avalonia.Controls.Grid.GetRow(filterRow));
+        Assert.True(global::Avalonia.Controls.Grid.GetRow(filterRow) > 0);
 
-        // Wrapped, the filter box and Reset both sit inside the pane.
-        var reset = window.FindControl<global::Avalonia.Controls.Button>("ResetButton")!;
+        // Wrapped, the filter box (Reset is its X) sits inside the pane.
+        var reset = window.FindControl<global::Avalonia.Controls.TextBox>("FilterBox")!;
         var birdsEye = window.FindControl<global::Avalonia.Controls.DockPanel>("BirdsEyePanel")!;
         var resetRight = AvaloniaVisualExtensions.TranslatePoint(reset, new global::Avalonia.Point(reset.Bounds.Width, 0), birdsEye)!.Value.X;
         Assert.True(resetRight <= birdsEye.Bounds.Width, $"Reset ends at {resetRight}, pane is {birdsEye.Bounds.Width}");

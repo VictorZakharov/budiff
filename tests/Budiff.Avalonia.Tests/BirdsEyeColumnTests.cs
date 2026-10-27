@@ -291,10 +291,10 @@ public sealed class BirdsEyeColumnTests
         AssertToolbarFits(window, pane);
         UiSnapshot.Capture(window, "birdseye-docked-narrow");
 
-        // Without Added either, the wrapped toolbar's widest row sets it.
+        // Without Added either, only Name's minimum is left (the compact
+        // toolbar's widest row is narrower still).
         Option(vm, "Added").IsOn = false;
-        var bare = Narrowest();
-        Assert.InRange(bare, 180, 230);
+        Assert.Equal(174, Narrowest(), 0.5);
         AssertToolbarFits(window, pane);
 
         // Back on: the pane widens to fit them again.
@@ -303,13 +303,54 @@ public sealed class BirdsEyeColumnTests
         window.Close();
     }
 
+    // Reset is an X inside the filter box, there only while the view differs
+    // from its defaults; the wide toolbar keeps the "Period" label.
+    [AvaloniaFact]
+    public void FilterBoxX_ResetsTheView()
+    {
+        var root = ReadmeFixture.BuildFixtureRepo("budiff-filter-x");
+        var window = new MainWindow(root, gitRoot: true, AppSettings.Load(TempSettings())) { Width = 1440, Height = 640 };
+        window.Show();
+        var vm = window.ViewModel;
+        WaitUntil(() => !vm.Analysis.IsScanning && vm.Analysis.Roots.Count > 0, "bird's-eye scan");
+        var x = window.FindControl<Button>("ResetButton")!;
+        Assert.True(window.FindControl<Control>("PeriodLabel")!.IsVisible);
+        Assert.Equal(0, Grid.GetRow(window.FindControl<Control>("FilterRow")!));
+        Assert.Null(global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(window).OfType<Button>()
+            .FirstOrDefault(b => Equals(b.Content, "Reset")));
+        Assert.False(x.IsEffectivelyVisible);
+        Assert.Matches(@"^\d+ files - [\d,]+ lines - \d+ commits? - \d+ authors?$", vm.Analysis.SummaryText);
+
+        vm.Analysis.SearchText = "Line";
+        UiSnapshot.Pump();
+        Assert.True(x.IsEffectivelyVisible);
+        UiSnapshot.Capture(window, "birdseye-filter-x");
+        x.Command!.Execute(null);
+        UiSnapshot.Pump();
+        Assert.Equal(string.Empty, vm.Analysis.SearchText);
+        Assert.False(x.IsEffectivelyVisible);
+
+        // An unticked extension counts too.
+        vm.Analysis.Extensions[0].Included = false;
+        UiSnapshot.Pump();
+        Assert.True(x.IsEffectivelyVisible);
+        x.Command!.Execute(null);
+        UiSnapshot.Pump();
+        Assert.True(vm.Analysis.Extensions[0].Included);
+        Assert.False(x.IsEffectivelyVisible);
+        window.Close();
+    }
+
     private static void AssertToolbarFits(MainWindow window, Control pane)
     {
-        var period = window.FindControl<Control>("PeriodBar")!;
-        var filter = window.FindControl<Control>("FilterRow")!;
-        Assert.Equal(1, Grid.GetRow(period));
-        Assert.Equal(2, Grid.GetRow(filter));
-        foreach (var name in new[] { "GroupingSwitch", "PeriodBar", "ResetButton" })
+        // Compact: the filter on a row of its own, the "Period" label gone.
+        Assert.True(Grid.GetRow(window.FindControl<Control>("FilterRow")!) > 0);
+        Assert.False(window.FindControl<Control>("PeriodLabel")!.IsVisible);
+
+        // The summary wraps rather than running off the pane edge.
+        var summary = window.FindControl<TextBlock>("SummaryLine")!;
+        Assert.DoesNotContain(summary.TextLayout.TextLines, line => line.Width > summary.Bounds.Width + 0.5);
+        foreach (var name in new[] { "GroupingSwitch", "PeriodBar", "FilterBox", "SummaryLine" })
         {
             var control = window.FindControl<Control>(name)!;
             var right = global::Avalonia.VisualExtensions.TranslatePoint(control, new global::Avalonia.Point(control.Bounds.Width, 0), pane)!.Value.X;

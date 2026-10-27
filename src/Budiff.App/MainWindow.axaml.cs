@@ -149,34 +149,55 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        // Widths without the wrap-dependent left margins.
+        // Widths without the wrap-dependent left margins and the label.
         var grouping = GroupingSwitch.DesiredSize.Width;
-        var period = PeriodBar.DesiredSize.Width - PeriodBar.Margin.Left;
-        var oneRow = grouping + ToolbarGap + period + ToolbarGap
-            + FilterComfortWidth + FilterRow.ColumnSpacing + ResetButton.DesiredSize.Width;
-        var filterWraps = available < oneRow;
-        var periodWraps = available < grouping + ToolbarGap + period;
-        var filterRow = !filterWraps ? 0 : periodWraps ? 2 : 1;
+        var period = PeriodWithoutLabel();
+        var label = _periodLabelWidth + PeriodBar.Spacing;
+        var oneRow = grouping + ToolbarGap + label + period + ToolbarGap + FilterComfortWidth;
+
+        // Compact once the filter no longer fits on the first row: the filter
+        // wraps under it and the "Period" label goes (the picker says it); if
+        // even then the picker does not fit beside the switch, it wraps too.
+        var compact = available < oneRow;
+        var periodWraps = available < grouping + ToolbarGap + period + (compact ? 0 : label);
+        var filterRow = !compact ? 0 : periodWraps ? 2 : 1;
         var periodRow = periodWraps ? 1 : 0;
-        if (Grid.GetRow(FilterRow) == filterRow && Grid.GetRow(PeriodBar) == periodRow)
+        if (Grid.GetRow(FilterRow) == filterRow && Grid.GetRow(PeriodBar) == periodRow && PeriodLabel.IsVisible != compact)
         {
             return;
         }
 
+        PeriodLabel.IsVisible = !compact;
         Grid.SetRow(PeriodBar, periodRow);
         Grid.SetColumn(PeriodBar, periodWraps ? 0 : 1);
         Grid.SetColumnSpan(PeriodBar, periodWraps ? 4 : 1);
         PeriodBar.Margin = new Thickness(periodWraps ? 0 : ToolbarGap, 0, 0, 0);
 
         Grid.SetRow(FilterRow, filterRow);
-        Grid.SetColumn(FilterRow, filterWraps ? 0 : 2);
-        Grid.SetColumnSpan(FilterRow, filterWraps ? 4 : 1);
-        FilterRow.Margin = new Thickness(filterWraps ? 0 : ToolbarGap, 0, 0, 0);
+        Grid.SetColumn(FilterRow, compact ? 0 : 2);
+        Grid.SetColumnSpan(FilterRow, compact ? 4 : 1);
+        FilterRow.Margin = new Thickness(compact ? 0 : ToolbarGap, 0, 0, 0);
 
         // Only as many rows as are used: RowSpacing counts empty rows too.
         var rows = Math.Max(filterRow, periodRow) + 1;
         ToolbarGrid.RowDefinitions = new RowDefinitions(string.Join(",", Enumerable.Repeat("Auto", rows)));
         ToolbarGrid.RowSpacing = rows > 1 ? 8 : 0;
+    }
+
+    // The "Period" label's width, remembered from when it last showed.
+    private double _periodLabelWidth = 40;
+
+    // The period controls' width without the label and the left margin.
+    private double PeriodWithoutLabel()
+    {
+        var width = PeriodBar.DesiredSize.Width - PeriodBar.Margin.Left;
+        if (PeriodLabel.IsVisible && PeriodLabel.DesiredSize.Width > 0)
+        {
+            _periodLabelWidth = PeriodLabel.DesiredSize.Width;
+            width -= _periodLabelWidth + PeriodBar.Spacing;
+        }
+
+        return width;
     }
 
     // Narrowest docked bird's-eye: Name's minimum, the Added / Removed columns
@@ -187,8 +208,7 @@ public sealed partial class MainWindow : Window
         var tree = MainWindowViewModel.NameMinWidth + TreeRowPadding
             + (_viewModel.ShowAddedColumn ? MainWindowViewModel.ChurnColumnWidth : 0)
             + (_viewModel.ShowRemovedColumn ? MainWindowViewModel.ChurnColumnWidth : 0);
-        var toolbar = ToolbarPadding
-            + Math.Max(GroupingSwitch.DesiredSize.Width, PeriodBar.DesiredSize.Width - PeriodBar.Margin.Left);
+        var toolbar = ToolbarPadding + Math.Max(GroupingSwitch.DesiredSize.Width, PeriodWithoutLabel());
         return Math.Ceiling(Math.Max(tree, toolbar));
     }
 

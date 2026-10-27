@@ -265,8 +265,7 @@ public sealed class PullRequestModeTests
         Assert.Equal(new[] { "LineDiff.cs", "README.md" }, AllFiles(vm).Select(r => r.Name).Order(StringComparer.Ordinal));
         Assert.Equal("#7 Simplify the line diff and make the README mention the gitroot flag for whole-repo scope", vm.Analysis.PullRequestLabel);
         Assert.True(vm.Analysis.IsPullRequestPeriod);
-        Assert.Contains("in PR #7", vm.Analysis.SummaryTail);
-        Assert.Contains("1 commits, 1 authors", vm.Analysis.SummaryTail);
+        Assert.Equal("2 files - " + vm.Analysis.SummaryText.Split(" - ")[1] + " - 1 commit - 1 author", vm.Analysis.SummaryText);
 
         var row = AllFiles(vm).Single(r => r.Name == "LineDiff.cs");
         Assert.Equal("-7", row.RemovedText);

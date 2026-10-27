@@ -235,7 +235,8 @@
                             </Border>
 
                             <StackPanel Grid.Column="1" x:Name="PeriodBar" Margin="10,0,0,0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                <TextBlock Text="Period" Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
+                                <!-- Hidden in the compact (wrapped) toolbar: the picker says it. -->
+                                <TextBlock x:Name="PeriodLabel" Text="Period" Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
                                 <!-- Picking "Pull request..." again reopens the picker. -->
                                 <app:RepickComboBox x:Name="PeriodBox"
                                                     Width="132"
@@ -281,18 +282,27 @@
                                 </Button>
                             </StackPanel>
 
-                            <Grid Grid.Column="2" x:Name="FilterRow" Margin="10,0,0,0" ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                            <!-- Reset lives inside the filter box: an X that shows once the
+                                 view differs from its defaults (filter, extension / author
+                                 checks, sort, grouping, period) and puts them all back. -->
+                            <Grid Grid.Column="2" x:Name="FilterRow" Margin="10,0,0,0">
                                 <TextBox x:Name="FilterBox"
                                          MinWidth="84"
                                          PlaceholderText="Filter files..."
                                          Text="{Binding Analysis.SearchText, Mode=TwoWay}"
-                                         VerticalAlignment="Center" />
-
-                                <Button Grid.Column="1"
-                                        x:Name="ResetButton"
-                                        Content="Reset"
-                                        Command="{Binding Analysis.ResetViewCommand}"
-                                        Padding="10,5" />
+                                         VerticalAlignment="Center">
+                                    <TextBox.InnerRightContent>
+                                        <Button x:Name="ResetButton"
+                                                Classes="diffTool"
+                                                Margin="0,0,4,0"
+                                                IsVisible="{Binding Analysis.CanResetView}"
+                                                Command="{Binding Analysis.ResetViewCommand}"
+                                                ToolTip.Tip="Reset the view: filter, extensions, authors, sort, grouping and period">
+                                            <app:AppIcon Kind="Close" Width="14" Height="14"
+                                                         Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                                        </Button>
+                                    </TextBox.InnerRightContent>
+                                </TextBox>
                             </Grid>
 
                             <StackPanel Grid.Column="3" x:Name="ScanIndicator" Margin="10,0,0,0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"
@@ -302,13 +312,9 @@
                             </StackPanel>
                         </Grid>
 
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="{Binding Analysis.SummaryHead}" FontSize="12" Foreground="{DynamicResource BudiffMutedTextBrush}" />
-                            <TextBlock Text="{Binding Analysis.SummaryCode}" FontSize="12" Foreground="{DynamicResource BudiffTextBrush}" />
-                            <TextBlock Text="{Binding Analysis.SummaryBlank}" FontSize="12" Foreground="#6E747E" />
-                            <TextBlock Text="{Binding Analysis.SummaryComment}" FontSize="12" Foreground="#5E8C5E" />
-                            <TextBlock Text="{Binding Analysis.SummaryTail}" FontSize="12" Foreground="{DynamicResource BudiffMutedTextBrush}" />
-                        </StackPanel>
+                        <!-- Wraps in a narrow pane instead of running off its edge. -->
+                        <TextBlock x:Name="SummaryLine" Text="{Binding Analysis.SummaryText}" FontSize="12" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource BudiffMutedTextBrush}" />
                     </StackPanel>
                 </Border>
 

@@ -230,19 +230,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     private bool _isScanning;
 
     [ObservableProperty]
-    private string _summaryHead = "Scanning...";
-
-    [ObservableProperty]
-    private string _summaryCode = string.Empty;
-
-    [ObservableProperty]
-    private string _summaryBlank = string.Empty;
-
-    [ObservableProperty]
-    private string _summaryComment = string.Empty;
-
-    [ObservableProperty]
-    private string _summaryTail = string.Empty;
+    private string _summaryText = "Scanning...";
 
     [ObservableProperty]
     private bool _gitAvailable;
@@ -438,6 +426,15 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         Rebuild();
     }
 
+    // Anything ResetView would change: the filter box's X shows while true.
+    public bool CanResetView =>
+        !string.IsNullOrEmpty(SearchText)
+        || SortKey != AnalysisSortKey.Lines || SortAscending
+        || SelectedGrouping != Groupings[0]
+        || SelectedPeriod != DefaultPeriod
+        || Extensions.Any(e => !e.Included)
+        || Authors.Any(a => !a.Included);
+
     [RelayCommand]
     private void ResetView()
     {
@@ -526,6 +523,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
     private void Rebuild()
     {
+        OnPropertyChanged(nameof(CanResetView));
         if (_suspendRebuild || !_ready || _scan is null)
         {
             return;
@@ -630,45 +628,31 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         return row;
     }
 
+    // Just the counts: files, lines, and (with git) commits and authors.
     private void SetSummary(AnalysisNode root)
     {
-        SummaryHead = $"{root.FileCount:N0} files - {N(root.Lines.Total)} lines (";
-        SummaryCode = $"{N(root.Lines.Code)} code";
-        SummaryBlank = $" / {N(root.Lines.Blank)} blank";
-        SummaryComment = $" / {N(root.Lines.Comment)} comment";
-
-        var tail = ")";
+        var parts = new List<string> { Count(root.FileCount, "file"), Count(root.Lines.Total, "line") };
         if (_history is not null)
         {
-            if (_appliedPullRequest is { } pr)
-            {
-                tail += $"  -  +{N(root.Added)} / -{N(root.Removed)} in PR #{pr.PullRequest.Number}";
-            }
-            else if (Historical)
-            {
-                tail += $"  -  +{N(root.Added)} / -{N(root.Removed)} in window";
-            }
-
-            tail += $"  -  {root.CommitCount:N0} commits, {root.AuthorCount:N0} authors";
+            parts.Add(Count(root.CommitCount, "commit"));
+            parts.Add(Count(root.AuthorCount, "author"));
         }
         else if (!GitAvailable)
         {
-            tail += "  -  no git repository";
+            parts.Add("no git repository");
         }
 
         if (_scan?.Truncated == true)
         {
-            tail += "  -  list capped";
+            parts.Add("list capped");
         }
 
-        SummaryTail = tail;
+        SummaryText = string.Join(" - ", parts);
     }
 
-    private void ShowMessage(string message)
-    {
-        SummaryHead = message;
-        SummaryCode = SummaryBlank = SummaryComment = SummaryTail = string.Empty;
-    }
+    private static string Count(long value, string noun) => $"{N(value)} {noun}{(value == 1 ? string.Empty : "s")}";
+
+    private void ShowMessage(string message) => SummaryText = message;
 
     private void SetAllExtensions(bool included) => SetAllFilterItems(Extensions, included, UpdateExtensionToggleState);
 
@@ -705,6 +689,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
     partial void OnSearchTextChanged(string value)
     {
+        OnPropertyChanged(nameof(CanResetView));
         if (_ready && !_suspendRebuild)
         {
             ApplySearch();
@@ -728,6 +713,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
     partial void OnSelectedPeriodChanged(PeriodOption value)
     {
+        OnPropertyChanged(nameof(CanResetView));
         IsCustomPeriod = value.IsCustom;
         IsPullRequestPeriod = value.IsPullRequest;
         if (value.IsPullRequest)
