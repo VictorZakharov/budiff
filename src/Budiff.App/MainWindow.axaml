@@ -12,18 +12,11 @@
         Title="{Binding WindowTitle}">
     <Window.Resources>
         <!-- The bird's-eye column chooser, shared by the header's right-click and
-             its corner button. Items follow MainWindowViewModel.ColumnOptions. -->
+             its corner button. One check item per column goes between the
+             separators, added in code (MainWindow.AddColumnMenuItems). -->
         <MenuFlyout x:Key="ColumnMenu" Placement="BottomEdgeAlignedRight">
             <MenuItem Header="All columns" ToggleType="CheckBox" IsChecked="{Binding AllColumnsOn, Mode=TwoWay}" />
             <Separator />
-            <MenuItem Header="{Binding ColumnOptions[0].Name}" ToggleType="CheckBox" IsChecked="{Binding ColumnOptions[0].IsOn, Mode=TwoWay}" />
-            <MenuItem Header="{Binding ColumnOptions[1].Name}" ToggleType="CheckBox" IsChecked="{Binding ColumnOptions[1].IsOn, Mode=TwoWay}" />
-            <MenuItem Header="{Binding ColumnOptions[2].Name}" ToggleType="CheckBox" IsChecked="{Binding ColumnOptions[2].IsOn, Mode=TwoWay}" />
-            <MenuItem Header="{Binding ColumnOptions[3].Name}" ToggleType="CheckBox" IsChecked="{Binding ColumnOptions[3].IsOn, Mode=TwoWay}" />
-            <MenuItem Header="{Binding ColumnOptions[4].Name}" ToggleType="CheckBox" IsChecked="{Binding ColumnOptions[4].IsOn, Mode=TwoWay}" />
-            <MenuItem Header="{Binding ColumnOptions[5].Name}" ToggleType="CheckBox" IsChecked="{Binding ColumnOptions[5].IsOn, Mode=TwoWay}" />
-            <MenuItem Header="{Binding ColumnOptions[6].Name}" ToggleType="CheckBox" IsChecked="{Binding ColumnOptions[6].IsOn, Mode=TwoWay}" />
-            <MenuItem Header="{Binding ColumnOptions[7].Name}" ToggleType="CheckBox" IsChecked="{Binding ColumnOptions[7].IsOn, Mode=TwoWay}" />
             <Separator />
             <MenuItem Header="Reset to default" Command="{Binding ResetColumnsCommand}" />
         </MenuFlyout>
@@ -395,8 +388,9 @@
                         <Border.ContextFlyout>
                             <StaticResource ResourceKey="ColumnMenu" />
                         </Border.ContextFlyout>
-                        <!-- Every column but Name / Added / Removed sits in an Auto column whose
-                             fixed-width content can hide, collapsing the column to zero. Blank /
+                        <!-- Every column but Name sits in an Auto column whose fixed-width
+                             content can hide, collapsing the column to zero. Added / Removed
+                             hide only when turned off in the chooser. Blank /
                              Comment / Files / Size only show without the docked diff; as the pane
                              narrows, columns drop Size, Files, Comment, Blank, then Authors,
                              Commits, Code and Lines (see MainWindowViewModel.FitColumns); columns
@@ -414,8 +408,8 @@
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="78" />
-                                <ColumnDefinition Width="78" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
@@ -451,12 +445,12 @@
                                     <TextBlock Text="Files" /><TextBlock Text="{Binding Analysis.FilesGlyph}" FontSize="9" />
                                 </StackPanel>
                             </Button>
-                            <Button Grid.Column="6" Classes="colHeader" Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Added}">
+                            <Button Grid.Column="6" Classes="colHeader" Width="78" IsVisible="{Binding ShowAddedColumn}" Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Added}">
                                 <StackPanel Orientation="Horizontal" Spacing="3" HorizontalAlignment="Right">
                                     <TextBlock Text="Added" /><TextBlock Text="{Binding Analysis.AddedGlyph}" FontSize="9" />
                                 </StackPanel>
                             </Button>
-                            <Button Grid.Column="7" Classes="colHeader" Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Removed}">
+                            <Button Grid.Column="7" Classes="colHeader" Width="78" IsVisible="{Binding ShowRemovedColumn}" Command="{Binding Analysis.SortCommand}" CommandParameter="{x:Static ca:AnalysisSortKey.Removed}">
                                 <StackPanel Orientation="Horizontal" Spacing="3" HorizontalAlignment="Right">
                                     <TextBlock Text="Removed" /><TextBlock Text="{Binding Analysis.RemovedGlyph}" FontSize="9" />
                                 </StackPanel>
@@ -508,8 +502,8 @@
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="78" />
-                                        <ColumnDefinition Width="78" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
@@ -531,7 +525,9 @@
                                                    HorizontalAlignment="Left"
                                                    VerticalAlignment="Center"
                                                    Foreground="{DynamicResource BudiffTextBrush}"
-                                                   TextTrimming="CharacterEllipsis" />
+                                                   TextTrimming="CharacterEllipsis"
+                                                   ToolTip.Tip="{Binding Name}"
+                                                   ToolTip.ToolTipOpening="OnNameTipOpening" />
                                     </Grid>
                                     <TextBlock Grid.Column="1" Classes="num" Width="56" TextAlignment="Right" Text="{Binding LinesText}" Foreground="{DynamicResource BudiffTextBrush}"
                                                IsVisible="{Binding $parent[Window].DataContext.ShowLinesColumn}" />
@@ -543,8 +539,10 @@
                                                IsVisible="{Binding $parent[Window].DataContext.ShowCommentColumn}" />
                                     <TextBlock Grid.Column="5" Classes="num" Width="38" TextAlignment="Right" Text="{Binding FilesText}" Foreground="{DynamicResource BudiffMutedTextBrush}"
                                                IsVisible="{Binding $parent[Window].DataContext.ShowFilesColumn}" />
-                                    <TextBlock Grid.Column="6" Classes="num" Text="{Binding AddedText}" Foreground="#6BB36B" />
-                                    <TextBlock Grid.Column="7" Classes="num" Text="{Binding RemovedText}" Foreground="#D16969" />
+                                    <TextBlock Grid.Column="6" Classes="num" Width="62" TextAlignment="Right" Text="{Binding AddedText}" Foreground="#6BB36B"
+                                               IsVisible="{Binding $parent[Window].DataContext.ShowAddedColumn}" />
+                                    <TextBlock Grid.Column="7" Classes="num" Width="62" TextAlignment="Right" Text="{Binding RemovedText}" Foreground="#D16969"
+                                               IsVisible="{Binding $parent[Window].DataContext.ShowRemovedColumn}" />
                                     <TextBlock Grid.Column="8" Classes="num" Width="48" TextAlignment="Right" Text="{Binding CommitsText}" Foreground="{DynamicResource BudiffMutedTextBrush}"
                                                IsVisible="{Binding $parent[Window].DataContext.ShowCommitsColumn}" />
                                     <TextBlock Grid.Column="9" Classes="num" Width="44" TextAlignment="Right" Text="{Binding AuthorsText}" Foreground="{DynamicResource BudiffMutedTextBrush}"

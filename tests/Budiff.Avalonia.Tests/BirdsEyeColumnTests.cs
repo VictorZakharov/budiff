@@ -141,7 +141,7 @@ public sealed class BirdsEyeColumnTests
         UiSnapshot.Pump();
         var items = menu.Items.OfType<MenuItem>().ToList();
         Assert.Equal(
-            new[] { "All columns", "Lines", "Code", "Blank", "Comment", "Files", "Commits", "Authors", "Size", "Reset to default" },
+            new[] { "All columns", "Lines", "Code", "Blank", "Comment", "Files", "Added", "Removed", "Commits", "Authors", "Size", "Reset to default" },
             items.Select(i => i.Header as string));
         MenuItem Item(string header) => items.Single(i => (string?)i.Header == header);
         Assert.False(Item("Blank").IsChecked);
@@ -161,6 +161,26 @@ public sealed class BirdsEyeColumnTests
         // The header's right-click opens the same menu.
         var header = (Border)blankHeader.Parent!.Parent!;
         Assert.Same(menu, header.ContextFlyout);
+
+        // All off leaves only Name: Added / Removed go too, header and rows.
+        menu.ShowAt(button);
+        UiSnapshot.Pump();
+        Item("All columns").IsChecked = false;
+        UiSnapshot.Pump();
+        UiSnapshot.Pump();
+        Assert.False(vm.ShowAddedColumn || vm.ShowRemovedColumn);
+        var visibleHeaders = global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(window).OfType<Button>()
+            .Where(b => b.Classes.Contains("colHeader") && b.IsEffectivelyVisible).ToList();
+        Assert.Equal(global::Budiff.CodeAnalysis.AnalysisSortKey.Name, Assert.Single(visibleHeaders).CommandParameter);
+        Assert.DoesNotContain(
+            global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(window).OfType<TextBlock>(),
+            b => b.Classes.Contains("num") && b.IsEffectivelyVisible);
+        UiSnapshot.Capture(window, "birdseye-no-columns");
+        Item("Reset to default").Command!.Execute(null);
+        UiSnapshot.Pump();
+        Assert.True(vm.ShowAddedColumn && vm.ShowRemovedColumn && vm.ShowLinesColumn);
+        Assert.True(Item("Added").IsChecked && Item("All columns").IsChecked);
+        menu.Hide();
         window.Close();
     }
 
@@ -177,7 +197,8 @@ public sealed class BirdsEyeColumnTests
         vm.AllColumnsOn = false;
         Assert.True(vm.ColumnOptions.All(o => !o.IsOn));
         Assert.Equal(0, vm.FittingColumns);
-        Assert.Equal(8, AppSettings.Load(path).HiddenColumns.Count);
+        Assert.Equal(10, AppSettings.Load(path).HiddenColumns.Count);
+        Assert.False(vm.ShowAddedColumn || vm.ShowRemovedColumn);
         Assert.True(vm.ResetColumnsCommand.CanExecute(null));
 
         vm.AllColumnsOn = true;
@@ -192,6 +213,42 @@ public sealed class BirdsEyeColumnTests
         Assert.Equal(8, vm.FittingColumns);
         Assert.Empty(AppSettings.Load(path).HiddenColumns);
         Assert.False(vm.ResetColumnsCommand.CanExecute(null));
+    }
+
+    // A name cut short by the ellipsis gets its full text as a tooltip; one
+    // that fits gets none.
+    [AvaloniaFact]
+    public void NameTooltip_OnlyWhenTrimmed()
+    {
+        var root = ReadmeFixture.BuildFixtureRepo("budiff-name-tips");
+        var window = new MainWindow(root, gitRoot: true, AppSettings.Load(TempSettings())) { MinWidth = 0, Width = 1440, Height = 640 };
+        window.Show();
+        var vm = window.ViewModel;
+        WaitUntil(() => !vm.Analysis.IsScanning && vm.Analysis.Roots.Count > 0, "bird's-eye scan");
+        foreach (var row in vm.Analysis.Roots.SelectMany(r => r.SelfAndDescendants()).Where(r => !r.IsFile))
+        {
+            row.IsExpanded = true;
+        }
+
+        UiSnapshot.Pump();
+        TextBlock NameOf(string name) => global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(window).OfType<TextBlock>()
+            .Single(b => b.TextTrimming == global::Avalonia.Media.TextTrimming.CharacterEllipsis && (b.DataContext as CodeAnalysisRow)?.Name == name);
+        bool TipOpens(TextBlock block)
+        {
+            var e = new global::Avalonia.Interactivity.CancelRoutedEventArgs(ToolTip.ToolTipOpeningEvent);
+            block.RaiseEvent(e);
+            return !e.Cancel;
+        }
+
+        Assert.Equal("AnsiRenderer.cs", ToolTip.GetTip(NameOf("AnsiRenderer.cs")));
+        Assert.False(TipOpens(NameOf("AnsiRenderer.cs")));
+
+        // Squeeze the Name column until the long name trims.
+        window.Width = 480;
+        UiSnapshot.Pump();
+        UiSnapshot.Pump();
+        Assert.True(TipOpens(NameOf("AnsiRenderer.cs")));
+        window.Close();
     }
 
     private static BirdsEyeColumnOption Option(MainWindowViewModel vm, string name) => vm.ColumnOptions.Single(o => o.Name == name);

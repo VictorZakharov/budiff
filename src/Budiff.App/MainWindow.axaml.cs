@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.Linq;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
@@ -64,6 +65,44 @@ public sealed partial class MainWindow : Window
         PeriodBar.SizeChanged += (_, _) => UpdateToolbarWrap();
         DiffToolbarGrid.LayoutUpdated += (_, _) => UpdateDiffOptionsOverflow();
         ApplyDiffLayout();
+        AddColumnMenuItems();
+    }
+
+    // A row's name tip shows only when the name is cut short by the ellipsis.
+    private void OnNameTipOpening(object? sender, CancelRoutedEventArgs e)
+    {
+        if (sender is TextBlock name && !name.TextLayout.TextLines.Any(line => line.HasCollapsed))
+        {
+            e.Cancel = true;
+        }
+    }
+
+    // One check item per column, between the column menu's two separators.
+    // Built here, wired to each option directly: indexer bindings
+    // (ColumnOptions[i].IsOn) came up empty in the NativeAOT build.
+    private void AddColumnMenuItems()
+    {
+        var menu = (MenuFlyout)Resources["ColumnMenu"]!;
+        var at = 2;
+        foreach (var option in _viewModel.ColumnOptions)
+        {
+            var item = new MenuItem { Header = option.Name, ToggleType = MenuItemToggleType.CheckBox, IsChecked = option.IsOn };
+            item.PropertyChanged += (_, e) =>
+            {
+                if (e.Property == MenuItem.IsCheckedProperty)
+                {
+                    option.IsOn = item.IsChecked;
+                }
+            };
+            option.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(BirdsEyeColumnOption.IsOn))
+                {
+                    item.IsChecked = option.IsOn;
+                }
+            };
+            menu.Items.Insert(at++, item);
+        }
     }
 
     // In a narrow docked pane the toggles run past the edge: a toggle that does

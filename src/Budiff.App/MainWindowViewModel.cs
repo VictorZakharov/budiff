@@ -134,12 +134,18 @@ public sealed partial class MainWindowViewModel : ObservableObject
     // Full bird's-eye (all columns + filter panes) whenever the docked diff is away.
     public bool ShowWideColumns => !ShowDiffPane;
 
-    // Bird's-eye column widths (header cell = row cell + its margins). Name,
-    // Added and Removed always show; the optional ones drop as the pane
-    // narrows, from the end of this keep order: Lines, Code, Commits, Authors,
-    // then the wide-only Blank, Comment, Files, Size.
+    // Bird's-eye column widths (header cell = row cell + its margins). Name
+    // always shows, and Added / Removed unless turned off in the chooser; the
+    // optional ones drop as the pane narrows, from the end of this keep order:
+    // Lines, Code, Commits, Authors, then the wide-only Blank, Comment, Files,
+    // Size.
     internal const double NameMinWidth = 150;
-    internal const double AddedRemovedWidth = 78 + 78;
+    internal const double ChurnColumnWidth = 78;
+    internal const double AddedRemovedWidth = ChurnColumnWidth * 2;
+
+    // Chooser indexes of Added / Removed, after the optional columns.
+    private const int AddedIndex = 8;
+    private const int RemovedIndex = 9;
     internal static readonly double[] OptionalColumnWidths = { 72, 72, 64, 60, 64, 76, 54, 90 };
     private const int DockedColumnCount = 4;
 
@@ -178,8 +184,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private bool IsShown(int column) => (ShownColumns & (1 << column)) != 0;
 
+    public bool ShowAddedColumn => IsOn(AddedIndex);
+
+    public bool ShowRemovedColumn => IsOn(RemovedIndex);
+
     // The column chooser (right-click the bird's-eye header), in on-screen
-    // order. Turned-off columns are remembered across runs (AppSettings).
+    // order: every column but Name. Turned-off columns are remembered across runs (AppSettings).
     public IReadOnlyList<BirdsEyeColumnOption> ColumnOptions { get; }
 
     private readonly AppSettings _settings;
@@ -191,6 +201,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         (string Name, int Index)[] columns =
         {
             ("Lines", 0), ("Code", 1), ("Blank", 4), ("Comment", 5), ("Files", 6),
+            ("Added", AddedIndex), ("Removed", RemovedIndex),
             ("Commits", 2), ("Authors", 3), ("Size", 7),
         };
         return columns
@@ -221,6 +232,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         _settings.Save();
         FitColumns(_rowWidth);
+        OnPropertyChanged(nameof(ShowAddedColumn));
+        OnPropertyChanged(nameof(ShowRemovedColumn));
         OnPropertyChanged(nameof(AllColumnsOn));
         ResetColumnsCommand.NotifyCanExecuteChanged();
     }
@@ -267,7 +280,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         _rowWidth = rowWidth;
         var candidates = ShowWideColumns ? OptionalColumnWidths.Length : DockedColumnCount;
-        var spare = rowWidth - NameMinWidth - AddedRemovedWidth;
+        var spare = rowWidth - NameMinWidth
+            - (ShowAddedColumn ? ChurnColumnWidth : 0) - (ShowRemovedColumn ? ChurnColumnWidth : 0);
         var shown = 0;
         for (var column = 0; column < candidates; column++)
         {
@@ -732,7 +746,8 @@ public sealed partial class BirdsEyeColumnOption : ObservableObject
 
     public string Name { get; }
 
-    // Its place in MainWindowViewModel.OptionalColumnWidths (the keep order).
+    // Its place in MainWindowViewModel.OptionalColumnWidths (the keep order),
+    // or AddedIndex / RemovedIndex.
     internal int Index { get; }
 
     [ObservableProperty]
