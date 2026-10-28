@@ -38,8 +38,8 @@ public sealed class ReadmeScreenshotTests
 
         UiSnapshot.Pump();
         var birdsEye = UiSnapshot.Capture(window, "gui-screenshot");
-        Assert.Equal(1440, birdsEye.Width);
-        Assert.Equal(820, birdsEye.Height);
+        Assert.Equal(TestScale.Px(1440), birdsEye.Width);
+        Assert.Equal(TestScale.Px(820), birdsEye.Height);
 
         // Drill-in state: open the modified file, docked diff + compressed columns.
         var row = vm.Analysis.Roots
@@ -55,8 +55,8 @@ public sealed class ReadmeScreenshotTests
         Assert.False(vm.ShowWideColumns);
 
         var diffing = UiSnapshot.Capture(window, "gui-diff");
-        Assert.Equal(1440, diffing.Width);
-        Assert.Equal(820, diffing.Height);
+        Assert.Equal(TestScale.Px(1440), diffing.Width);
+        Assert.Equal(TestScale.Px(820), diffing.Height);
     }
 
     private static void WaitUntil(Func<bool> condition, string what, bool throwOnTimeout = true)

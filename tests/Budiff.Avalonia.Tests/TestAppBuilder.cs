@@ -34,5 +34,28 @@ public sealed class TestApp : Application
         });
     }
 
-    public override void OnFrameworkInitializationCompleted() => base.OnFrameworkInitializationCompleted();
+    public override void OnFrameworkInitializationCompleted()
+    {
+        // BUDIFF_TEST_SCALE=1.25 runs every window at that display scale (the
+        // suite runs at 1 and at 1.25 - a common desktop setting, where a row
+        // is no whole number of device pixels).
+        if (TestScale.Value != 1)
+        {
+            global::Avalonia.Controls.Window.WindowOpenedEvent.AddClassHandler<global::Avalonia.Controls.Window>(
+                (window, _) => window.SetRenderScaling(TestScale.Value));
+        }
+
+        base.OnFrameworkInitializationCompleted();
+    }
+}
+
+public static class TestScale
+{
+    public static double Value { get; } =
+        double.TryParse(Environment.GetEnvironmentVariable("BUDIFF_TEST_SCALE"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var scale) && scale > 0
+            ? scale
+            : 1;
+
+    // A size in device pixels (what a captured frame measures).
+    public static int Px(double dip) => (int)Math.Round(dip * Value);
 }

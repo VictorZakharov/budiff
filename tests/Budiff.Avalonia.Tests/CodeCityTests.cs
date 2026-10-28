@@ -355,7 +355,7 @@ public sealed class CodeCityTests
                     continue;
                 }
 
-                var at = pixels.Address + (int)(origin.Y + y) * pixels.RowBytes + (int)(origin.X + x) * 4;
+                var at = pixels.Address + (int)((origin.Y + y) * TestScale.Value) * pixels.RowBytes + (int)((origin.X + x) * TestScale.Value) * 4;
                 var r = System.Runtime.InteropServices.Marshal.ReadByte(at, 0);
                 var g = System.Runtime.InteropServices.Marshal.ReadByte(at, 1);
                 var b = System.Runtime.InteropServices.Marshal.ReadByte(at, 2);

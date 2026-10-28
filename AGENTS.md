@@ -12,10 +12,12 @@ budiff is "`ls` for diffs": a folder-scoped, read-only, syntax-highlighted side-
 
 - Build: `dotnet build`
 - Test: `dotnet test` (once integration-tagged tests exist, the fast run is `dotnet test --filter "Category!=Integration"`)
+- GUI tests also run at 125% display scale (CI does both): `BUDIFF_TEST_SCALE=1.25 dotnet test tests/Budiff.Avalonia.Tests`. There a row is no whole number of device pixels; assert on where controls sit, not on exact offsets, and size captured frames with `TestScale.Px`.
 - Toolchain: the .NET 10 SDK. Package versions are pinned in `SPEC.md` section 3 - match them.
 
 ## Conventions
 
+- **Bound every feedback loop.** Code that reacts to layout or scroll events by changing layout or scroll (a restore chasing a row, a fit that resizes what it measured) gets an iteration budget worked out from what it can legitimately need, plus a check for revisiting a state it already tried; over budget, it settles and stops. A loop like that hung the diff at 125% (`ScrollRestore`).
 - **ASCII-only code comments** - no em-dashes, curly quotes, ellipses, or arrow glyphs; write `-`, `...`, `->`. Fancy Unicode is fine in on-screen UI strings.
 - **Strict layering** (`SPEC.md` section 2): `Budiff.Core` is pure (no Avalonia, no git); `Budiff.Avalonia` depends on Avalonia + the `ISyntaxHighlighter` / `IDocumentPreviewer` interfaces only (their implementations live in `.TextMate` / `.Markdown`); git lives in the CLI / App, never in Core or Avalonia.
 - Keep the CLI's **data model separate from its ANSI rendering** (`SPEC.md` section 6) so `--json` / MCP are cheap to add later.

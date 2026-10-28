@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using global::Avalonia;
 using global::Avalonia.Controls;
@@ -19,6 +20,16 @@ internal sealed class ScrollRestore
     // Shown anyway after this, placed or not (content shorter than the spot).
     private static readonly TimeSpan RevealAfter = TimeSpan.FromMilliseconds(400);
 
+    // A pane height to budget with before the scroller has one.
+    private const double FallbackViewport = 200;
+
+    // Moves to land once the rows above are measured. In the sweep test
+    // (TypeScriptStart_Settles_AtFractionalScales, 125% / 150% / 175%) a
+    // laid-out pane lands in 1-3; the first file of a window, opened before
+    // the pane has a height, circles a couple of device pixels around the
+    // row and ends on the budget, within 2 px of it.
+    private const int SettleMoves = 4;
+
     // One at a time per scroller: the next file's spot replaces the last one's.
     private static readonly ConditionalWeakTable<ScrollViewer, ScrollRestore> Active = new();
 
@@ -29,6 +40,12 @@ internal sealed class ScrollRestore
     // above it are measured (wrapped lines); null until it can tell.
     private readonly Func<double?>? _target;
     private bool _putting;
+
+    // Offsets already moved to while following _target, how far each left
+    // the target once laid out, and how many moves that may take (see Put).
+    private readonly List<double> _tried = new();
+    private readonly List<(double Offset, double Miss)> _missed = new();
+    private readonly int _maxMoves;
     private readonly DateTime _until;
     private readonly double _opacity;
     private readonly DispatcherTimer _reveal;
@@ -43,6 +60,13 @@ internal sealed class ScrollRestore
         _scroller = scroller;
         _offset = offset;
         _target = target;
+
+        // The target moves only while rows above it get their real heights,
+        // and each layout pass measures at least a pane of them: one move
+        // per pane between the top and the spot, then SettleMoves to land
+        // on it as the panel rounds rows to device pixels.
+        var pane = scroller.Viewport.Height > 0 ? scroller.Viewport.Height : FallbackViewport;
+        _maxMoves = (int)Math.Ceiling(offset / pane) + SettleMoves;
         _until = DateTime.UtcNow + HoldFor;
         _opacity = scroller.Opacity;
         _reveal = new DispatcherTimer { Interval = RevealAfter };
@@ -132,8 +156,27 @@ internal sealed class ScrollRestore
         try
         {
             var offset = _target?.Invoke() ?? _offset;
+            if (_target is not null)
+            {
+                // How far off the target the current offset leaves it.
+                _missed.Add((_scroller.Offset.Y, Math.Abs(offset - _scroller.Offset.Y)));
+            }
+
             if (Math.Abs(_scroller.Offset.Y - offset) > 0.5)
             {
+                // At a fractional display scale a row is no whole number of
+                // device pixels, and the panel places the target row a little
+                // differently for every offset: chasing it can circle forever
+                // (one layout pass after another - the window hangs). Back at
+                // a spot already tried, or over the move budget: settle on
+                // the closest spot seen and stop following.
+                if (_target is not null && (_tried.Exists(t => Math.Abs(t - offset) <= 0.5) || _tried.Count >= _maxMoves))
+                {
+                    Settle();
+                    return;
+                }
+
+                _tried.Add(offset);
                 _scroller.Offset = new Vector(_scroller.Offset.X, offset);
                 offset = _target?.Invoke() ?? offset;
             }
@@ -146,6 +189,25 @@ internal sealed class ScrollRestore
         finally
         {
             _putting = false;
+        }
+    }
+
+    private void Settle()
+    {
+        var best = _missed[0];
+        foreach (var seen in _missed)
+        {
+            // Ties go to the later spot: it was laid out with more rows measured.
+            if (seen.Miss <= best.Miss)
+            {
+                best = seen;
+            }
+        }
+
+        Stop();
+        if (Math.Abs(_scroller.Offset.Y - best.Offset) > 0.5)
+        {
+            _scroller.Offset = new Vector(_scroller.Offset.X, best.Offset);
         }
     }
 

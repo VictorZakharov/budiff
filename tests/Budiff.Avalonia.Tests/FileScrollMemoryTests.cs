@@ -55,7 +55,13 @@ public sealed class FileScrollMemoryTests
         // TypeScript: past the header and the imports, at the doc comment.
         Open(window, "app.component.spec.ts");
         // (The rows panel sits 1px up, so row 13 starts 1px higher.)
-        Assert.Equal((13 * RowHeight) - 1, RowsScroller(window).Offset.Y, 0.5);
+        // At 100% exactly; at a fractional scale the row is on the top edge.
+        if (TestScale.Value == 1)
+        {
+            Assert.Equal((13 * RowHeight) - 1, RowsScroller(window).Offset.Y, 0.5);
+        }
+
+        AssertStartRowOnTop(window);
         Assert.Equal(1, RowsScroller(window).Opacity);
 
         // Back to the earlier ones: each where it was left.
@@ -110,6 +116,68 @@ public sealed class FileScrollMemoryTests
         Assert.NotNull(row);
         Assert.Equal(0, global::Avalonia.VisualExtensions.TranslatePoint(row!, default, scroller)!.Value.Y, 1);
         Assert.Equal(1, scroller.Opacity);
+        window.Close();
+    }
+
+    // At a fractional display scale an 18 px row is no whole number of device
+    // pixels, and the rows panel places the start row a little differently
+    // each time the offset moves: chasing it never settled, and the window
+    // hung in a layout loop. Every start row, at the usual scales, must land.
+    [AvaloniaTheory]
+    [InlineData(1.25)]
+    [InlineData(1.5)]
+    [InlineData(1.75)]
+    public void TypeScriptStart_Settles_AtFractionalScales(double scale)
+    {
+        var root = ReadmeFixture.BuildFixtureRepo("budiff-scaled-start-" + scale.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        var files = new Dictionary<string, string>();
+        for (var imports = 5; imports <= 30; imports++)
+        {
+            var text = new StringBuilder();
+            for (var i = 0; i < imports; i++)
+            {
+                text.Append("import { Part").Append(i).Append(" } from './part-").Append(i).Append("';\n");
+            }
+
+            text.Append("\nexport class Widget {\n");
+            for (var i = 0; i < 90; i++)
+            {
+                text.Append("  field").Append(i).Append(" = ").Append(i).Append(";\n");
+            }
+
+            files[$"web/widget{imports}.ts"] = text.Append("}\n").ToString();
+        }
+
+        using (var repo = new Repository(root))
+        {
+            ReadmeFixture.Commit(repo, ReadmeFixture.Sig("Ada Lovelace", "ada@example.com", daysAgo: 4), "Add widgets", files);
+        }
+
+        var window = new MainWindow(root, gitRoot: true) { Width = 1600, Height = 900 };
+        window.Show();
+        global::Avalonia.Headless.HeadlessWindowExtensions.SetRenderScaling(window, scale);
+        var vm = window.ViewModel;
+        WaitUntil(() => !vm.Analysis.IsScanning && vm.Analysis.Roots.Count > 0, "bird's-eye scan");
+        window.FindControl<Grid>("BodyGrid")!.ColumnDefinitions[2].Width = new GridLength(620);
+        UiSnapshot.Pump();
+        UiSnapshot.Pump();
+
+        for (var imports = 5; imports <= 30; imports++)
+        {
+            var name = $"widget{imports}.ts";
+            Open(window, name);
+            for (var i = 0; i < 4; i++)
+            {
+                Thread.Sleep(10);
+                UiSnapshot.Pump();
+            }
+
+            // Shown, and within a row of the start (the line after the blank).
+            var scroller = RowsScroller(window);
+            Assert.Equal(1, scroller.Opacity);
+            AssertStartRowOnTop(window);
+        }
+
         window.Close();
     }
 
@@ -183,6 +251,19 @@ public sealed class FileScrollMemoryTests
         WaitUntil(() => vm.IsDiffOpen && !vm.Diff.IsLoading && !vm.Diff.IsPlaceholder && vm.Diff.FileName == name, name + " to load");
         UiSnapshot.Pump();
         UiSnapshot.Pump();
+    }
+
+    // The row a fresh file starts at sits at the top of the pane: within a
+    // couple of device pixels, never a sliver of the line above showing.
+    private static void AssertStartRowOnTop(MainWindow window)
+    {
+        var scroller = RowsScroller(window);
+        var host = window.GetVisualDescendants().OfType<ItemsControl>().Single(h => h.Name == "RowsHost" && h.IsEffectivelyVisible);
+        var start = window.ViewModel.Diff.StartRow();
+        var row = host.ContainerFromIndex(start);
+        Assert.NotNull(row);
+        var top = global::Avalonia.VisualExtensions.TranslatePoint(row!, default, scroller)!.Value.Y;
+        Assert.InRange(top, -2, 2);
     }
 
     private static ScrollViewer RowsScroller(Window window)
