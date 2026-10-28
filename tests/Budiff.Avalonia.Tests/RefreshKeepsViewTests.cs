@@ -16,7 +16,8 @@ public sealed class RefreshKeepsViewTests
     {
         var (window, vm, tree) = Open("budiff-refresh-file");
         var analysis = vm.Analysis;
-        analysis.SortCommand.Execute(AnalysisSortKey.Name);
+        // Not the default sort (Name A-Z): the biggest first.
+        analysis.SortCommand.Execute(AnalysisSortKey.Lines);
         UiSnapshot.Pump();
 
         // One folder opened all the way down, another one closed.
@@ -44,8 +45,8 @@ public sealed class RefreshKeepsViewTests
         WaitUntil(() => !analysis.IsScanning && analysis.Roots.Count > 0 && !vm.Diff.IsLoading && !vm.Diff.IsPlaceholder, "the reload");
         Settle();
 
-        Assert.Equal(AnalysisSortKey.Name, analysis.SortKey);
-        Assert.True(analysis.SortAscending);
+        Assert.Equal(AnalysisSortKey.Lines, analysis.SortKey);
+        Assert.False(analysis.SortAscending);
         Assert.Equal(expanded, ExpandedPaths(vm));
         if (excluded is not null)
         {
@@ -68,9 +69,9 @@ public sealed class RefreshKeepsViewTests
         var (window, vm, tree) = Open("budiff-refresh-merge");
         var analysis = vm.Analysis;
 
-        // By name, so the order holds; a short window, so the tree scrolls.
-        analysis.SortCommand.Execute(AnalysisSortKey.Name);
-        UiSnapshot.Pump();
+        // By name (the default), so the order holds; a short window, so the
+        // tree scrolls.
+        Assert.Equal(AnalysisSortKey.Name, analysis.SortKey);
         foreach (var folder in analysis.Roots.Where(r => !r.IsFile))
         {
             analysis.SetSubtreeExpanded(folder, expanded: true);

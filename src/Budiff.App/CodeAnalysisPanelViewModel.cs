@@ -392,11 +392,15 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     [ObservableProperty]
     private PeriodOption _selectedPeriod;
 
-    [ObservableProperty]
-    private AnalysisSortKey _sortKey = AnalysisSortKey.Lines;
+    // By name A-Z by default (folders first): the tree reads like a file
+    // manager; a column header sorts by its numbers.
+    internal const AnalysisSortKey DefaultSortKey = AnalysisSortKey.Name;
 
     [ObservableProperty]
-    private bool _sortAscending;
+    private AnalysisSortKey _sortKey = DefaultSortKey;
+
+    [ObservableProperty]
+    private bool _sortAscending = true;
 
     public IReadOnlyList<GroupingOption> Groupings { get; } = new[]
     {
@@ -693,7 +697,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     // Anything ResetView would change: the filter box's X shows while true.
     public bool CanResetView =>
         !string.IsNullOrEmpty(SearchText)
-        || SortKey != AnalysisSortKey.Lines || SortAscending
+        || SortKey != DefaultSortKey || !SortAscending
         || SelectedGrouping != Groupings[0]
         || SelectedPeriod != DefaultPeriod
         || Extensions.Any(e => !e.Included)
@@ -703,8 +707,8 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     private void ResetView()
     {
         _suspendRebuild = true;
-        SortKey = AnalysisSortKey.Lines;
-        SortAscending = false;
+        SortKey = DefaultSortKey;
+        SortAscending = true;
         SelectedGrouping = Groupings[0];
         SearchText = string.Empty;
         foreach (var item in Extensions)
