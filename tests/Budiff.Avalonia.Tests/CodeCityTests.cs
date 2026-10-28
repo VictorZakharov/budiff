@@ -102,6 +102,73 @@ public sealed class CodeCityTests
         UiSnapshot.Capture(window, "city-docked-diff");
     }
 
+    // Right-click a building (without dragging): Show in Explorer, on that
+    // file. Right-drag still pans, with no menu.
+    [AvaloniaFact]
+    public void RightClick_ABuilding_ShowsItInExplorer()
+    {
+        var (window, vm) = Open("budiff-city-reveal");
+        var shown = new List<string>();
+        vm.Analysis.RevealInFileManager = shown.Add;
+        ShowCity(window, vm);
+        var city = window.FindControl<CodeCityView>("CodeCity")!;
+        var tallest = vm.Analysis.City.Buildings.OrderByDescending(b => b.Top).First();
+        var at = TopCenter(city, window, tallest);
+
+        window.MouseDown(at, MouseButton.Right);
+        window.MouseMove(at + new global::Avalonia.Point(120, 30), RawInputModifiers.RightMouseButton);
+        window.MouseUp(at + new global::Avalonia.Point(120, 30), MouseButton.Right);
+        UiSnapshot.Pump();
+        Assert.Null(city.BlockMenu);
+
+        at = TopCenter(city, window, tallest);
+        window.MouseDown(at, MouseButton.Right);
+        window.MouseUp(at, MouseButton.Right);
+        UiSnapshot.Pump();
+        var menu = city.BlockMenu!;
+        Assert.True(menu.IsOpen);
+        var item = (MenuItem)menu.Items[0]!;
+        Assert.Equal(FileManager.RevealLabel, item.Header);
+        item.RaiseEvent(new global::Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        var expected = vm.Analysis.Roots.SelectMany(r => r.SelfAndDescendants()).Single(r => r.RelativePath == tallest.RelativePath).FullPath!;
+        Assert.Equal(new[] { expected }, shown);
+        Assert.False(vm.IsDiffOpen);
+        menu.Close();
+    }
+
+    // Right-click a tree row: the row is selected and its menu shows it in
+    // Explorer - a file, or a folder.
+    [AvaloniaFact]
+    public void RightClick_ATreeRow_ShowsItInExplorer()
+    {
+        var (window, vm) = Open("budiff-tree-reveal");
+        var shown = new List<string>();
+        vm.Analysis.RevealInFileManager = shown.Add;
+        var folder = vm.Analysis.Roots.First(r => !r.IsFile && r.Children.Any(c => c.IsFile));
+        folder.IsExpanded = true;
+        UiSnapshot.Pump();
+        UiSnapshot.Pump();
+        var file = folder.Children.First(r => r.IsFile);
+        var tree = window.FindControl<TreeView>("AnalysisTree")!;
+
+        foreach (var row in new[] { file, folder })
+        {
+            var item = (Control)tree.TreeContainerFromItem(row)!;
+            var at = global::Avalonia.VisualExtensions.TranslatePoint(item, new global::Avalonia.Point(80, 12), window)!.Value;
+            window.MouseDown(at, MouseButton.Right);
+            window.MouseUp(at, MouseButton.Right);
+            UiSnapshot.Pump();
+            Assert.Same(row, tree.SelectedItem);
+            var menu = window.RowMenu!;
+            Assert.True(menu.IsOpen);
+            ((MenuItem)menu.Items[0]!).RaiseEvent(new global::Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+            menu.Close();
+        }
+
+        Assert.Equal(new[] { file.FullPath!, Path.GetDirectoryName(file.FullPath)! }, shown);
+        Assert.False(vm.IsDiffOpen);
+    }
+
     [AvaloniaFact]
     public void Drag_OrbitsWithoutOpening()
     {

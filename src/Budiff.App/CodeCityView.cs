@@ -35,6 +35,10 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
     public static readonly StyledProperty<ICommand?> OpenCommandProperty =
         AvaloniaProperty.Register<CodeCityView, ICommand?>(nameof(OpenCommand));
 
+    // Right-click (without dragging) on a building or a district.
+    public static readonly StyledProperty<ICommand?> RevealCommandProperty =
+        AvaloniaProperty.Register<CodeCityView, ICommand?>(nameof(RevealCommand));
+
     public static readonly StyledProperty<bool> ShowFpsProperty =
         AvaloniaProperty.Register<CodeCityView, bool>(nameof(ShowFps));
 
@@ -135,6 +139,15 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
         get => GetValue(OpenCommandProperty);
         set => SetValue(OpenCommandProperty, value);
     }
+
+    public ICommand? RevealCommand
+    {
+        get => GetValue(RevealCommandProperty);
+        set => SetValue(RevealCommandProperty, value);
+    }
+
+    // The last building menu opened (tests).
+    internal ContextMenu? BlockMenu { get; private set; }
 
     // The performance panel (the "Show FPS" box).
     public bool ShowFps
@@ -632,7 +645,14 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
 
         _pressed = false;
         e.Pointer.Capture(null);
-        if (!_dragged && !_panning && PickNear(e.GetPosition(this)) is { } hit)
+        if (!_dragged && e.InitialPressMouseButton == MouseButton.Right && PickNear(e.GetPosition(this)) is { } picked
+            && RevealCommand is { } reveal && reveal.CanExecute(picked))
+        {
+            // A right-click that did not pan: the building's menu.
+            BlockMenu = FileManager.Menu(() => reveal.Execute(picked));
+            BlockMenu.Open(this);
+        }
+        else if (!_dragged && !_panning && PickNear(e.GetPosition(this)) is { } hit)
         {
             if (hit.IsFile)
             {

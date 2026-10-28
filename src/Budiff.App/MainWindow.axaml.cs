@@ -72,6 +72,8 @@ public sealed partial class MainWindow : Window
         ApplyDiffLayout();
         AddColumnMenuItems();
 
+        AnalysisTree.ContextRequested += OnAnalysisContextRequested;
+
         CodeCity.Gpu = CityGl;
         if (Environment.GetEnvironmentVariable("BUDIFF_CITY_BENCH") is { Length: > 0 } benchReport)
         {
@@ -540,6 +542,24 @@ public sealed partial class MainWindow : Window
         {
             _viewModel.StatusText = "Open file failed: " + ex.Message;
         }
+    }
+
+    // The last row menu opened (tests).
+    internal ContextMenu? RowMenu { get; private set; }
+
+    // Right-click a row (or the menu key): Show in Explorer. The row is
+    // selected first, so it is clear which one the menu is for.
+    private void OnAnalysisContextRequested(object? sender, ContextRequestedEventArgs e)
+    {
+        if (FindAnalysisRow(e.Source) is not { } row)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        AnalysisTree.SelectedItem = row;
+        RowMenu = FileManager.Menu(() => _viewModel.Analysis.RevealRowCommand.Execute(row));
+        RowMenu.Open(e.Source as Control ?? AnalysisTree);
     }
 
     private static CodeAnalysisRow? FindAnalysisRow(object? source)
