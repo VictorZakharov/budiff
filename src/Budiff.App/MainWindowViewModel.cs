@@ -80,6 +80,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
             {
                 OnPropertyChanged(nameof(ShowCompareOptions));
             }
+            else if (e.PropertyName == nameof(DiffViewModel.ShowWrapOption))
+            {
+                OnPropertyChanged(nameof(ShowWrapToggle));
+            }
         };
         _ = LoadAsync(startPath, gitRoot);
     }
@@ -169,9 +173,70 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
     }
 
-    // Base + Working tree: meaningless for a plain file view, and a pull
-    // request fixes both ends (its merge-base and its head).
-    public bool ShowCompareOptions => Diff.ShowDiffOptions && AppliedRange is null;
+    // Base + Working tree: meaningless for a plain file view or a folder
+    // summary, and a pull request fixes both ends (its merge-base and its head).
+    public bool ShowCompareOptions => Diff.ShowDiffOptions && AppliedRange is null && FolderSummary is null;
+
+    // A folder picked in the bird's-eye while the diff pane is open: the pane
+    // shows this instead of a file diff (null while a file shows).
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsFolderSummary))]
+    [NotifyPropertyChangedFor(nameof(ShowCompareOptions))]
+    [NotifyPropertyChangedFor(nameof(ShowWrapToggle))]
+    private FolderSummary? _folderSummary;
+
+    public bool IsFolderSummary => FolderSummary is not null;
+
+    // Wrap belongs to a line diff, not to a folder summary.
+    public bool ShowWrapToggle => Diff.ShowWrapOption && FolderSummary is null;
+
+    // The bird's-eye selection moved while the diff pane is open: the pane
+    // follows it - a file's diff, or a folder's summary. The file already
+    // showing stays as it is (a re-selection after a sort, or the follow-up
+    // of a double-click that already opened it).
+    internal void FollowSelection(CodeAnalysisRow row)
+    {
+        if (!IsDiffOpen)
+        {
+            return;
+        }
+
+        if (row.IsFile)
+        {
+            if (FolderSummary is null && _openFile is { } open && open.RelativePath == row.RelativePath)
+            {
+                return;
+            }
+
+            _ = Analysis.OpenAsync(row);
+            return;
+        }
+
+        ShowFolder(row);
+    }
+
+    private void ShowFolder(CodeAnalysisRow row)
+    {
+        RememberScroll();
+        ClearLinkTrail();
+        _openFile = null;
+        _openDiffFile = null;
+        _openTarget = null;
+        _blameGen++;
+        _blamePath = null;
+        var summary = Analysis.SummarizeFolder(row);
+        Diff.CancelLoad();
+        Diff.Title = summary.Path;
+        Diff.Subtitle = "folder summary - " + summary.Period;
+        Diff.Extension = string.Empty;
+        Diff.FileName = string.Empty;
+
+        // Nothing to compare line by line: drops Blame and Collapse unchanged
+        // from the toolbar (the next file sets it back).
+        Diff.IsFileView = true;
+        Diff.SetPlaceholder(summary.PlainText);
+        FolderSummary = summary;
+    }
 
     // What a pull request or a commit compares; null in a time period.
     private (string BaseSha, string HeadSha)? AppliedRange
@@ -433,6 +498,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         IsDiffOpen = false;
         IsTreeCollapsed = false;
+        FolderSummary = null;
         _openDiffFile = null;
         _openTarget = null;
         RememberScroll();
@@ -817,6 +883,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         var reopened = _openFile?.FullPath == fullPath;
         RememberScroll();
         _openFile = (fullPath, relativePath);
+        FolderSummary = null;
         Diff.RestoreScroll = restore ?? (reopened ? null : _scrollByFile.GetValueOrDefault(fullPath) ?? DiffScrollSpot.Start);
         if (_scope is null)
         {

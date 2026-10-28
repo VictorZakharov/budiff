@@ -460,6 +460,16 @@ public sealed partial class DiffViewModel : ObservableObject
         (_blameOld, _blameNew) = (oldBlame, newBlame);
     }
 
+    // Drops a load still under way: its result never lands. For a host that
+    // shows something else in its place (SetPlaceholder alone would be
+    // overwritten when the load finishes).
+    public void CancelLoad()
+    {
+        _loadGen++;
+        _loadingTimer?.Stop();
+        IsLoading = false;
+    }
+
     public void SetPlaceholder(string text)
     {
         // A direct placeholder must also silence a pending BeginLoad

@@ -122,6 +122,9 @@ public sealed partial class CodeAnalysisRow : ObservableObject
 
     public string? FullPath { get; init; }
 
+    // The analysis node it shows (its numbers, for a folder summary).
+    internal AnalysisNode? Node { get; init; }
+
     public bool IsFile { get; init; }
 
     public AppIconKind Icon { get; init; }
@@ -483,6 +486,91 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     public Task OpenAsync(CodeAnalysisRow? row)
         => row is { IsFile: true, FullPath: { } path } ? _openFile(path, row.RelativePath) : Task.CompletedTask;
 
+    // A folder's (or project's) changes in the applied period, from the
+    // numbers its rows were built from. A file whose every line is added is
+    // new. A deleted file is not in the tree: it is a path the period's net
+    // diff only removes lines from that the scan did not find - counted only
+    // when the period has a start to delete from (not all time) and the scan
+    // is complete.
+    internal FolderSummary SummarizeFolder(CodeAnalysisRow row)
+    {
+        var path = row.RelativePath.Replace('\\', '/');
+        var files = new List<FolderSummaryFile>();
+        var fileCount = 0;
+        if (row.Node is { } node)
+        {
+            foreach (var leaf in Leaves(node))
+            {
+                fileCount++;
+                if (leaf.Added + leaf.Removed == 0)
+                {
+                    continue;
+                }
+
+                var isNew = leaf.Removed == 0 && leaf.Added >= leaf.Lines.Total;
+                files.Add(new FolderSummaryFile
+                {
+                    Path = Under(path, leaf.RelativePath),
+                    Change = isNew ? FolderFileChange.New : FolderFileChange.Modified,
+                    Added = leaf.Added,
+                    Removed = leaf.Removed,
+                });
+            }
+        }
+
+        var windowed = _appliedPullRequest is not null || _appliedCommit is not null || _appliedDays is > 0;
+        if (_history is not null && windowed && _scan is { Truncated: false } scan && row.Node?.Kind is AnalysisNodeKind.Folder or AnalysisNodeKind.Project)
+        {
+            var scanned = new HashSet<string>(scan.Files.Select(f => f.RelativePath), StringComparer.OrdinalIgnoreCase);
+            var prefix = path.Length == 0 ? string.Empty : path + "/";
+            foreach (var (gone, h) in _history.ByPath)
+            {
+                if (h is { Added: 0, Removed: > 0 }
+                    && gone.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                    && !scanned.Contains(gone))
+                {
+                    files.Add(new FolderSummaryFile { Path = Under(path, gone), Change = FolderFileChange.Deleted, Removed = h.Removed });
+                }
+            }
+        }
+
+        // Biggest change first, then by path.
+        files.Sort((a, b) =>
+        {
+            var byChurn = (b.Added + b.Removed).CompareTo(a.Added + a.Removed);
+            return byChurn != 0 ? byChurn : string.Compare(a.Path, b.Path, StringComparison.OrdinalIgnoreCase);
+        });
+
+        return new FolderSummary
+        {
+            Path = path.Length == 0 ? Path.GetFileName(Path.TrimEndingDirectorySeparator(_root)) : path,
+            Period = DescribeAppliedPeriod(),
+            Files = fileCount,
+            Changed = files.Count,
+            New = files.Count(f => f.Change == FolderFileChange.New),
+            Modified = files.Count(f => f.Change == FolderFileChange.Modified),
+            Deleted = files.Count(f => f.Change == FolderFileChange.Deleted),
+            LinesAdded = files.Sum(f => f.Added),
+            LinesRemoved = files.Sum(f => f.Removed),
+            HasHistory = _history is not null,
+            ChangedFiles = files.Take(FolderSummary.MaxListed).ToList(),
+        };
+
+        static IEnumerable<AnalysisNode> Leaves(AnalysisNode node)
+            => node.IsFile ? new[] { node } : node.Children.SelectMany(Leaves);
+
+        static string Under(string folder, string file)
+            => folder.Length > 0 && file.StartsWith(folder + "/", StringComparison.OrdinalIgnoreCase) ? file[(folder.Length + 1)..] : file;
+    }
+
+    // What the applied numbers cover, in words.
+    private string DescribeAppliedPeriod()
+        => _appliedPullRequest is not null ? PullRequestButtonText
+            : _appliedCommit is not null ? "Commit " + CommitButtonText
+            : _appliedDays is not > 0 ? "All time"
+            : _appliedPeriod.IsCustom ? $"Last {_appliedDays} days"
+            : _appliedPeriod.Label;
+
     [RelayCommand]
     private void Sort(AnalysisSortKey key)
     {
@@ -751,6 +839,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             Name = node.Name,
             RelativePath = node.RelativePath,
             IsFile = node.IsFile,
+            Node = node,
             FullPath = node.IsFile ? Path.Combine(_root, node.RelativePath.Replace('/', Path.DirectorySeparatorChar)) : null,
             Icon = IconFor(node),
             IconTint = node.IsFile ? FileIcons.For(node.Name).Tint : null,

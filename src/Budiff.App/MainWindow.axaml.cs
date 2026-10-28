@@ -77,6 +77,8 @@ public sealed partial class MainWindow : Window
         AddColumnMenuItems();
 
         AnalysisTree.ContextRequested += OnAnalysisContextRequested;
+        AnalysisTree.SelectionChanged += OnAnalysisSelectionChanged;
+        AnalysisTree.AddHandler(KeyDownEvent, OnAnalysisTreeKeyDown, RoutingStrategies.Bubble, handledEventsToo: false);
 
         CodeCity.Gpu = CityGl;
         if (Environment.GetEnvironmentVariable("BUDIFF_CITY_BENCH") is { Length: > 0 } benchReport)
@@ -592,6 +594,88 @@ public sealed partial class MainWindow : Window
             {
                 await _viewModel.Analysis.OpenAsync(row);
             }
+        }
+        catch (Exception ex)
+        {
+            _viewModel.StatusText = "Open file failed: " + ex.Message;
+        }
+    }
+
+    // While the diff pane is open it follows the bird's-eye selection (keys,
+    // type-to-search, a click). A lone move shows at once; a burst (a held
+    // arrow key) shows its first row, then only the row it ends on, once the
+    // keys have paused for FollowDelayMs - so a key repeat never queues a
+    // load per row it passes. Focus stays in the tree. (The pause is a
+    // delayed post, not a DispatcherTimer: the headless test dispatcher never
+    // ticks those.)
+    private const int FollowDelayMs = 120;
+    private CodeAnalysisRow? _followRow;
+    private bool _followPending;
+    private int _followGen;
+    private long _lastFollow = long.MinValue / 2;
+
+    private void OnAnalysisSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (!_viewModel.IsDiffOpen || AnalysisTree.SelectedItem is not CodeAnalysisRow row)
+        {
+            CancelFollow();
+            return;
+        }
+
+        _followRow = row;
+        if (!_followPending && Environment.TickCount64 - _lastFollow >= FollowDelayMs)
+        {
+            FollowPendingSelection();
+            return;
+        }
+
+        // Each move restarts the pause.
+        _followPending = true;
+        var gen = ++_followGen;
+        var ui = global::Avalonia.Threading.Dispatcher.UIThread;
+        _ = Task.Delay(FollowDelayMs).ContinueWith(
+            _ => ui.Post(() =>
+            {
+                if (gen == _followGen)
+                {
+                    FollowPendingSelection();
+                }
+            }),
+            TaskScheduler.Default);
+    }
+
+    private void FollowPendingSelection()
+    {
+        var row = _followRow;
+        CancelFollow();
+        _lastFollow = Environment.TickCount64;
+        if (row is not null && ReferenceEquals(AnalysisTree.SelectedItem, row))
+        {
+            _viewModel.FollowSelection(row);
+        }
+    }
+
+    private void CancelFollow()
+    {
+        _followGen++;
+        _followPending = false;
+        _followRow = null;
+    }
+
+    // Enter on a file row opens it (pane open or not), like a double-click.
+    // async void: a throw here is an unhandled process crash, so guard.
+    private async void OnAnalysisTreeKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || e.KeyModifiers != KeyModifiers.None || AnalysisTree.SelectedItem is not CodeAnalysisRow { IsFile: true } row)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        try
+        {
+            CancelFollow();
+            await _viewModel.Analysis.OpenAsync(row);
         }
         catch (Exception ex)
         {
