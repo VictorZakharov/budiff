@@ -106,6 +106,7 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
     private bool _panning;
     private Point? _pointer;
     private CityBlock? _hover;
+    private CityBlock? _menuBlock;
 
     private bool _flying;
     private bool _frameRequested;
@@ -276,6 +277,10 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
 
     // The building or district under the pointer (for tests and the card).
     internal CityBlock? Hovered => _hover;
+
+    // What is drawn highlighted: the right-clicked block while its menu is
+    // open (the pointer has left for the menu), else the hovered one.
+    internal CityBlock? Highlighted => _menuBlock ?? _hover;
 
     internal IReadOnlyCollection<CityBlock>? Matches => _matches;
 
@@ -650,7 +655,14 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
         {
             // A right-click that did not pan: the building's menu.
             BlockMenu = FileManager.Menu(() => reveal.Execute(picked));
+            _menuBlock = picked;
+            BlockMenu.Closed += (_, _) =>
+            {
+                _menuBlock = null;
+                InvalidateVisual();
+            };
             BlockMenu.Open(this);
+            InvalidateVisual();
         }
         else if (!_dragged && !_panning && PickNear(e.GetPosition(this)) is { } hit)
         {
@@ -1014,7 +1026,11 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
         _hud.Labels = 0;
         DrawLabels(context, model);
         DrawLegend(context, model, bounds);
-        if (_hover is { } hover)
+        if (_menuBlock is { } menuBlock)
+        {
+            DrawHighlight(context, menuBlock);
+        }
+        else if (_hover is { } hover)
         {
             DrawHighlight(context, hover);
             if (_pointer is { } pointer)

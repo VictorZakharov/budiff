@@ -127,6 +127,12 @@ public sealed class CodeCityTests
         UiSnapshot.Pump();
         var menu = city.BlockMenu!;
         Assert.True(menu.IsOpen);
+
+        // The pointer leaving for the menu keeps the building highlighted.
+        window.MouseMove(new global::Avalonia.Point(1, 1));
+        UiSnapshot.Pump();
+        Assert.Null(city.Hovered);
+        Assert.Equal(tallest.RelativePath, city.Highlighted?.RelativePath);
         var item = (MenuItem)menu.Items[0]!;
         Assert.Equal(FileManager.RevealLabel, item.Header);
         item.RaiseEvent(new global::Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
@@ -134,6 +140,8 @@ public sealed class CodeCityTests
         Assert.Equal(new[] { expected }, shown);
         Assert.False(vm.IsDiffOpen);
         menu.Close();
+        UiSnapshot.Pump();
+        Assert.Null(city.Highlighted);
     }
 
     // Right-click a tree row: the row is selected and its menu shows it in
