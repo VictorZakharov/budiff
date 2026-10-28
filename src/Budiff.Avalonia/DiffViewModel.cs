@@ -41,7 +41,8 @@ public sealed partial class DiffViewModel : ObservableObject
 
     // Until a view reports its real pane width, assume ~80 visible columns.
     private double _visibleTextWidth = 80 * CharWidth;
-    private IReadOnlyList<BlameEntry?>? _blameLines;
+    private IReadOnlyList<BlameEntry?>? _blameOld;
+    private IReadOnlyList<BlameEntry?>? _blameNew;
     private int _tokenizeGen;
     private int _loadGen;
     private DispatcherTimer? _loadingTimer;
@@ -156,6 +157,10 @@ public sealed partial class DiffViewModel : ObservableObject
 
     public Action? GoBackHandler { get; set; }
 
+    // A click on a blame cell: the host opens that commit (null = blame cells
+    // are not clickable).
+    public Action<BlameEntry>? OpenCommitHandler { get; set; }
+
     [RelayCommand]
     private void GoBack() => GoBackHandler?.Invoke();
 
@@ -253,9 +258,40 @@ public sealed partial class DiffViewModel : ObservableObject
     public bool IsBlameVisible => ShowBlame && !IsFileView;
 
     // The funnel gutter offsets its center by this (the blame column sits left
-    // of both code halves). Keep in sync with the column's Width in the row
-    // template.
-    public double BlameGutterWidth => IsBlameVisible ? 120 : 0;
+    // of both code halves); the row template's blame cells bind to it too.
+    public double BlameGutterWidth => IsBlameVisible ? BlameLabelWidth : 0;
+
+    // Wide enough for the file's longest blame label ("author age") in full.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(BlameGutterWidth))]
+    private double _blameLabelWidth = MinBlameWidth;
+
+    internal const double MinBlameWidth = 120;
+    internal const double MaxBlameWidth = 280;
+
+    // Measures a blame label as its cell draws it - set by the view, which
+    // knows the font; without one (plain view-model tests) an estimate stands
+    // in. Setting it re-fits the column to the blame already shown.
+    public Func<string, double>? MeasureBlameLabel
+    {
+        get => _measureBlameLabel;
+        set
+        {
+            _measureBlameLabel = value;
+            FitBlameColumn();
+        }
+    }
+
+    private Func<string, double>? _measureBlameLabel;
+
+    private void FitBlameColumn()
+    {
+        var measure = _measureBlameLabel ?? (label => label.Length * 6.5);
+        var widest = (_blameOld ?? Array.Empty<BlameEntry?>()).Concat(_blameNew ?? Array.Empty<BlameEntry?>())
+            .OfType<BlameEntry>().Select(e => e.Label).Distinct().Select(measure).DefaultIfEmpty(0).Max();
+        // + the cell's padding (8 left, 4 right) and a little air.
+        BlameLabelWidth = Math.Clamp(Math.Ceiling(widest) + 16, MinBlameWidth, MaxBlameWidth);
+    }
 
     [ObservableProperty]
     private bool _isPlaceholder;
@@ -349,7 +385,7 @@ public sealed partial class DiffViewModel : ObservableObject
             _loadingTimer?.Stop();
             if (gen == _loadGen)
             {
-                SetPlaceholder("Loading diff...");
+                ShowLoadingIndicator();
             }
         };
         _loadingTimer.Start();
@@ -391,25 +427,37 @@ public sealed partial class DiffViewModel : ObservableObject
     }
 
     // Blame arrives asynchronously (1-based line n at index n-1); null clears
-    // it, e.g. when a new diff starts loading. It normally describes the OLD
-    // side; forNewSide maps by NEW line numbers instead (used when the base
-    // has nothing to blame - a new file's lines were still written by someone).
+    // it, e.g. when a new diff starts loading. One side's blame: the OLD
+    // side's, or (forNewSide) the NEW side's.
     public void SetBlame(IReadOnlyList<BlameEntry?>? lines, bool forNewSide = false)
+        => SetBlame(forNewSide ? null : lines, forNewSide ? lines : null);
+
+    // Both sides: a row shows who last changed the line as it is NOW (the new
+    // side), and only a removed line - gone from the new side - its old blame.
+    public void SetBlame(IReadOnlyList<BlameEntry?>? oldSide, IReadOnlyList<BlameEntry?>? newSide)
     {
-        _blameLines = lines;
-        _blameOnNewSide = forNewSide;
+        _blameOld = oldSide;
+        _blameNew = newSide;
+        FitBlameColumn();
         foreach (var vm in Rows)
         {
             vm.Blame = BlameFor(vm.Source);
         }
     }
 
-    private bool _blameOnNewSide;
-
     private BlameEntry? BlameFor(DiffRow? row)
+        => At(_blameNew, row?.NewNo) ?? (row?.NewNo is null || _blameNew is null ? At(_blameOld, row?.OldNo) : null);
+
+    private static BlameEntry? At(IReadOnlyList<BlameEntry?>? blame, int? lineNo)
+        => blame is not null && lineNo is { } n && n >= 1 && n <= blame.Count ? blame[n - 1] : null;
+
+    // The diff is taking a while. The file's blame is loaded alongside and
+    // may already be here: keep it for the rows, or they arrive without it.
+    internal void ShowLoadingIndicator()
     {
-        var lineNo = _blameOnNewSide ? row?.NewNo : row?.OldNo;
-        return _blameLines is { } blame && lineNo is { } n && n >= 1 && n <= blame.Count ? blame[n - 1] : null;
+        var (oldBlame, newBlame) = (_blameOld, _blameNew);
+        SetPlaceholder("Loading diff...");
+        (_blameOld, _blameNew) = (oldBlame, newBlame);
     }
 
     public void SetPlaceholder(string text)
@@ -420,7 +468,8 @@ public sealed partial class DiffViewModel : ObservableObject
         _tokenizeGen++;
         IsHighlighting = false;
         _all = Array.Empty<DiffRow>();
-        _blameLines = null;
+        _blameOld = null;
+        _blameNew = null;
         _oldRuns = Array.Empty<DiffRun[]>();
         _newRuns = Array.Empty<DiffRun[]>();
         _expandedGaps.Clear();

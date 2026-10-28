@@ -1,0 +1,163 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:app="using:Budiff.App"
+        x:Class="Budiff.App.CommitWindow"
+        x:CompileBindings="False"
+        Title="{Binding Title, StringFormat='{}{0} - budiff'}"
+        Width="840"
+        Height="480"
+        MinWidth="520"
+        MinHeight="280"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource BudiffEditorBackgroundBrush}">
+    <Window.Styles>
+        <Style Selector="TextBlock.muted, SelectableTextBlock.muted">
+            <Setter Property="Foreground" Value="{DynamicResource BudiffMutedTextBrush}" />
+        </Style>
+        <Style Selector="SelectableTextBlock.code">
+            <Setter Property="FontFamily" Value="Cascadia Code,Consolas,monospace" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+        <Style Selector="TreeView#FileTree TreeViewItem">
+            <Setter Property="IsExpanded" Value="True" />
+            <Setter Property="MinHeight" Value="26" />
+        </Style>
+        <Style Selector="Button.icon">
+            <Setter Property="Padding" Value="6" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+    </Window.Styles>
+
+    <DockPanel>
+        <!-- Header: the commit, who and when, and the way into a full window. -->
+        <Border DockPanel.Dock="Top"
+                Background="{DynamicResource BudiffToolbarBrush}"
+                Padding="12,6">
+            <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto" ColumnSpacing="8">
+                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <!-- The PR it came from (or is waiting in): its number on a pill in
+                         GitHub's state colour, as the PR picker shows it. A click opens it. -->
+                    <Border x:Name="PullRequestPill"
+                            IsVisible="{Binding HasPullRequest}"
+                            Background="{Binding PullRequestBrush}"
+                            CornerRadius="10"
+                            Padding="8,1"
+                            VerticalAlignment="Center"
+                            Cursor="Hand"
+                            Tapped="OnOpenPullRequest"
+                            ToolTip.Tip="{Binding PullRequestTip}">
+                        <TextBlock Text="{Binding PullRequestText}" FontSize="11" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Center" />
+                    </Border>
+                    <app:AppIcon Kind="SourceCommit" Width="18" Height="18"
+                                 Foreground="{DynamicResource BudiffMutedTextBrush}"
+                                 VerticalAlignment="Center" />
+                </StackPanel>
+                <SelectableTextBlock Grid.Column="1"
+                                     Text="{Binding Commit.ShortSha}"
+                                     FontFamily="Cascadia Code,Consolas,monospace"
+                                     Foreground="#61AFEF"
+                                     VerticalAlignment="Center"
+                                     ToolTip.Tip="{Binding Commit.Sha}" />
+                <Button Grid.Column="2"
+                        x:Name="CopyShaButton"
+                        Classes="icon"
+                        Click="OnCopySha"
+                        ToolTip.Tip="Copy the full commit id">
+                    <app:AppIcon Kind="ContentCopy" Width="14" Height="14" />
+                </Button>
+                <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center" ClipToBounds="True">
+                    <TextBlock Text="{Binding Commit.Author}" FontWeight="SemiBold"
+                               ToolTip.Tip="{Binding AuthorText}" />
+                    <TextBlock Classes="muted" Text="{Binding DateText}" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+                <Button Grid.Column="4"
+                        x:Name="ExpandButton"
+                        Classes="icon"
+                        Click="OnExpand"
+                        ToolTip.Tip="Open in a full budiff window">
+                    <app:AppIcon Kind="ArrowExpand" Width="16" Height="16" />
+                </Button>
+            </Grid>
+        </Border>
+
+        <Grid ColumnDefinitions="5*,Auto,6*">
+            <!-- Why: the message, as written. -->
+            <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="16,14" Spacing="12">
+                    <SelectableTextBlock Text="{Binding Commit.Subject}"
+                                         FontSize="15"
+                                         FontWeight="SemiBold"
+                                         TextWrapping="Wrap" />
+                    <!-- The body, reflowed: paragraphs and list items wrap
+                         to the pane, list items with a hanging indent. -->
+                    <ItemsControl ItemsSource="{Binding Paragraphs}" IsVisible="{Binding HasBody}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid ColumnDefinitions="Auto,*" Margin="{Binding Margin}">
+                                    <TextBlock Text="{Binding Bullet}"
+                                               IsVisible="{Binding HasBullet}"
+                                               Classes="muted"
+                                               MinWidth="16"
+                                               Margin="0,0,4,0"
+                                               LineHeight="20" />
+                                    <SelectableTextBlock Grid.Column="1"
+                                                         Classes.code="{Binding IsCode}"
+                                                         Text="{Binding Text}"
+                                                         TextWrapping="Wrap"
+                                                         LineHeight="20" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <!-- Co-authors and sign-offs: one person per line. -->
+                    <ItemsControl ItemsSource="{Binding Trailers}" IsVisible="{Binding HasTrailers}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <WrapPanel Margin="0,1">
+                                    <TextBlock Classes="muted" Text="{Binding Label}" Margin="0,0,6,0" />
+                                    <SelectableTextBlock Text="{Binding Name}" FontWeight="SemiBold" Margin="0,0,6,0" />
+                                    <SelectableTextBlock Classes="muted" Text="{Binding EmailText}" />
+                                </WrapPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Classes="muted" FontSize="12" Text="{Binding ParentText}" TextWrapping="Wrap" />
+                </StackPanel>
+            </ScrollViewer>
+
+            <GridSplitter Grid.Column="1" Width="4" Background="{DynamicResource BudiffToolbarBrush}" />
+
+            <!-- What: the files it changed. Double-click a file or folder to
+                 open the full window there. -->
+            <DockPanel Grid.Column="2">
+                <TextBlock DockPanel.Dock="Top"
+                           x:Name="FilesSummaryText"
+                           Classes="muted"
+                           Margin="12,10,12,4"
+                           Text="{Binding FilesSummary}" />
+                <!-- Rows fit the pane: a long name trims, its counts stay in view. -->
+                <TreeView x:Name="FileTree"
+                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                          ItemsSource="{Binding Files}"
+                          Margin="4,0,4,4">
+                    <TreeView.ItemTemplate>
+                        <TreeDataTemplate ItemsSource="{Binding Children}">
+                            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="6" Margin="0,0,16,0" ToolTip.Tip="{Binding Tip}">
+                                <app:AppIcon Kind="{Binding Icon}" Tint="{Binding IconTint}" Width="16" Height="16"
+                                             Foreground="{DynamicResource BudiffMutedTextBrush}"
+                                             VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="2" Classes="muted" FontSize="11" Text="{Binding StateText}" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="3" Text="{Binding AddedText}" Foreground="#6BB36B"
+                                           FontFamily="Cascadia Code,Consolas,monospace" FontSize="12" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="4" Text="{Binding RemovedText}" Foreground="#D16969"
+                                           FontFamily="Cascadia Code,Consolas,monospace" FontSize="12" VerticalAlignment="Center" />
+                            </Grid>
+                        </TreeDataTemplate>
+                    </TreeView.ItemTemplate>
+                </TreeView>
+            </DockPanel>
+        </Grid>
+    </DockPanel>
+</Window>

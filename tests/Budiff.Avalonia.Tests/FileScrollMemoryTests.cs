@@ -54,7 +54,8 @@ public sealed class FileScrollMemoryTests
 
         // TypeScript: past the header and the imports, at the doc comment.
         Open(window, "app.component.spec.ts");
-        Assert.Equal(13 * RowHeight, RowsScroller(window).Offset.Y, 0.5);
+        // (The rows panel sits 1px up, so row 13 starts 1px higher.)
+        Assert.Equal((13 * RowHeight) - 1, RowsScroller(window).Offset.Y, 0.5);
         Assert.Equal(1, RowsScroller(window).Opacity);
 
         // Back to the earlier ones: each where it was left.

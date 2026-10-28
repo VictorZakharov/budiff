@@ -18,9 +18,9 @@ namespace Budiff.App;
 internal static class NameExtent
 {
     // Name, then Lines .. Size.
-    internal const int ColumnCount = 11;
+    internal const int ColumnCount = 12;
 
-    private const int SizeColumn = 10;
+    private const int SizeColumn = 11;
 
     // A number cell's right margin (TextBlock.num) and the gap kept before it.
     private const double NumberRightMargin = 8;

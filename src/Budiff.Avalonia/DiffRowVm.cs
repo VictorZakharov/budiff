@@ -39,7 +39,19 @@ public sealed partial class DiffRowVm : ObservableObject
 
     public IReadOnlyList<DiffRun>? SingleRuns => NewNo is not null ? NewRuns : OldRuns;
 
-    public IBrush SingleBackground => NewNo is not null ? NewBackground : OldBackground;
+    // A wholly new or deleted file: every line would be tinted alike, so the
+    // lines stay plain and a gutter bar beside the line numbers says it
+    // instead - green for added, red for removed (the tints, made solid).
+    public IBrush SingleMarker => Kind switch
+    {
+        DiffKind.Added => Solid(NewBackground),
+        DiffKind.Removed => Solid(OldBackground),
+        _ => Brushes.Transparent,
+    };
+
+    private static IBrush Solid(IBrush tint) => tint is ISolidColorBrush s
+        ? new global::Avalonia.Media.Immutable.ImmutableSolidColorBrush(Color.FromArgb(0xFF, s.Color.R, s.Color.G, s.Color.B))
+        : tint;
 
     partial void OnNewRunsChanged(IReadOnlyList<DiffRun>? value) => OnPropertyChanged(nameof(SingleRuns));
 

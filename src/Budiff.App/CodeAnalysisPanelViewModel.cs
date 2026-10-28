@@ -18,7 +18,7 @@ namespace Budiff.App;
 
 public sealed record GroupingOption(string Label, AnalysisGrouping Value);
 
-public sealed record PeriodOption(string Label, int? Days, bool IsCustom = false, bool IsPullRequest = false);
+public sealed record PeriodOption(string Label, int? Days, bool IsCustom = false, bool IsPullRequest = false, bool IsCommit = false);
 
 // Common shape of one include/exclude filter entry (extension, author); the
 // panel wires all filter lists through the same subscribe/set-all helpers.
@@ -147,6 +147,9 @@ public sealed partial class CodeAnalysisRow : ObservableObject
 
     public string AuthorsText { get; init; } = string.Empty;
 
+    // How long ago it last changed: <1min, 5min, 3hr, 2d, 4mo, 1y.
+    public string RecencyText { get; init; } = string.Empty;
+
     public double BarFraction { get; init; }
 
     // What this row shows in a bird's-eye number column (1 = Lines ... 9 =
@@ -163,6 +166,7 @@ public sealed partial class CodeAnalysisRow : ObservableObject
         7 => RemovedText,
         8 => CommitsText,
         9 => AuthorsText,
+        10 => RecencyText,
         _ => string.Empty,
     };
 
@@ -192,6 +196,11 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     // files; leaving it restores this one without rescanning the disk.
     private ScanResult? _folderScan;
     private PullRequestRange? _appliedPullRequest;
+
+    // Commit mode (a window opened on one commit): the commit, kept to apply
+    // again when its period entry is picked again, and whether it is applied.
+    private CommitDetails? _commit;
+    private CommitDetails? _appliedCommit;
     private HistoryResult? _history;
     private bool _ready;
     private bool _suspendRebuild;
@@ -233,6 +242,21 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     public string PullRequestButtonText => PullRequestLabel.Length > 0 ? PullRequestLabel : "Choose...";
 
     public string PullRequestTip => PullRequestLabel.Length > 0 ? PullRequestLabel + " - click to pick another" : "Choose a pull request";
+
+    // The commit the visible analysis was computed for (null = not commit mode).
+    public CommitDetails? AppliedCommit => _appliedCommit;
+
+    // Whether the working tree was scanned (a window opened on a commit skips it).
+    internal bool HasFolderScan => _folderScan is not null;
+
+    [ObservableProperty]
+    private bool _isCommitPeriod;
+
+    public string CommitButtonText => _commit is { } commit ? commit.ShortSha + " " + commit.Subject : string.Empty;
+
+    public string CommitTip => _commit is { } commit
+        ? $"{commit.ShortSha} - {commit.Author}, {commit.When.LocalDateTime:yyyy-MM-dd HH:mm}\n\n{commit.Message}"
+        : string.Empty;
 
     [ObservableProperty]
     private ObservableCollection<CodeAnalysisRow> _roots = new();
@@ -285,7 +309,8 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         new GroupingOption("Projects", AnalysisGrouping.Projects),
     };
 
-    public IReadOnlyList<PeriodOption> Periods { get; } = new[]
+    // The "Commit" entry joins the list once a window is opened on a commit.
+    public ObservableCollection<PeriodOption> Periods { get; } = new()
     {
         new PeriodOption("All time", null),
         new PeriodOption("Last week", 7),
@@ -296,6 +321,24 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     };
 
     private PeriodOption DefaultPeriod => Periods.First(p => p.Days == 30);
+
+    private static readonly PeriodOption CommitPeriod = new("Commit", null, IsCommit: true);
+
+    // Opens on this commit: what it changed, against its parent. Call before
+    // the first LoadAsync, which then scans for it instead of a period.
+    public void StartWithCommit(CommitDetails commit)
+    {
+        _commit = commit;
+        if (!Periods.Contains(CommitPeriod))
+        {
+            Periods.Add(CommitPeriod);
+        }
+
+        OnPropertyChanged(nameof(CommitButtonText));
+        OnPropertyChanged(nameof(CommitTip));
+        SelectPeriodQuietly(CommitPeriod);
+        IsCommitPeriod = true;
+    }
 
     public string NameGlyph => Glyph(AnalysisSortKey.Name);
 
@@ -316,6 +359,8 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     public string CommitsGlyph => Glyph(AnalysisSortKey.Commits);
 
     public string AuthorsGlyph => Glyph(AnalysisSortKey.Authors);
+
+    public string RecencyGlyph => Glyph(AnalysisSortKey.Recency);
 
     [ObservableProperty]
     private bool _isCustomPeriod;
@@ -343,7 +388,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     }
 
     // PR mode is period-like too: churn columns show what the PR changed.
-    private bool Historical => _appliedPullRequest is not null || SinceDays.HasValue;
+    private bool Historical => _appliedPullRequest is not null || _appliedCommit is not null || SinceDays.HasValue;
 
     // The window the visible analysis was actually computed with (null = all
     // time). The drill-in diff aligns its default base to this.
@@ -367,6 +412,8 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             SelectPeriodQuietly(DefaultPeriod);
         }
 
+        var reapplyCommit = SelectedPeriod.IsCommit ? _commit : null;
+
         ClearPullRequest();
         _root = root;
         _ready = false;
@@ -377,6 +424,15 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
         {
             ShowMessage("No folder is open.");
+            return;
+        }
+
+        // A commit needs only its own files: no working-tree scan and no
+        // period history (both load if a time period is picked later).
+        if (reapplyCommit is not null)
+        {
+            _folderScan = null;
+            await ApplyCommitAsync(reapplyCommit);
             return;
         }
 
@@ -571,6 +627,62 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         ApplySearch();
     }
 
+    // Expands every folder, and remembers it across tree rebuilds.
+    internal void ExpandAll()
+    {
+        foreach (var row in Roots.SelectMany(r => r.SelfAndDescendants()).Where(r => !r.IsFile))
+        {
+            row.IsExpanded = true;
+            _expanded.Add(row.RelativePath);
+        }
+    }
+
+    // Expands the folders down to relativePath (a folder expands itself too)
+    // and returns its row; null when the tree does not show it. A folder the
+    // tree compacts into a longer row ("src" inside "src/app") reveals that row.
+    internal CodeAnalysisRow? Reveal(string relativePath)
+    {
+        var trail = FindTrail(Roots, relativePath.Trim('/'));
+        if (trail is null)
+        {
+            return null;
+        }
+
+        foreach (var row in trail.Where(r => !r.IsFile))
+        {
+            row.IsExpanded = true;
+        }
+
+        return trail[^1];
+    }
+
+    private static List<CodeAnalysisRow>? FindTrail(IEnumerable<CodeAnalysisRow> rows, string path)
+    {
+        if (path.Length == 0)
+        {
+            return null;
+        }
+
+        foreach (var row in rows)
+        {
+            if (string.Equals(row.RelativePath, path, StringComparison.OrdinalIgnoreCase)
+                || row.RelativePath.StartsWith(path + "/", StringComparison.OrdinalIgnoreCase))
+            {
+                return new List<CodeAnalysisRow> { row };
+            }
+
+            if (!row.IsFile
+                && path.StartsWith(row.RelativePath + "/", StringComparison.OrdinalIgnoreCase)
+                && FindTrail(row.Children, path) is { } trail)
+            {
+                trail.Insert(0, row);
+                return trail;
+            }
+        }
+
+        return null;
+    }
+
     private void CaptureExpansion()
     {
         if (_lastWasSearching)
@@ -632,6 +744,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             RemovedText = showGit && node.Removed > 0 ? "-" + N(node.Removed) : string.Empty,
             CommitsText = showGit && node.CommitCount > 0 ? N(node.CommitCount) : string.Empty,
             AuthorsText = showGit && node.AuthorCount > 0 ? N(node.AuthorCount) : string.Empty,
+            RecencyText = showGit ? Age(node.LastChanged, DateTimeOffset.Now) : string.Empty,
             BarFraction = node.BarFraction,
             IsExpanded = _expanded.Contains(node.RelativePath),
             NameRuns = new[] { new NameRun(node.Name, false) },
@@ -735,6 +848,17 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         OnPropertyChanged(nameof(CanResetView));
         IsCustomPeriod = value.IsCustom;
         IsPullRequestPeriod = value.IsPullRequest;
+        IsCommitPeriod = value.IsCommit;
+        if (value.IsCommit)
+        {
+            if (!_suspendRebuild && _commit is not null)
+            {
+                _ = ApplyCommitAsync(_commit);
+            }
+
+            return;
+        }
+
         if (value.IsPullRequest)
         {
             if (!_suspendRebuild)
@@ -777,7 +901,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
     public async Task ApplyPullRequestAsync(PullRequestInfo pullRequest)
     {
-        if (PullRequests is null || _folderScan is null || !GitAvailable)
+        if (PullRequests is null || string.IsNullOrEmpty(_root) || !GitAvailable)
         {
             return;
         }
@@ -790,6 +914,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             var root = _root;
             var snapshot = await Task.Run(() => CodeAnalysisRepositoryReader.LoadPullRequest(root, range));
             _appliedPullRequest = range;
+            _appliedCommit = null;
             _scan = snapshot.Scan;
             _history = snapshot.History;
             SelectPeriodQuietly(Periods.First(p => p.IsPullRequest));
@@ -819,6 +944,47 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         HistoryApplied?.Invoke();
     }
 
+    public async Task ApplyCommitAsync(CommitDetails commit)
+    {
+        if (string.IsNullOrEmpty(_root))
+        {
+            return;
+        }
+
+        IsScanning = true;
+        ShowMessage($"Loading commit {commit.ShortSha}...");
+        try
+        {
+            var root = _root;
+            var snapshot = await Task.Run(() => CodeAnalysisRepositoryReader.LoadCommit(root, commit));
+            _appliedPullRequest = null;
+            PullRequestLabel = string.Empty;
+            _appliedCommit = commit;
+            _scan = snapshot.Scan;
+            _history = snapshot.History;
+            SelectPeriodQuietly(CommitPeriod);
+            IsCommitPeriod = true;
+            _appliedPeriod = SelectedPeriod;
+            _appliedDays = null;
+            GitAvailable = true;
+            LoadFilters(_scan, _history, preserveSelection: _ready);
+            _ready = true;
+        }
+        catch (Exception ex)
+        {
+            Rebuild();
+            ShowMessage($"Could not load commit {commit.ShortSha}: {ex.Message}");
+            return;
+        }
+        finally
+        {
+            IsScanning = false;
+        }
+
+        Rebuild();
+        HistoryApplied?.Invoke();
+    }
+
     private void SelectPeriodQuietly(PeriodOption period)
     {
         var suspended = _suspendRebuild;
@@ -827,9 +993,11 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         _suspendRebuild = suspended;
     }
 
+    // Back to a time period: leaves PR and commit mode.
     private void ClearPullRequest()
     {
         _appliedPullRequest = null;
+        _appliedCommit = null;
         PullRequestLabel = string.Empty;
         if (_folderScan is not null)
         {
@@ -853,7 +1021,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
     private async Task ReloadHistoryAsync()
     {
-        if (_suspendRebuild || !_ready || _folderScan is null || !GitAvailable)
+        if (_suspendRebuild || !_ready || !GitAvailable)
         {
             Rebuild();
             return;
@@ -882,7 +1050,19 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         try
         {
             var sw = Stopwatch.StartNew();
-            _history = await Task.Run(() => GitHistory.Load(_root, days));
+            if (_folderScan is null)
+            {
+                // Opened on a commit: the working tree was never scanned.
+                var root = _root;
+                var snapshot = await Task.Run(() => CodeAnalysisRepositoryReader.Load(root, days));
+                _folderScan = snapshot.Scan;
+                _history = snapshot.History;
+            }
+            else
+            {
+                _history = await Task.Run(() => GitHistory.Load(_root, days));
+            }
+
             RecordTiming(sw.ElapsedMilliseconds, _history?.CommitCount ?? 0);
             ClearPullRequest();
             _appliedPeriod = SelectedPeriod;
@@ -925,6 +1105,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         OnPropertyChanged(nameof(RemovedGlyph));
         OnPropertyChanged(nameof(CommitsGlyph));
         OnPropertyChanged(nameof(AuthorsGlyph));
+        OnPropertyChanged(nameof(RecencyGlyph));
     }
 
     private string Glyph(AnalysisSortKey key)
@@ -940,4 +1121,21 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     };
 
     private static string N(long value) => value.ToString("N0", CultureInfo.CurrentCulture);
+
+    // Minutes spelled "min" so they never read as months ("mo").
+    internal static string Age(long unixSeconds, DateTimeOffset now)
+    {
+        if (unixSeconds <= 0)
+        {
+            return string.Empty;
+        }
+
+        var span = now - DateTimeOffset.FromUnixTimeSeconds(unixSeconds);
+        return span.TotalDays >= 365 ? $"{(int)(span.TotalDays / 365)}y"
+            : span.TotalDays >= 30 ? $"{(int)(span.TotalDays / 30)}mo"
+            : span.TotalDays >= 1 ? $"{(int)span.TotalDays}d"
+            : span.TotalHours >= 1 ? $"{(int)span.TotalHours}hr"
+            : span.TotalMinutes >= 1 ? $"{(int)span.TotalMinutes}min"
+            : "<1min";
+    }
 }

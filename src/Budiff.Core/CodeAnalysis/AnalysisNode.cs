@@ -21,6 +21,7 @@ public enum AnalysisSortKey
     Removed,
     Commits,
     Authors,
+    Recency,
 }
 
 public enum AnalysisNodeKind
@@ -71,6 +72,9 @@ public sealed class AnalysisNode
 
     public int AuthorCount => Authors.Count;
 
+    // The newest commit under it, as Unix seconds (0 = none in the window).
+    public long LastChanged { get; set; }
+
     public double BarFraction { get; private set; }
 
     public double SortValue(AnalysisSortKey key) => key switch
@@ -84,6 +88,7 @@ public sealed class AnalysisNode
         AnalysisSortKey.Removed => Removed,
         AnalysisSortKey.Commits => CommitCount,
         AnalysisSortKey.Authors => AuthorCount,
+        AnalysisSortKey.Recency => LastChanged,
         _ => Lines.Total,
     };
 
@@ -107,6 +112,7 @@ public sealed class AnalysisNode
             removed += child.Removed;
             CommitIds.UnionWith(child.CommitIds);
             Authors.UnionWith(child.Authors);
+            LastChanged = Math.Max(LastChanged, child.LastChanged);
         }
 
         Lines = lines;
@@ -155,7 +161,8 @@ public sealed class AnalysisNode
 
         Children.Sort(ascending ? ascendingCompare : (a, b) => ascendingCompare(b, a));
 
-        var barKey = key == AnalysisSortKey.Name ? AnalysisSortKey.Lines : key;
+        // A date is no size: by name or recency, the bar shows lines.
+        var barKey = key is AnalysisSortKey.Name or AnalysisSortKey.Recency ? AnalysisSortKey.Lines : key;
         var max = 0.0;
         foreach (var child in Children)
         {

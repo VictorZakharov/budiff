@@ -15,4 +15,8 @@
     <ProjectReference Include="..\Budiff.Core\Budiff.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Budiff.Avalonia.Tests" />
+  </ItemGroup>
+
 </Project>
