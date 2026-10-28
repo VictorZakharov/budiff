@@ -505,23 +505,14 @@ public sealed partial class DiffViewModel : ObservableObject
         _expandedGaps.Clear();
         HorizontalScroll = 0;
 
-        // A missing side diffs as one empty line, which pairs with the other
-        // side's trailing blank into an Unchanged row - tolerate blank
-        // Unchanged rows when deciding "wholly added/deleted".
+        // A missing side diffs as no lines (LineDiff.Compute), so a wholly
+        // added or deleted file is all Added or all Removed rows.
         var anyChange = false;
         var allAdded = true;
         var allRemoved = true;
         foreach (var row in rows)
         {
-            if (row.Kind == DiffKind.Unchanged)
-            {
-                var blank = string.IsNullOrEmpty(row.OldText) && string.IsNullOrEmpty(row.NewText);
-                allAdded &= blank;
-                allRemoved &= blank;
-                continue;
-            }
-
-            anyChange = true;
+            anyChange |= row.Kind != DiffKind.Unchanged;
             allAdded &= row.Kind == DiffKind.Added;
             allRemoved &= row.Kind == DiffKind.Removed;
         }

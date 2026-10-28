@@ -14,6 +14,15 @@ public static class LineDiff
 
     public static IReadOnlyList<DiffRow> Compute(string oldText, string newText)
     {
+        // A missing side (an added or deleted file) is no lines at all, not one
+        // empty line: left to the LCS, that empty line would pair with the other
+        // side's first blank line into an Unchanged row mid-file, numbered and
+        // marked as if it existed on both sides.
+        if (string.IsNullOrEmpty(oldText) != string.IsNullOrEmpty(newText))
+        {
+            return WholeSideRows(string.IsNullOrEmpty(oldText) ? newText : oldText, added: string.IsNullOrEmpty(oldText));
+        }
+
         var oldLines = SplitLines(oldText);
         var newLines = SplitLines(newText);
 
@@ -25,8 +34,8 @@ public static class LineDiff
     }
 
     // Split on \n, \r\n, or lone \r. Note "" yields [""] - a single empty line,
-    // like string.Split - which downstream pairing relies on (an empty old side
-    // pairs into one blank Unchanged row). Manual scan to avoid the two full
+    // like string.Split. Compute handles a missing side before splitting, so
+    // that line never pairs with the other side's blanks. Manual scan to avoid the two full
     // normalization copies the old Replace/Replace/Split made per file.
     public static string[] SplitLines(string text)
     {
@@ -52,6 +61,24 @@ public static class LineDiff
 
         lines.Add(text[start..]);
         return lines.ToArray();
+    }
+
+    // Every line of the one populated side, all Added or all Removed. The
+    // trailing newline gets no blank row of its own (as in DiffLoader.BuildView):
+    // there is no other side for it to end alongside.
+    private static List<DiffRow> WholeSideRows(string text, bool added)
+    {
+        var lines = SplitLines(text);
+        var count = lines.Length > 1 && lines[^1].Length == 0 ? lines.Length - 1 : lines.Length;
+        var rows = new List<DiffRow>(count);
+        for (var i = 0; i < count; i++)
+        {
+            rows.Add(added
+                ? new DiffRow(null, null, i + 1, lines[i], DiffKind.Added)
+                : new DiffRow(i + 1, lines[i], null, null, DiffKind.Removed));
+        }
+
+        return rows;
     }
 
     private readonly record struct Op(int Kind, int OldIdx, int NewIdx);
