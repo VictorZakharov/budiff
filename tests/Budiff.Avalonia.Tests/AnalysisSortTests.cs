@@ -1,5 +1,7 @@
 using Avalonia.Controls;
+using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
+using Avalonia.Input;
 using Avalonia.VisualTree;
 using Budiff.App;
 using Budiff.CodeAnalysis;
@@ -12,10 +14,16 @@ namespace Budiff.Avalonia.Tests;
 // selected and scrolls it into view - on the real window.
 public sealed class AnalysisSortTests
 {
-    [AvaloniaFact]
-    public void Sort_KeepsTheSelectedRowSelectedAndInView()
+    // Picked with the mouse and sorted from the header, like the user does:
+    // a file, a folder, and a file inside an expanded folder.
+    [AvaloniaTheory]
+    [InlineData("item59.cs")]
+    [InlineData("pack59")]
+    [InlineData("pack59/code.cs")]
+    public void Sort_KeepsTheClickedRowSelectedAndInView(string path)
     {
-        var root = BuildFolder("budiff-sort-selection");
+        var name = path.Split('/')[0];
+        var root = BuildFolder("budiff-sort-" + path.Replace('/', '-'));
         var window = new MainWindow(root, gitRoot: true) { Width = 1400, Height = 820 };
         window.Show();
         var vm = window.ViewModel;
@@ -23,22 +31,37 @@ public sealed class AnalysisSortTests
         UiSnapshot.Pump();
         var tree = window.FindControl<TreeView>("AnalysisTree")!;
 
-        // Biggest file first (Lines, descending): the top row is selected.
-        var top = vm.Analysis.Roots[0];
-        Assert.Equal("item59.cs", top.Name);
-        tree.SelectedItem = top;
-        UiSnapshot.Pump();
-        Assert.True(IsInView(tree, top));
+        // Biggest first (Lines, descending): the row is on screen; click it.
+        var row = vm.Analysis.Roots.First(r => r.Name == name);
+        if (path != name)
+        {
+            row.IsExpanded = true;
+            UiSnapshot.Pump();
+            UiSnapshot.Pump();
+            row = row.Children.Single();
+        }
 
-        // Ascending puts it last, far below the fold.
-        vm.Analysis.SortCommand.Execute(AnalysisSortKey.Lines);
+        Assert.True(IsInView(tree, row));
+        var at = global::Avalonia.VisualExtensions.TranslatePoint((Control)tree.TreeContainerFromItem(row)!, new global::Avalonia.Point(120, 12), window)!.Value;
+        window.MouseDown(at, MouseButton.Left);
+        window.MouseUp(at, MouseButton.Left);
+        UiSnapshot.Pump();
+        Assert.Same(row, tree.SelectedItem);
+
+        // Ascending from the Lines header puts it far below the fold.
+        var header = window.GetVisualDescendants().OfType<Button>()
+            .First(b => b.CommandParameter is AnalysisSortKey.Lines && b.IsEffectivelyVisible);
+        var headerAt = global::Avalonia.VisualExtensions.TranslatePoint(header, new global::Avalonia.Point(header.Bounds.Width / 2, header.Bounds.Height / 2), window)!.Value;
+        window.MouseDown(headerAt, MouseButton.Left);
+        window.MouseUp(headerAt, MouseButton.Left);
         UiSnapshot.Pump();
         UiSnapshot.Pump();
 
-        Assert.Equal("item59.cs", vm.Analysis.Roots[^1].Name);
+        Assert.True(vm.Analysis.SortAscending);
+        Assert.True(vm.Analysis.Roots.ToList().FindIndex(r => r.Name == name) > 50);
         var selected = Assert.IsType<CodeAnalysisRow>(tree.SelectedItem);
-        Assert.Equal("item59.cs", selected.RelativePath);
-        Assert.Same(vm.Analysis.Roots[^1], selected);
+        Assert.Equal(path, selected.RelativePath);
+        Assert.Same(vm.Analysis.FindShown(path), selected);
         Assert.True(IsInView(tree, selected), "the selected row is scrolled out of view after the sort");
     }
 
@@ -55,7 +78,8 @@ public sealed class AnalysisSortTests
         return at is { } p && p.Y >= 0 && p.Y + item.Bounds.Height <= viewer.Bounds.Height;
     }
 
-    // Sixty files of growing size at the root: far more rows than fit.
+    // Sixty files and sixty one-file folders of growing size at the root: far
+    // more rows than fit.
     private static string BuildFolder(string name)
     {
         var root = Path.Combine(AppContext.BaseDirectory, "fixtures", name);
@@ -76,6 +100,7 @@ public sealed class AnalysisSortTests
         for (var i = 0; i < 60; i++)
         {
             files[$"item{i:00}.cs"] = string.Concat(Enumerable.Repeat("var x = 1;\n", (i + 1) * 5));
+            files[$"pack{i:00}/code.cs"] = string.Concat(Enumerable.Repeat("var y = 2;\n", (i + 1) * 5 + 2));
         }
 
         ReadmeFixture.Commit(repo, ReadmeFixture.Sig("Ada Lovelace", "ada@example.com", daysAgo: 5), "Files", files);
