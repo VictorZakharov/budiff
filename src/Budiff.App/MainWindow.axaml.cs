@@ -71,6 +71,16 @@ public sealed partial class MainWindow : Window
         DiffToolbarGrid.LayoutUpdated += (_, _) => UpdateDiffOptionsOverflow();
         ApplyDiffLayout();
         AddColumnMenuItems();
+
+        // In the city, Enter in the search box flies to the best match.
+        FilterBox.AddHandler(KeyDownEvent, (_, e) =>
+        {
+            if (e.Key == Key.Enter && _viewModel.Analysis.IsCityView)
+            {
+                CodeCity.FlyToBestMatch();
+                e.Handled = true;
+            }
+        }, RoutingStrategies.Tunnel);
     }
 
     // A row's name tip shows only when the name is cut short by the ellipsis.
