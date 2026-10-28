@@ -120,40 +120,40 @@ public sealed partial class CodeAnalysisRow : ObservableObject
 
     partial void OnIsExpandedChanged(bool value) => OnPropertyChanged(nameof(ExpandIcon));
 
-    public string? FullPath { get; init; }
+    public string? FullPath { get; set; }
 
     // The analysis node it shows (its numbers, for a folder summary).
-    internal AnalysisNode? Node { get; init; }
+    internal AnalysisNode? Node { get; set; }
 
     public bool IsFile { get; init; }
 
-    public AppIconKind Icon { get; init; }
+    public AppIconKind Icon { get; set; }
 
     // A file type's own colour; null keeps the muted text colour.
-    public IBrush? IconTint { get; init; }
+    public IBrush? IconTint { get; set; }
 
-    public string LinesText { get; init; } = string.Empty;
+    public string LinesText { get; set; } = string.Empty;
 
-    public string CodeText { get; init; } = string.Empty;
+    public string CodeText { get; set; } = string.Empty;
 
-    public string BlankText { get; init; } = string.Empty;
+    public string BlankText { get; set; } = string.Empty;
 
-    public string CommentText { get; init; } = string.Empty;
+    public string CommentText { get; set; } = string.Empty;
 
-    public string FilesText { get; init; } = string.Empty;
+    public string FilesText { get; set; } = string.Empty;
 
-    public string AddedText { get; init; } = string.Empty;
+    public string AddedText { get; set; } = string.Empty;
 
-    public string RemovedText { get; init; } = string.Empty;
+    public string RemovedText { get; set; } = string.Empty;
 
-    public string CommitsText { get; init; } = string.Empty;
+    public string CommitsText { get; set; } = string.Empty;
 
-    public string AuthorsText { get; init; } = string.Empty;
+    public string AuthorsText { get; set; } = string.Empty;
 
     // How long ago it last changed: <1min, 5min, 3hr, 2d, 4mo, 1y.
-    public string RecencyText { get; init; } = string.Empty;
+    public string RecencyText { get; set; } = string.Empty;
 
-    public double BarFraction { get; init; }
+    public double BarFraction { get; set; }
 
     // What this row shows in a bird's-eye number column (1 = Lines ... 9 =
     // Authors): the name runs on over empty ones and up to the first number
@@ -175,6 +175,89 @@ public sealed partial class CodeAnalysisRow : ObservableObject
 
     public ObservableCollection<CodeAnalysisRow> Children { get; } = new();
 
+    // A refresh: whether a freshly built row for the same path shows the
+    // same, and taking over what it shows - the row object (and the tree's
+    // container for it) stays, so the tree does not move.
+    internal bool Shows(CodeAnalysisRow fresh)
+        => Name == fresh.Name && IsFile == fresh.IsFile && Icon == fresh.Icon && Equals(IconTint, fresh.IconTint)
+           && LinesText == fresh.LinesText && CodeText == fresh.CodeText && BlankText == fresh.BlankText
+           && CommentText == fresh.CommentText && FilesText == fresh.FilesText && AddedText == fresh.AddedText
+           && RemovedText == fresh.RemovedText && CommitsText == fresh.CommitsText && AuthorsText == fresh.AuthorsText
+           && RecencyText == fresh.RecencyText && BarFraction.Equals(fresh.BarFraction);
+
+    internal void Take(CodeAnalysisRow fresh)
+    {
+        Node = fresh.Node;
+        FullPath = fresh.FullPath;
+        if (Shows(fresh))
+        {
+            return;
+        }
+
+        Icon = fresh.Icon;
+        IconTint = fresh.IconTint;
+        LinesText = fresh.LinesText;
+        CodeText = fresh.CodeText;
+        BlankText = fresh.BlankText;
+        CommentText = fresh.CommentText;
+        FilesText = fresh.FilesText;
+        AddedText = fresh.AddedText;
+        RemovedText = fresh.RemovedText;
+        CommitsText = fresh.CommitsText;
+        AuthorsText = fresh.AuthorsText;
+        RecencyText = fresh.RecencyText;
+        BarFraction = fresh.BarFraction;
+        OnPropertyChanged(string.Empty);
+    }
+
+    // Makes rows (one level, then each kept row's children) match fresh ones:
+    // a row whose path is still there stays and takes the new numbers, a
+    // gone one goes, a new one comes in at its place.
+    internal static void Merge(ObservableCollection<CodeAnalysisRow> rows, IList<CodeAnalysisRow> fresh)
+    {
+        var keep = new HashSet<string>(fresh.Select(r => r.RelativePath), StringComparer.OrdinalIgnoreCase);
+        for (var i = rows.Count - 1; i >= 0; i--)
+        {
+            if (!keep.Contains(rows[i].RelativePath))
+            {
+                rows.RemoveAt(i);
+            }
+        }
+
+        for (var i = 0; i < fresh.Count; i++)
+        {
+            var path = fresh[i].RelativePath;
+            var at = -1;
+            for (var j = i; j < rows.Count; j++)
+            {
+                if (string.Equals(rows[j].RelativePath, path, StringComparison.OrdinalIgnoreCase))
+                {
+                    at = j;
+                    break;
+                }
+            }
+
+            if (at < 0 || rows[at].IsFile != fresh[i].IsFile || rows[at].Name != fresh[i].Name)
+            {
+                if (at >= 0)
+                {
+                    rows.RemoveAt(at);
+                }
+
+                rows.Insert(i, fresh[i]);
+                continue;
+            }
+
+            if (at != i)
+            {
+                rows.Move(at, i);
+            }
+
+            rows[i].Take(fresh[i]);
+            Merge(rows[i].Children, fresh[i].Children);
+        }
+    }
+
     public IEnumerable<CodeAnalysisRow> SelfAndDescendants()
     {
         yield return this;
@@ -192,6 +275,15 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 {
     private readonly Func<string, string, Task> _openFile;
     private readonly HashSet<string> _expanded = new(StringComparer.OrdinalIgnoreCase);
+
+    // The next rebuild is a refresh's: merged into the rows shown, not
+    // replacing them. Around the merge, the window keeps the selected row
+    // where it was on screen.
+    private bool _mergeRows;
+
+    internal event Action? TreeMerging;
+
+    internal event Action? TreeMerged;
     private string _root = string.Empty;
     private ScanResult? _scan;
 
@@ -417,18 +509,19 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
         var reapplyCommit = SelectedPeriod.IsCommit ? _commit : null;
 
-        // A refresh of the same folder keeps what the reader set up: open
-        // folders (taken before the rows go), the filters and the sort. The
-        // rows are replaced, not cleared, so the window remembers the
-        // selected one to pick again once the new rows arrive.
-        var refresh = string.Equals(root, _root, StringComparison.OrdinalIgnoreCase);
+        // A refresh of the same folder keeps what the reader set up: the tree
+        // stays on screen while it scans, then only rows whose numbers changed
+        // change (see CodeAnalysisRow.Merge) - open folders, the selection and
+        // the scroll stay; so do the filters and the sort.
+        var refresh = string.Equals(root, _root, StringComparison.OrdinalIgnoreCase) && Roots.Count > 0;
         CaptureExpansion();
         ClearPullRequest();
         _root = root;
         _ready = false;
-        Roots = new ObservableCollection<CodeAnalysisRow>();
+        _mergeRows = refresh;
         if (!refresh)
         {
+            Roots = new ObservableCollection<CodeAnalysisRow>();
             _expanded.Clear();
             Extensions.Clear();
             Authors.Clear();
@@ -720,7 +813,19 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             allTime: !Historical,
             includedAuthors: authorFilter);
 
-        Roots = new ObservableCollection<CodeAnalysisRow>(root.Children.Select(n => BuildRow(n, depth: 0)));
+        var fresh = root.Children.Select(n => BuildRow(n, depth: 0)).ToList();
+        if (_mergeRows && Roots.Count > 0)
+        {
+            TreeMerging?.Invoke();
+            CodeAnalysisRow.Merge(Roots, fresh);
+            TreeMerged?.Invoke();
+        }
+        else
+        {
+            Roots = new ObservableCollection<CodeAnalysisRow>(fresh);
+        }
+
+        _mergeRows = false;
         SetSummary(root);
         ApplySearch();
         _lastRoot = root;

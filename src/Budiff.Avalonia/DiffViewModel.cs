@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Threading;
 using System.Threading.Tasks;
 using Budiff;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -371,7 +372,16 @@ public sealed partial class DiffViewModel : ObservableObject
         }
     }
 
-    public void BeginLoad(Func<DiffResult> loader)
+    // How long finished rows wait for their blame (loading alongside) so both
+    // change at once; a slower blame fills the column in afterwards.
+    internal int BlameWaitMs { get; set; } = 300;
+
+    // The load whose rows are ready (only its blame may still be coming):
+    // the loading indicator then stays away.
+    private int _rowsReadyGen;
+
+    // blame: the new file's blame, loading alongside (null: no blame).
+    public void BeginLoad(Func<DiffResult> loader, Task<BlameSides>? blame = null)
     {
         var gen = ++_loadGen;
         IsLoading = true;
@@ -383,7 +393,7 @@ public sealed partial class DiffViewModel : ObservableObject
         _loadingTimer.Tick += (_, _) =>
         {
             _loadingTimer?.Stop();
-            if (gen == _loadGen)
+            if (gen == _loadGen && Volatile.Read(ref _rowsReadyGen) != gen)
             {
                 ShowLoadingIndicator();
             }
@@ -405,6 +415,10 @@ public sealed partial class DiffViewModel : ObservableObject
                 result = DiffResult.Message("Could not load this diff.");
             }
 
+            // The previous file stays on screen, blame and all, until the
+            // new rows land - with their blame when it is quick.
+            Volatile.Write(ref _rowsReadyGen, gen);
+            var blameReady = blame is not null && result.Rows is not null && Finished(blame, BlameWaitMs);
             ui.Post(() =>
             {
                 if (gen != _loadGen)
@@ -416,6 +430,16 @@ public sealed partial class DiffViewModel : ObservableObject
                 IsLoading = false;
                 if (result.Rows is { } rows)
                 {
+                    if (blame is not null)
+                    {
+                        // Not ready: the column keeps its width, empty, until it is.
+                        (_blameOld, _blameNew) = blameReady ? (blame.Result.Old, blame.Result.New) : (null, null);
+                        if (blameReady)
+                        {
+                            FitBlameColumn();
+                        }
+                    }
+
                     SetDiff(rows);
                 }
                 else
@@ -423,7 +447,32 @@ public sealed partial class DiffViewModel : ObservableObject
                     SetPlaceholder(result.Placeholder ?? "Nothing to show.");
                 }
             });
+
+            if (blame is not null && !blameReady && result.Rows is not null)
+            {
+                blame.ContinueWith(
+                    done => ui.Post(() =>
+                    {
+                        if (gen == _loadGen && done.IsCompletedSuccessfully)
+                        {
+                            SetBlame(done.Result.Old, done.Result.New);
+                        }
+                    }),
+                    TaskScheduler.Default);
+            }
         });
+    }
+
+    private static bool Finished(Task task, int waitMs)
+    {
+        try
+        {
+            return task.Wait(waitMs) && task.IsCompletedSuccessfully;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     // Blame arrives asynchronously (1-based line n at index n-1); null clears

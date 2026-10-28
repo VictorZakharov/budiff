@@ -127,6 +127,9 @@ public sealed class DiffFollowsSelectionTests
     {
         var (window, tree) = OpenOn("budiff-follow-burst", "f01.cs");
         var vm = window.ViewModel;
+
+        // A pause long enough that no runner is slow enough to split the burst.
+        window.FollowDelayMs = 1500;
         var titles = new List<string>();
         vm.Diff.PropertyChanged += (_, e) =>
         {

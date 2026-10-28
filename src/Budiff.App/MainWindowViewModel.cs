@@ -23,8 +23,6 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private GitRepositoryScope? _scope;
     private ChangedFile? _openDiffFile;
     private DiffTarget? _openTarget;
-    private int _blameGen;
-    private string? _blamePath;
 
     // The folder whose summary the diff pane shows (its tree path).
     private string? _folderPath;
@@ -226,8 +224,6 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _openFile = null;
         _openDiffFile = null;
         _openTarget = null;
-        _blameGen++;
-        _blamePath = null;
         var summary = Analysis.SummarizeFolder(row);
         _folderPath = row.RelativePath;
         Diff.CancelLoad();
@@ -534,28 +530,18 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _openTarget = target;
         Diff.Subtitle = DescribeTarget(target);
         Diff.PreviewContext = PreviewContext(target);
-        Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(scope, file, target));
-        BeginLoadBlame(scope, file, target);
+        Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(scope, file, target), LoadBlameAsync(scope, file, target));
     }
 
     // Blame describes the diff's BASE side; when the base has nothing to blame
     // (empty-tree base, or the file is absent there - a wholly new file), fall
     // back to blaming the NEW side: those lines were still written by someone.
-    // Loaded off-thread after the diff so the rows never wait on it; the
-    // generation guard drops a stale result when the user has already moved on.
-    // Reloading the SAME file keeps the old values on screen until the fresh
-    // ones land, so a working-tree/base toggle does not blank the column.
-    private void BeginLoadBlame(GitRepositoryScope scope, ChangedFile file, DiffTarget target)
+    // Loaded off-thread alongside the diff; the diff view swaps the old file's
+    // rows and blame for the new ones together (or fills in a slow blame
+    // after), and drops a result the reader has already moved on from.
+    private static Task<BlameSides> LoadBlameAsync(GitRepositoryScope scope, ChangedFile file, DiffTarget target)
     {
-        var gen = ++_blameGen;
-        if (!string.Equals(_blamePath, file.Path, StringComparison.OrdinalIgnoreCase))
-        {
-            Diff.SetBlame(null);
-        }
-
-        _blamePath = file.Path;
-        var ui = global::Avalonia.Threading.Dispatcher.UIThread;
-        _ = Task.Run(() =>
+        return Task.Run(() =>
         {
             // The new side's blame names who last changed each line as it is
             // now - so its newest matches the file's Recency; the old side's
@@ -581,13 +567,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             var heat = BlameHeat.For(oldBlame.Concat(newBlame), line => Age(line.When, now));
             var oldEntries = Entries(oldBlame, heat);
             var newEntries = newBlame.Count > 0 ? Entries(newBlame, heat) : null;
-            ui.Post(() =>
-            {
-                if (gen == _blameGen)
-                {
-                    Diff.SetBlame(oldEntries, newEntries);
-                }
-            });
+            return new BlameSides(oldEntries, newEntries);
         });
     }
 
@@ -938,8 +918,6 @@ public sealed partial class MainWindowViewModel : ObservableObject
             // No git: nothing to compare against - show the file as it is now.
             _openDiffFile = null;
             _openTarget = null;
-            _blameGen++;
-            _blamePath = null;
             Diff.SetBlame(null);
             Diff.Title = relativePath.Replace('\\', '/');
             Diff.Subtitle = "current file - no git";
@@ -960,8 +938,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             _openTarget = target;
             Diff.PreviewContext = PreviewContext(target);
             IsDiffOpen = true;
-            Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(_scope, file, target));
-            BeginLoadBlame(_scope, file, target);
+            Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(_scope, file, target), LoadBlameAsync(_scope, file, target));
         }
 
         // Only once the load is under way (its result lands later, on this

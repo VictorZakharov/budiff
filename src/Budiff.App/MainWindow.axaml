@@ -363,13 +363,18 @@
                                         </Button>
                                     </TextBox.InnerRightContent>
                                 </TextBox>
+                                <!-- Scanning: a thin bar along the filter box's bottom edge.
+                                     It takes no toolbar width, so a narrow pane never has
+                                     controls painting over each other; the summary line
+                                     says "Scanning...". -->
+                                <ProgressBar x:Name="ScanIndicator"
+                                             IsIndeterminate="True"
+                                             IsVisible="{Binding Analysis.IsScanning}"
+                                             IsHitTestVisible="False"
+                                             MinHeight="2" Height="2"
+                                             VerticalAlignment="Bottom"
+                                             Margin="3,0,3,1" />
                             </Grid>
-
-                            <StackPanel Grid.Column="3" x:Name="ScanIndicator" Margin="10,0,0,0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"
-                                        IsVisible="{Binding Analysis.IsScanning}">
-                                <ProgressBar IsIndeterminate="True" Width="72" Height="6" />
-                                <TextBlock Text="Scanning" Foreground="{DynamicResource BudiffMutedTextBrush}" />
-                            </StackPanel>
                         </Grid>
 
                         <!-- The summary wraps in a narrow pane instead of running off its

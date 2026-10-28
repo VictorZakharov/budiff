@@ -58,6 +58,64 @@ public sealed class RefreshKeepsViewTests
         window.Close();
     }
 
+    // The tree stays on screen while it scans and only what changed changes:
+    // every row is the same row (the tree keeps its containers and scroll),
+    // an edited file's numbers update in place, a new file comes in, and the
+    // selected row stays at the same height in the tree.
+    [AvaloniaFact]
+    public void Refresh_ChangesOnlyWhatChanged()
+    {
+        var (window, vm, tree) = Open("budiff-refresh-merge");
+        var analysis = vm.Analysis;
+
+        // By name, so the order holds; a short window, so the tree scrolls.
+        analysis.SortCommand.Execute(AnalysisSortKey.Name);
+        UiSnapshot.Pump();
+        foreach (var folder in analysis.Roots.Where(r => !r.IsFile))
+        {
+            analysis.SetSubtreeExpanded(folder, expanded: true);
+        }
+
+        window.Height = 360;
+        Settle();
+        var rows = analysis.Roots.SelectMany(r => r.SelfAndDescendants()).ToList();
+        var folderRow = rows.Last(r => !r.IsFile && r.Children.Count(c => c.IsFile && c.FullPath is not null) >= 1);
+        var edited = folderRow.Children.Last(c => c.IsFile && c.FullPath is not null);
+        tree.SelectedItem = edited;
+        ((Control)tree.TreeContainerFromItem(edited)!).BringIntoView();
+        Settle();
+        var top = RowTop(tree, edited);
+        Assert.NotNull(top);
+        var roots = analysis.Roots;
+        var emptied = false;
+        roots.CollectionChanged += (_, _) => emptied |= roots.Count == 0;
+        var lines = edited.LinesText;
+
+        // An edit to the selected file, and a new file just above it.
+        File.AppendAllText(edited.FullPath!, "\nmore\nlines\n");
+        var added = Path.Combine(Path.GetDirectoryName(edited.FullPath!)!, "!added.txt");
+        File.WriteAllText(added, "new\n");
+        vm.RefreshCommand.Execute(null);
+        Assert.True(analysis.Roots.Count > 0);
+        WaitUntil(() => !analysis.IsScanning && edited.LinesText != lines, "the reload");
+        Settle();
+
+        Assert.Same(roots, analysis.Roots);
+        Assert.False(emptied);
+        Assert.All(rows, r => Assert.Contains(r, analysis.Roots.SelectMany(x => x.SelfAndDescendants())));
+        Assert.Contains(folderRow.Children, r => r.Name == "!added.txt");
+        Assert.Same(edited, tree.SelectedItem);
+        Assert.Equal(top, RowTop(tree, edited));
+        window.Close();
+    }
+
+    private static double? RowTop(TreeView tree, CodeAnalysisRow row)
+    {
+        var item = tree.TreeContainerFromItem(row) as Control;
+        var viewer = global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(tree).OfType<ScrollViewer>().First();
+        return item is null ? null : global::Avalonia.VisualExtensions.TranslatePoint(item, default, viewer)?.Y;
+    }
+
     [AvaloniaFact]
     public void Refresh_KeepsAFolderSummary()
     {

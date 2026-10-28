@@ -7,3 +7,7 @@ namespace Budiff.Avalonia;
 // tooltip with the commit's details. Shade tints the gutter cell by how
 // recent the line is (null = none).
 public sealed record BlameEntry(string Label, string Sha, string Author, string Email, string Date, string Message, IBrush? Shade = null);
+
+// A file's blame for both sides of its diff, indexed by 0-based line; a null
+// side has none.
+public sealed record BlameSides(IReadOnlyList<BlameEntry?>? Old, IReadOnlyList<BlameEntry?>? New);

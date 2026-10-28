@@ -58,6 +58,8 @@ public sealed partial class MainWindow : Window
         DataContext = _viewModel;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         _viewModel.Analysis.PropertyChanging += OnAnalysisPropertyChanging;
+        _viewModel.Analysis.TreeMerging += OnTreeMerging;
+        _viewModel.Analysis.TreeMerged += OnTreeMerged;
         _viewModel.Analysis.PropertyChanged += OnAnalysisPropertyChanged;
         _viewModel.Analysis.PickPullRequest = PickPullRequestAsync;
         // "Pull request..." may be next: start the list its picker opens on.
@@ -396,6 +398,57 @@ public sealed partial class MainWindow : Window
         viewer.Offset = new Vector(viewer.Offset.X, Math.Clamp(y, 0, max));
     }
 
+    // A refresh merges new numbers into the rows shown; rows coming or going
+    // above the selected one would push it along, so it is held at the same
+    // height in the tree's viewport.
+    private (CodeAnalysisRow Row, double Y)? _heldRow;
+
+    private void OnTreeMerging()
+    {
+        _heldRow = AnalysisTree.SelectedItem is CodeAnalysisRow row && RowTop(row) is { } y ? (row, y) : null;
+    }
+
+    private void OnTreeMerged()
+    {
+        if (_heldRow is not { } held)
+        {
+            return;
+        }
+
+        _heldRow = null;
+        global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            if (!ReferenceEquals(AnalysisTree.SelectedItem, held.Row) || TreeViewer() is not { } viewer)
+            {
+                return;
+            }
+
+            AnalysisTree.UpdateLayout();
+            if (RowTop(held.Row) is { } y && Math.Abs(y - held.Y) > 0.5)
+            {
+                var max = Math.Max(0, viewer.Extent.Height - viewer.Viewport.Height);
+                viewer.Offset = new Vector(viewer.Offset.X, Math.Clamp(viewer.Offset.Y + y - held.Y, 0, max));
+            }
+        }, global::Avalonia.Threading.DispatcherPriority.Loaded);
+    }
+
+    private ScrollViewer? TreeViewer()
+        => global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(AnalysisTree).OfType<ScrollViewer>().FirstOrDefault();
+
+    // Where the row's own line sits in the tree's viewport; null when it has
+    // no container (scrolled far away).
+    private double? RowTop(CodeAnalysisRow row)
+    {
+        if (AnalysisTree.TreeContainerFromItem(row) is not Control item || TreeViewer() is not { } viewer)
+        {
+            return null;
+        }
+
+        var line = global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(item)
+            .OfType<Control>().FirstOrDefault(c => c.Name == "PART_LayoutRoot") ?? item;
+        return line.TranslatePoint(default, viewer)?.Y;
+    }
+
     // The tree is about to get new rows: remember which one was selected.
     private void OnAnalysisPropertyChanging(object? sender, PropertyChangingEventArgs e)
     {
@@ -611,7 +664,9 @@ public sealed partial class MainWindow : Window
     // load per row it passes. Focus stays in the tree. (The pause is a
     // delayed post, not a DispatcherTimer: the headless test dispatcher never
     // ticks those.)
-    private const int FollowDelayMs = 120;
+    // (Settable for tests: a slow machine can take longer than 120 ms between
+    // two simulated key presses, which then are not one burst.)
+    internal int FollowDelayMs { get; set; } = 120;
     private CodeAnalysisRow? _followRow;
     private bool _followPending;
     private int _followGen;
