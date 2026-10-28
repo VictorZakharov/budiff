@@ -124,6 +124,106 @@ public sealed class CodeCityTests
         UiSnapshot.Capture(window, "city-search");
     }
 
+    [AvaloniaFact]
+    public void Wasd_FliesTheCamera_SpaceUp_CtrlDown()
+    {
+        var (window, vm) = Open("budiff-city-wasd");
+        ShowCity(window, vm);
+        var city = window.FindControl<CodeCityView>("CodeCity")!;
+        city.Focus();
+        UiSnapshot.Pump();
+        var eye = city.Eye;
+        var start = city.CameraTarget;
+
+        // W: along the view on the ground, away from the eye.
+        window.KeyPress(Key.W, RawInputModifiers.None, PhysicalKey.W, "w");
+        Assert.Contains(Key.W, city.HeldKeys);
+        city.Move(0.1);
+        var moved = city.CameraTarget - start;
+        Assert.Equal(0, moved.Y, 3);
+        Assert.True(System.Numerics.Vector3.Dot(moved, new System.Numerics.Vector3(start.X - eye.X, 0, start.Z - eye.Z)) > 0);
+        window.KeyRelease(Key.W, RawInputModifiers.None, PhysicalKey.W, "w");
+        Assert.Empty(city.HeldKeys);
+
+        // D after A comes back to the same spot.
+        var before = city.CameraTarget;
+        window.KeyPress(Key.A, RawInputModifiers.None, PhysicalKey.A, "a");
+        city.Move(0.05);
+        window.KeyRelease(Key.A, RawInputModifiers.None, PhysicalKey.A, "a");
+        Assert.True(System.Numerics.Vector3.Distance(before, city.CameraTarget) > 1);
+        window.KeyPress(Key.D, RawInputModifiers.None, PhysicalKey.D, "d");
+        city.Move(0.05);
+        window.KeyRelease(Key.D, RawInputModifiers.None, PhysicalKey.D, "d");
+        Assert.True(System.Numerics.Vector3.Distance(before, city.CameraTarget) < 0.5f);
+
+        // Space rises, Ctrl comes down (never under the ground).
+        window.KeyPress(Key.Space, RawInputModifiers.None, PhysicalKey.Space, " ");
+        city.Move(0.3);
+        window.KeyRelease(Key.Space, RawInputModifiers.None, PhysicalKey.Space, " ");
+        var up = city.CameraTarget.Y;
+        Assert.True(up > 10);
+        window.KeyPress(Key.LeftCtrl, RawInputModifiers.Control, PhysicalKey.ControlLeft, null);
+        city.Move(5);
+        window.KeyRelease(Key.LeftCtrl, RawInputModifiers.None, PhysicalKey.ControlLeft, null);
+        Assert.Equal(0, city.CameraTarget.Y, 3);
+        Assert.False(vm.IsDiffOpen);
+        UiSnapshot.Capture(window, "city-wasd");
+    }
+
+    [AvaloniaFact]
+    public void PointingAtABuildingsSide_HoversIt()
+    {
+        var (window, vm) = Open("budiff-city-side");
+        ShowCity(window, vm);
+        var city = window.FindControl<CodeCityView>("CodeCity")!;
+        var eye = city.Eye;
+        var tallest = vm.Analysis.City.Buildings.OrderByDescending(b => b.Top).First();
+        var f = tallest.Footprint;
+        var y = (float)(tallest.Base + tallest.Height * 0.3);
+
+        // The middle of a side the eye can see, low down.
+        var side = eye.X < f.X
+            ? new System.Numerics.Vector3((float)f.X, y, (float)(f.Y + f.Height / 2))
+            : new System.Numerics.Vector3((float)(f.X + f.Width), y, (float)(f.Y + f.Height / 2));
+        var at = global::Avalonia.VisualExtensions.TranslatePoint(city, city.Project(side)!.Value, window)!.Value;
+        window.MouseMove(at);
+        UiSnapshot.Pump();
+        Assert.Same(tallest, city.Hovered);
+        UiSnapshot.Capture(window, "city-hover-side");
+    }
+
+    [AvaloniaFact]
+    public void PerformancePanel_ShowsFps_AndClickOpensDebugInfo()
+    {
+        var (window, vm) = Open("budiff-city-hud");
+        ShowCity(window, vm);
+        var city = window.FindControl<CodeCityView>("CodeCity")!;
+
+        // A few frames in a run (an orbit drag).
+        var mid = global::Avalonia.VisualExtensions.TranslatePoint(city, new global::Avalonia.Point(city.Bounds.Width / 2, city.Bounds.Height / 2), window)!.Value;
+        window.MouseDown(mid, MouseButton.Left);
+        for (var i = 1; i <= 8; i++)
+        {
+            window.MouseMove(mid + new global::Avalonia.Point(i * 6, 0), RawInputModifiers.LeftMouseButton);
+            UiSnapshot.Pump();
+        }
+
+        window.MouseUp(mid + new global::Avalonia.Point(48, 0), MouseButton.Left);
+        UiSnapshot.Pump();
+        Assert.True(city.Hud.Redraws > 0);
+        Assert.True(city.Hud.Bounds.Width > 0);
+        Assert.False(city.Hud.Expanded);
+
+        var hud = global::Avalonia.VisualExtensions.TranslatePoint(city, city.Hud.Bounds.Center, window)!.Value;
+        window.MouseDown(hud, MouseButton.Left);
+        window.MouseUp(hud, MouseButton.Left);
+        UiSnapshot.Pump();
+        Assert.True(city.Hud.Expanded);
+        Assert.False(vm.IsDiffOpen);
+        Assert.True(city.Hud.Faces > 0);
+        UiSnapshot.Capture(window, "city-hud-expanded");
+    }
+
     // Opt-in: the city of a real repository (BUDIFF_CITY_REPO), for review.
     [AvaloniaFact]
     public void RealRepository_Snapshots()

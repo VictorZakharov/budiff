@@ -21,8 +21,9 @@ namespace Budiff.App;
 // it costs nothing in the AOT exe and renders in headless snapshots.
 //
 // Left-drag orbits, right/middle-drag pans, the wheel zooms toward the
-// pointer, Home resets. Hover shows a card; clicking a building opens its
-// diff, clicking a district flies to it.
+// pointer, WASD flies (Space up, Ctrl down, Shift faster), Home resets.
+// Hover shows a card; clicking a building opens its diff, clicking a
+// district flies to it.
 internal sealed class CodeCityView : Control
 {
     public static readonly StyledProperty<CityModel?> ModelProperty =
@@ -54,6 +55,8 @@ internal sealed class CodeCityView : Control
     private static readonly IPen CardPen = new ImmutablePen(new ImmutableSolidColorBrush(Color.Parse("#4A4D55")), 1);
     private static readonly IPen EdgePen = new ImmutablePen(new ImmutableSolidColorBrush(Color.Parse("#38000000")), 1);
     private static readonly IPen HoverPen = new ImmutablePen(new ImmutableSolidColorBrush(Colors.White), 2);
+    private static readonly IPen HighlightPen = new ImmutablePen(new ImmutableSolidColorBrush(Color.Parse("#D0FFFFFF")), 1.5);
+    private static readonly IBrush HighlightBrush = new ImmutableSolidColorBrush(Color.Parse("#40FFFFFF"));
     private static readonly IPen MatchPen = new ImmutablePen(new ImmutableSolidColorBrush(Color.Parse("#FFE082")), 1.5);
     private static readonly Typeface UiFont = new(FontFamily.Default);
     private static readonly Typeface UiBold = new(FontFamily.Default, FontStyle.Normal, FontWeight.SemiBold);
@@ -99,6 +102,9 @@ internal sealed class CodeCityView : Control
     private CityBlock? _hover;
 
     private DispatcherTimer? _flyTimer;
+    private DispatcherTimer? _moveTimer;
+    private readonly HashSet<Key> _held = new();
+    private readonly System.Diagnostics.Stopwatch _moveClock = new();
     private (Vector3 Target, float Distance, float Yaw, float Pitch) _flyFrom;
     private (Vector3 Target, float Distance, float Yaw, float Pitch) _flyTo;
     private DateTime _flyStart;
@@ -136,6 +142,8 @@ internal sealed class CodeCityView : Control
     internal Vector3 CameraTarget => _target;
 
     internal float CameraDistance => _distance;
+
+    internal Vector3 Eye => _eye;
 
     // Where the camera is flying to (its target when it is not flying).
     internal Vector3 FlyDestination => _flyTimer?.IsEnabled == true ? _flyTo.Target : _target;
@@ -341,6 +349,15 @@ internal sealed class CodeCityView : Control
     {
         base.OnPointerPressed(e);
         var point = e.GetCurrentPoint(this);
+        if (_hud.Bounds.Contains(point.Position))
+        {
+            // The performance panel: a click opens or closes its debug lines.
+            _hud.Expanded = !_hud.Expanded;
+            InvalidateVisual();
+            e.Handled = true;
+            return;
+        }
+
         _pressed = true;
         _dragged = false;
         _panning = !point.Properties.IsLeftButtonPressed;
@@ -394,7 +411,7 @@ internal sealed class CodeCityView : Control
 
         _pressed = false;
         e.Pointer.Capture(null);
-        if (!_dragged && !_panning && Pick(e.GetPosition(this)) is { } hit)
+        if (!_dragged && !_panning && PickNear(e.GetPosition(this)) is { } hit)
         {
             if (hit.IsFile)
             {
@@ -451,6 +468,91 @@ internal sealed class CodeCityView : Control
             ResetCamera();
             e.Handled = true;
         }
+        else if (IsMoveKey(e.Key))
+        {
+            // Shooter-style flying: held keys move the camera every tick.
+            if (_held.Add(e.Key) && _moveTimer?.IsEnabled != true)
+            {
+                _flyTimer?.Stop();
+                _moveClock.Restart();
+                _moveTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(15), DispatcherPriority.Render, OnMoveTick);
+                _moveTimer.Start();
+            }
+
+            e.Handled = true;
+        }
+    }
+
+    protected override void OnKeyUp(KeyEventArgs e)
+    {
+        base.OnKeyUp(e);
+        if (_held.Remove(e.Key))
+        {
+            e.Handled = true;
+        }
+
+        if (!_held.Any(k => k is not (Key.LeftShift or Key.RightShift)))
+        {
+            _moveTimer?.Stop();
+        }
+    }
+
+    protected override void OnLostFocus(FocusChangedEventArgs e)
+    {
+        base.OnLostFocus(e);
+        _held.Clear();
+        _moveTimer?.Stop();
+    }
+
+    private static bool IsMoveKey(Key key)
+        => key is Key.W or Key.A or Key.S or Key.D or Key.Space
+            or Key.LeftCtrl or Key.RightCtrl or Key.LeftShift or Key.RightShift;
+
+    internal IReadOnlyCollection<Key> HeldKeys => _held;
+
+    private void OnMoveTick(object? sender, EventArgs e)
+    {
+        var seconds = Math.Min(0.1, _moveClock.Elapsed.TotalSeconds);
+        _moveClock.Restart();
+        Move(seconds);
+    }
+
+    // One step of WASD flying for the keys held: W/S along the view on the
+    // ground, A/D sideways, Space up, Ctrl down; Shift triples the speed.
+    // The speed follows the zoom, so it feels the same near and far.
+    internal void Move(double seconds)
+    {
+        UpdateCamera();
+        var flatForward = Vector3.Normalize(new Vector3(_forward.X, 0, _forward.Z));
+        var flatRight = Vector3.Normalize(new Vector3(_right.X, 0, _right.Z));
+        var direction = Vector3.Zero;
+        foreach (var key in _held)
+        {
+            direction += key switch
+            {
+                Key.W => flatForward,
+                Key.S => -flatForward,
+                Key.D => flatRight,
+                Key.A => -flatRight,
+                Key.Space => Vector3.UnitY,
+                Key.LeftCtrl or Key.RightCtrl => -Vector3.UnitY,
+                _ => Vector3.Zero,
+            };
+        }
+
+        if (direction == Vector3.Zero)
+        {
+            return;
+        }
+
+        var fast = _held.Contains(Key.LeftShift) || _held.Contains(Key.RightShift) ? 3f : 1f;
+        _target += Vector3.Normalize(direction) * _distance * 0.8f * fast * (float)seconds;
+        var size = (float)(Model?.Size ?? CityLayout.DefaultSize);
+        _target.X = Math.Clamp(_target.X, -size * 0.25f, size * 1.25f);
+        _target.Y = Math.Clamp(_target.Y, 0, size * 0.6f);
+        _target.Z = Math.Clamp(_target.Z, -size * 0.25f, size * 1.25f);
+        _hover = null;
+        InvalidateVisual();
     }
 
     private void Pan(Point delta)
@@ -467,7 +569,7 @@ internal sealed class CodeCityView : Control
 
     private void UpdateHover()
     {
-        var hit = _pointer is { } p ? Pick(p) : null;
+        var hit = _pointer is { } p && !_hud.Bounds.Contains(p) ? PickNear(p) : null;
         if (!ReferenceEquals(hit, _hover) || hit is not null)
         {
             _hover = hit;
@@ -476,6 +578,32 @@ internal sealed class CodeCityView : Control
     }
 
     // ---- camera and picking ----
+
+    // What the pointer means: the block under it, except that a district
+    // hit within a few pixels of a building means that building - in a dense
+    // folder the streets between buildings are only a few pixels wide.
+    internal CityBlock? PickNear(Point screen)
+    {
+        var hit = Pick(screen);
+        if (hit is not { IsFile: false })
+        {
+            return hit;
+        }
+
+        foreach (var radius in new[] { 2.5, 5.0 })
+        {
+            for (var step = 0; step < 8; step++)
+            {
+                var angle = step * Math.PI / 4;
+                if (Pick(screen + new Point(Math.Cos(angle) * radius, Math.Sin(angle) * radius)) is { IsFile: true } near)
+                {
+                    return near;
+                }
+            }
+        }
+
+        return hit;
+    }
 
     private void UpdateCamera()
     {
@@ -589,8 +717,13 @@ internal sealed class CodeCityView : Control
     private RenderTargetBitmap? _scene;
     private (Vector3, float, float, float, Size, double, CityModel?, HashSet<CityBlock>?) _sceneKey;
 
+    private readonly CityPerfHud _hud = new();
+
+    internal CityPerfHud Hud => _hud;
+
     public override void Render(DrawingContext context)
     {
+        var frameClock = System.Diagnostics.Stopwatch.StartNew();
         var bounds = new Rect(Bounds.Size);
         if (Model is not { } model || bounds.Width < 2 || bounds.Height < 2)
         {
@@ -617,23 +750,42 @@ internal sealed class CodeCityView : Control
                 _scene = new RenderTargetBitmap(pixels, new global::Avalonia.Vector(96 * scale, 96 * scale));
             }
 
+            var redraw = System.Diagnostics.Stopwatch.StartNew();
+            _hud.Faces = 0;
+            _hud.Labels = 0;
             using (var scene = _scene.CreateDrawingContext())
             {
                 RenderScene(scene, model, bounds);
             }
 
+            _hud.RedrawMs = redraw.Elapsed.TotalMilliseconds;
+            _hud.Redraws++;
             _sceneKey = key;
+        }
+        else
+        {
+            _hud.CachedFrames++;
         }
 
         context.DrawImage(_scene, new Rect(_scene.Size), bounds);
         if (_hover is { } hover)
         {
-            DrawTopOutline(context, hover, HoverPen);
+            DrawHighlight(context, hover);
             if (_pointer is { } pointer)
             {
                 DrawCard(context, hover, pointer, bounds);
             }
         }
+
+        _hud.Frame(frameClock.Elapsed.TotalMilliseconds);
+        var degrees = 180 / Math.PI;
+        _hud.Draw(context, bounds, new[]
+        {
+            $"{model.Buildings.Count:N0} BUILDINGS · {model.Districts.Count:N0} DISTRICTS · {model.HotspotCount:N0} HOTSPOTS",
+            $"CAMERA {_target.X:0},{_target.Y:0},{_target.Z:0} · DIST {_distance:0}",
+            $"YAW {_yaw * degrees:0}° · PITCH {_pitch * degrees:0}°",
+            $"{bounds.Width:0}×{bounds.Height:0} DIP @ {scale:0.##}×",
+        });
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
@@ -651,7 +803,10 @@ internal sealed class CodeCityView : Control
         DrawQuad(context, GroundBrush, null,
             new Vector3(0, 0, 0), new Vector3(size, 0, 0), new Vector3(size, 0, size), new Vector3(0, 0, size));
 
-        foreach (var block in DrawOrder(model))
+        var orderClock = System.Diagnostics.Stopwatch.StartNew();
+        var drawOrder = DrawOrder(model);
+        _hud.OrderMs = orderClock.Elapsed.TotalMilliseconds;
+        foreach (var block in drawOrder)
         {
             var ghost = _matches is not null && (!block.IsFile || !_matches.Contains(block));
             DrawBox(context, block, _colors[block], ghost);
@@ -673,7 +828,9 @@ internal sealed class CodeCityView : Control
     internal List<CityBlock> DrawOrder(CityModel model)
     {
         var order = new List<CityBlock>(model.Districts.Count + model.Buildings.Count);
+        var pairCount = 0;
         Emit(_topLevel);
+        _hud.Pairs = pairCount;
         return order;
 
         void Emit(List<CityBlock> siblings)
@@ -686,7 +843,9 @@ internal sealed class CodeCityView : Control
                 extents[i] = ScreenExtent(boxes[i]);
             }
 
-            foreach (var i in BoxDrawOrder.Sort(boxes, _eye, OverlappingPairs(extents), i => FarDistance(siblings[i])))
+            var pairs = OverlappingPairs(extents);
+            pairCount += pairs.Count;
+            foreach (var i in BoxDrawOrder.Sort(boxes, _eye, pairs, i => FarDistance(siblings[i])))
             {
                 var block = siblings[i];
                 order.Add(block);
@@ -806,6 +965,40 @@ internal sealed class CodeCityView : Control
         }
     }
 
+    // The hovered block lit up: every face turned to the eye of a building
+    // (so pointing at a side shows it), the roof outline of a district.
+    private void DrawHighlight(DrawingContext context, CityBlock block)
+    {
+        if (!block.IsFile)
+        {
+            DrawTopOutline(context, block, HoverPen);
+            return;
+        }
+
+        var f = block.Footprint;
+        var (x0, x1, z0, z1) = ((float)f.X, (float)(f.X + f.Width), (float)f.Y, (float)(f.Y + f.Height));
+        var (y0, y1) = ((float)block.Base, (float)block.Top);
+        if (_eye.X < x0)
+        {
+            DrawQuad(context, HighlightBrush, HighlightPen, new(x0, y0, z0), new(x0, y1, z0), new(x0, y1, z1), new(x0, y0, z1));
+        }
+        else if (_eye.X > x1)
+        {
+            DrawQuad(context, HighlightBrush, HighlightPen, new(x1, y0, z0), new(x1, y1, z0), new(x1, y1, z1), new(x1, y0, z1));
+        }
+
+        if (_eye.Z < z0)
+        {
+            DrawQuad(context, HighlightBrush, HighlightPen, new(x0, y0, z0), new(x1, y0, z0), new(x1, y1, z0), new(x0, y1, z0));
+        }
+        else if (_eye.Z > z1)
+        {
+            DrawQuad(context, HighlightBrush, HighlightPen, new(x0, y0, z1), new(x1, y0, z1), new(x1, y1, z1), new(x0, y1, z1));
+        }
+
+        DrawQuad(context, HighlightBrush, HoverPen, new(x0, y1, z0), new(x1, y1, z0), new(x1, y1, z1), new(x0, y1, z1));
+    }
+
     private void DrawTopOutline(DrawingContext context, CityBlock block, IPen pen)
     {
         var f = block.Footprint;
@@ -826,11 +1019,12 @@ internal sealed class CodeCityView : Control
 
         // Edges only where the face is big enough for them to help.
         var extent = Math.Max(Math.Max(Math.Abs(pa.X - pc.X), Math.Abs(pb.X - pd.X)), Math.Max(Math.Abs(pa.Y - pc.Y), Math.Abs(pb.Y - pd.Y)));
-        if (extent < 0.6 && pen != HoverPen && pen != MatchPen)
+        if (extent < 0.6 && pen != HoverPen && pen != MatchPen && pen != HighlightPen)
         {
             return;
         }
 
+        _hud.Faces++;
         var geometry = new StreamGeometry();
         using (var g = geometry.Open())
         {
@@ -841,7 +1035,7 @@ internal sealed class CodeCityView : Control
             g.EndFigure(true);
         }
 
-        context.DrawGeometry(fill, fill is null || extent >= 8 ? pen : null, geometry);
+        context.DrawGeometry(fill, fill is null || extent >= 8 || pen == HoverPen || pen == HighlightPen ? pen : null, geometry);
     }
 
     // District names on their plinths, the top level always, deeper ones when
@@ -915,6 +1109,7 @@ internal sealed class CodeCityView : Control
 
             context.DrawRectangle(LabelPillBrush, top ? LabelPillPen : null, pill, 4, 4);
             context.DrawText(text, pill.TopLeft + new Point(6, 2));
+            _hud.Labels++;
         }
     }
 
@@ -957,7 +1152,7 @@ internal sealed class CodeCityView : Control
             context.DrawText(Text("no change", 10.5, MutedBrush), new Point(swatch.Right + 5, swatch.Y - 2));
         }
 
-        var hint = Text("Drag: orbit · Right-drag: pan · Wheel: zoom · Click: open · Home: reset", 11, MutedBrush);
+        var hint = Text("Drag: orbit · Right-drag: pan · Wheel: zoom · WASD: move · Space/Ctrl: up/down · Click: open · Home: reset", 11, MutedBrush);
         if (hint.Width + panel.Right + 30 < bounds.Width)
         {
             context.DrawText(hint, new Point(bounds.Width - hint.Width - 12, bounds.Height - hint.Height - 10));
