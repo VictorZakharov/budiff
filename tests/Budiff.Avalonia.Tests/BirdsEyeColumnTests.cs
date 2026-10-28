@@ -141,7 +141,7 @@ public sealed class BirdsEyeColumnTests
         UiSnapshot.Pump();
         var items = menu.Items.OfType<MenuItem>().ToList();
         Assert.Equal(
-            new[] { "All columns", "Lines", "Code", "Blank", "Comment", "Files", "Added", "Removed", "Commits", "Authors", "Size", "Reset to default" },
+            new[] { "All columns", "Lines", "Code", "Blank", "Comment", "Files", "Added", "Removed", "Commits", "Authors", "Recency", "Size", "Reset to default" },
             items.Select(i => i.Header as string));
         MenuItem Item(string header) => items.Single(i => (string?)i.Header == header);
         Assert.False(Item("Blank").IsChecked);
@@ -188,6 +188,54 @@ public sealed class BirdsEyeColumnTests
         window.Close();
     }
 
+    // Recency: how long ago a row last changed. Minutes are "min", never "m"
+    // (which would read as months).
+    [Theory]
+    [InlineData(30, "<1min")]
+    [InlineData(5 * 60, "5min")]
+    [InlineData(59 * 60, "59min")]
+    [InlineData(3 * 3600 + 120, "3hr")]
+    [InlineData(2 * 86400, "2d")]
+    [InlineData(45 * 86400, "1mo")]
+    [InlineData(400 * 86400, "1y")]
+    public void Recency_ReadsAsAnAge(long secondsAgo, string expected)
+    {
+        var now = DateTimeOffset.FromUnixTimeSeconds(1_800_000_000);
+        Assert.Equal(expected, CodeAnalysisPanelViewModel.Age(now.ToUnixTimeSeconds() - secondsAgo, now));
+        Assert.Equal(string.Empty, CodeAnalysisPanelViewModel.Age(0, now));
+    }
+
+    // Files and folders show their newest commit in the period; sorting by it
+    // puts the most recent first.
+    [AvaloniaFact]
+    public void Recency_ShowsTheNewestCommit_AndSorts()
+    {
+        var root = ReadmeFixture.BuildFixtureRepo("budiff-recency");
+        var window = new MainWindow(root, gitRoot: true) { Width = 1500, Height = 700 };
+        window.Show();
+        var vm = window.ViewModel;
+        WaitUntil(() => !vm.Analysis.IsScanning && vm.Analysis.Roots.Count > 0, "bird's-eye scan");
+        Assert.True(vm.ShowRecencyColumn);
+
+        CodeAnalysisRow Row(string name) => vm.Analysis.Roots.SelectMany(r => r.SelfAndDescendants()).Single(r => r.Name == name);
+        Assert.Equal("3d", Row("README.md").RecencyText);
+        Assert.Equal("6d", Row("DiffLoader.cs").RecencyText);
+        Assert.Equal("3d", Row("src").RecencyText);
+        Assert.Equal(string.Empty, Row("build.ps1").RecencyText);
+
+        vm.Analysis.SortCommand.Execute(Budiff.CodeAnalysis.AnalysisSortKey.Recency);
+        UiSnapshot.Pump();
+        Assert.False(vm.Analysis.SortAscending);
+        var top = vm.Analysis.Roots.Select(r => r.Name).ToList();
+        Assert.True(top.IndexOf("README.md") < top.IndexOf("build.ps1"), string.Join(", ", top));
+        Assert.NotEmpty(vm.Analysis.RecencyGlyph);
+
+        // Size still means lines: the small README bar is short.
+        Assert.True(Row("README.md").BarFraction < 0.2, Row("README.md").BarFraction.ToString());
+        UiSnapshot.Capture(window, "birdseye-recency");
+        window.Close();
+    }
+
     // The top check hides every optional column, then shows them all again;
     // Reset goes back to the defaults and forgets the saved choices.
     [AvaloniaFact]
@@ -201,12 +249,12 @@ public sealed class BirdsEyeColumnTests
         vm.AllColumnsOn = false;
         Assert.True(vm.ColumnOptions.All(o => !o.IsOn));
         Assert.Equal(0, vm.FittingColumns);
-        Assert.Equal(10, AppSettings.Load(path).HiddenColumns.Count);
+        Assert.Equal(11, AppSettings.Load(path).HiddenColumns.Count);
         Assert.False(vm.ShowAddedColumn || vm.ShowRemovedColumn);
         Assert.True(vm.ResetColumnsCommand.CanExecute(null));
 
         vm.AllColumnsOn = true;
-        Assert.Equal(8, vm.FittingColumns);
+        Assert.Equal(9, vm.FittingColumns);
         Assert.Empty(AppSettings.Load(path).HiddenColumns);
 
         Option(vm, "Files").IsOn = false;
@@ -214,7 +262,7 @@ public sealed class BirdsEyeColumnTests
         Assert.False(vm.AllColumnsOn);
         vm.ResetColumnsCommand.Execute(null);
         Assert.True(vm.AllColumnsOn);
-        Assert.Equal(8, vm.FittingColumns);
+        Assert.Equal(9, vm.FittingColumns);
         Assert.Empty(AppSettings.Load(path).HiddenColumns);
         Assert.False(vm.ResetColumnsCommand.CanExecute(null));
     }

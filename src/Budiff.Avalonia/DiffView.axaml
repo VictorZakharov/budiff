@@ -6,15 +6,8 @@
              x:CompileBindings="False">
     <UserControl.Styles>
         <!-- Line wrap (the root's "wrap" class): code wraps inside its pane and
-             rows grow taller; otherwise each code cell scrolls sideways with the
-             shared horizontal scrollbar. -->
-        <Style Selector="ScrollViewer.code">
-            <Setter Property="HorizontalScrollBarVisibility" Value="Hidden" />
-            <Setter Property="VerticalScrollBarVisibility" Value="Disabled" />
-        </Style>
-        <Style Selector="DockPanel.wrap ScrollViewer.code">
-            <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
-        </Style>
+             rows grow taller; otherwise each code cell (CodeClip) shifts
+             sideways with the shared horizontal scrollbar. -->
         <Style Selector="TextBlock.code">
             <Setter Property="TextWrapping" Value="NoWrap" />
         </Style>
@@ -30,18 +23,28 @@
         <!-- One commit-details tooltip (#54) for the blame cell of BOTH row
              layouts - two-pane and the single-pane whole-file view. -->
         <Style Selector="TextBlock.blameCell">
+            <Setter Property="Cursor" Value="Hand" />
+            <!-- Heat: newer lines get a stronger tint (BlameEntry.Shade). -->
+            <Setter Property="Background" Value="{Binding Blame.Shade}" />
             <Setter Property="ToolTip.Tip">
                 <Template>
                     <StackPanel Spacing="3" MaxWidth="440">
-                        <StackPanel Orientation="Horizontal" Spacing="10">
+                        <!-- Wrap panels: a long name or email moves down a line
+                             instead of pushing the date out of the tooltip. -->
+                        <WrapPanel>
                             <TextBlock Text="{Binding Blame.Sha}"
                                        FontFamily="Cascadia Code,Consolas,monospace"
-                                       Foreground="#61AFEF" />
-                            <TextBlock Text="{Binding Blame.Author}" FontWeight="SemiBold" />
+                                       Foreground="#61AFEF"
+                                       Margin="0,0,10,0" />
+                            <TextBlock Text="{Binding Blame.Author}" FontWeight="SemiBold" Margin="0,0,10,0" />
                             <TextBlock Text="{Binding Blame.Email}" Foreground="#9DA0A8" />
-                            <TextBlock Text="{Binding Blame.Date}" Foreground="#9DA0A8" />
-                        </StackPanel>
+                        </WrapPanel>
+                        <TextBlock Text="{Binding Blame.Date}" Foreground="#9DA0A8" TextWrapping="Wrap" />
                         <TextBlock Text="{Binding Blame.Message}" TextWrapping="Wrap" />
+                        <TextBlock Text="Click to open this commit"
+                                   Foreground="#9DA0A8"
+                                   FontSize="11"
+                                   Margin="0,4,0,0" />
                     </StackPanel>
                 </Template>
             </Setter>
@@ -171,11 +174,12 @@
                     </MultiBinding>
                 </ScrollViewer.IsVisible>
                 <Grid>
-                    <ItemsControl x:Name="RowsHost" ItemsSource="{Binding Rows}">
+                    <local:DiffRowsHost x:Name="RowsHost" ItemsSource="{Binding Rows}">
                         <!-- Virtualized: only the viewport's rows get containers, so a
                              Collapse-unchanged toggle or a big diff open realizes ~40
                              rows instead of one per line (which froze the UI). All
-                             rows are a fixed 18px - DiffFunnelGutter relies on that. -->
+                             rows are a fixed 18px - DiffFunnelGutter relies on that.
+                             A scrollable diff shifts it 1px up (DiffView.KeepTopAnchored). -->
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <VirtualizingStackPanel />
@@ -209,7 +213,8 @@
                                         </Grid.IsVisible>
                                         <TextBlock Grid.Column="0"
                                                    Classes="blameCell"
-                                                   Width="120"
+                                                   Tapped="OnBlameTapped"
+                                                   Width="{Binding $parent[ItemsControl].DataContext.BlameLabelWidth}"
                                                    Text="{Binding Blame.Label}"
                                                    IsVisible="{Binding $parent[ItemsControl].DataContext.IsBlameVisible}"
                                                    TextTrimming="CharacterEllipsis"
@@ -217,8 +222,13 @@
                                                    FontSize="11"
                                                    VerticalAlignment="Top"
                                                    Foreground="{Binding MutedTextBrush, ElementName=Root}" />
-                                        <Border Grid.Column="1" Grid.ColumnSpan="2" Background="{Binding SingleBackground}">
+                                        <Border Grid.Column="1" Grid.ColumnSpan="2">
                                             <Grid ColumnDefinitions="46,*">
+                                                <!-- Added / removed gutter bar (the whole file is one or the other). -->
+                                                <Border Grid.Column="0"
+                                                        Width="3"
+                                                        HorizontalAlignment="Right"
+                                                        Background="{Binding SingleMarker}" />
                                                 <TextBlock Grid.Column="0"
                                                            Text="{Binding SingleNo}"
                                                            TextAlignment="Right"
@@ -226,16 +236,15 @@
                                                            FontFamily="Cascadia Code,Consolas,monospace"
                                                            FontSize="12.5"
                                                            Foreground="{Binding MutedTextBrush, ElementName=Root}" />
-                                                <ScrollViewer Grid.Column="1"
-                                                              Classes="code"
-                                                              Offset="{Binding $parent[ItemsControl].DataContext.HorizontalScroll, Converter={x:Static local:HScrollOffsetConverter.Instance}}">
+                                                <local:CodeClip Grid.Column="1"
+                                                                ScrollX="{Binding $parent[ItemsControl].DataContext.HorizontalScroll}">
                                                     <TextBlock local:DiffInlines.Runs="{Binding SingleRuns}"
                                                                Classes="code"
                                                                Padding="2,0,4,0"
                                                                FontFamily="Cascadia Code,Consolas,monospace"
                                                                FontSize="12.5"
                                                                Foreground="{Binding TextBrush, ElementName=Root}" />
-                                                </ScrollViewer>
+                                                </local:CodeClip>
                                             </Grid>
                                         </Border>
                                     </Grid>
@@ -250,12 +259,14 @@
                                                 <Binding Path="!$parent[ItemsControl].DataContext.IsSinglePane" />
                                             </MultiBinding>
                                         </local:DiffSplitGrid.IsVisible>
-                                        <!-- Blame gutter (#46): who last touched the OLD side's line;
+                                        <!-- Blame gutter (#46): who last touched the line as it is now
+                                             (a removed line: as it was);
                                              hover for the commit's details. Its own OUTER column, so
                                              showing it costs BOTH code halves equally. -->
                                         <TextBlock Grid.Column="0"
                                                    Classes="blameCell"
-                                                   Width="120"
+                                                   Tapped="OnBlameTapped"
+                                                   Width="{Binding $parent[ItemsControl].DataContext.BlameLabelWidth}"
                                                    Text="{Binding Blame.Label}"
                                                    IsVisible="{Binding $parent[ItemsControl].DataContext.IsBlameVisible}"
                                                    TextTrimming="CharacterEllipsis"
@@ -275,16 +286,15 @@
                                                            FontFamily="Cascadia Code,Consolas,monospace"
                                                            FontSize="12.5"
                                                            Foreground="{Binding MutedTextBrush, ElementName=Root}" />
-                                                <ScrollViewer Grid.Column="1"
-                                                              Classes="code"
-                                                              Offset="{Binding $parent[ItemsControl].DataContext.HorizontalScroll, Converter={x:Static local:HScrollOffsetConverter.Instance}}">
+                                                <local:CodeClip Grid.Column="1"
+                                                                ScrollX="{Binding $parent[ItemsControl].DataContext.HorizontalScroll}">
                                                     <TextBlock local:DiffInlines.Runs="{Binding OldRuns}"
                                                                Classes="code"
                                                                Padding="2,0,4,0"
                                                                FontFamily="Cascadia Code,Consolas,monospace"
                                                                FontSize="12.5"
                                                                Foreground="{Binding TextBrush, ElementName=Root}" />
-                                                </ScrollViewer>
+                                                </local:CodeClip>
                                             </Grid>
                                         </Border>
 
@@ -297,23 +307,22 @@
                                                            FontFamily="Cascadia Code,Consolas,monospace"
                                                            FontSize="12.5"
                                                            Foreground="{Binding MutedTextBrush, ElementName=Root}" />
-                                                <ScrollViewer Grid.Column="1"
-                                                              Classes="code"
-                                                              Offset="{Binding $parent[ItemsControl].DataContext.HorizontalScroll, Converter={x:Static local:HScrollOffsetConverter.Instance}}">
+                                                <local:CodeClip Grid.Column="1"
+                                                                ScrollX="{Binding $parent[ItemsControl].DataContext.HorizontalScroll}">
                                                     <TextBlock local:DiffInlines.Runs="{Binding NewRuns}"
                                                                Classes="code"
                                                                Padding="2,0,4,0"
                                                                FontFamily="Cascadia Code,Consolas,monospace"
                                                                FontSize="12.5"
                                                                Foreground="{Binding TextBrush, ElementName=Root}" />
-                                                </ScrollViewer>
+                                                </local:CodeClip>
                                             </Grid>
                                         </Border>
                                     </local:DiffSplitGrid>
                                 </Panel>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                    </local:DiffRowsHost>
 
                     <local:DiffFunnelGutter Rows="{Binding Rows}"
                                             ItemsHost="{Binding #RowsHost}"

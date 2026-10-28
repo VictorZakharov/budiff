@@ -20,6 +20,18 @@ internal sealed class AppSettings
 
     public HashSet<string> HiddenColumns { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+    // A throwaway copy never saves: changes stay in the one window using it.
+    public bool IsTemporary { get; private init; }
+
+    // A temporary copy with the given columns turned on.
+    public AppSettings TemporaryCopy(params string[] shownColumns)
+    {
+        var copy = new AppSettings(FilePath) { IsTemporary = true };
+        copy.HiddenColumns.UnionWith(HiddenColumns);
+        copy.HiddenColumns.ExceptWith(shownColumns);
+        return copy;
+    }
+
     public static string DefaultPath
     {
         get
@@ -61,6 +73,11 @@ internal sealed class AppSettings
 
     public void Save()
     {
+        if (IsTemporary)
+        {
+            return;
+        }
+
         try
         {
             var path = FilePath;

@@ -40,11 +40,18 @@ public sealed partial class MainWindow : Window
     {
     }
 
-    // settings: where the GUI's preferences live (null = the user's own).
-    internal MainWindow(string startPath, bool gitRoot, AppSettings? settings)
+    // settings: where the GUI's preferences live (null = the user's own);
+    // commit / openPath: see MainWindowViewModel.
+    internal MainWindow(string startPath, bool gitRoot, AppSettings? settings, CommitDetails? commit = null, string? openPath = null)
     {
         InitializeComponent();
-        _viewModel = new MainWindowViewModel(startPath, gitRoot, settings);
+        _viewModel = new MainWindowViewModel(startPath, gitRoot, settings, commit, openPath);
+        _viewModel.ShowCommit = (scope, shown) => CommitWindow.Open(this, scope, shown);
+        _viewModel.RowRevealed += row =>
+        {
+            AnalysisTree.SelectedItem = row;
+            global::Avalonia.Threading.Dispatcher.UIThread.Post(() => AnalysisTree.TreeContainerFromItem(row)?.BringIntoView(), global::Avalonia.Threading.DispatcherPriority.Loaded);
+        };
         DataContext = _viewModel;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         _viewModel.Analysis.PropertyChanged += OnAnalysisPropertyChanged;

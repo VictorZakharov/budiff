@@ -60,7 +60,7 @@ public static class GitHistory
             "--no-renames",
             "--numstat",
             "--no-color",
-            "--format=%x1f%H%x1f%aN",
+            "--format=%x1f%H%x1f%aN%x1f%ct",
         };
         if (sinceDays is { } days and > 0)
         {
@@ -97,8 +97,9 @@ public static class GitHistory
                 "--no-renames",
                 "--numstat",
                 "--no-color",
-                "--format=%x1f%H%x1f%aN",
-                baseRev + ".." + headRev,
+                "--format=%x1f%H%x1f%aN%x1f%ct",
+                // A root commit's base is the empty tree, which log cannot range from.
+                baseRev == EmptyTreeSha ? headRev : baseRev + ".." + headRev,
                 "--",
                 "."))
         {
@@ -131,6 +132,7 @@ public static class GitHistory
         var result = new HistoryResult();
         var commitIndex = -1;
         var author = string.Empty;
+        long when = 0;
 
         foreach (var line in LineCounter.SplitLines(log))
         {
@@ -144,6 +146,7 @@ public static class GitHistory
                 var parts = line.Split(Sep);
                 commitIndex++;
                 author = parts.Length > 2 ? parts[2] : string.Empty;
+                when = parts.Length > 3 && long.TryParse(parts[3], out var seconds) ? seconds : 0;
                 result.CommitCount = commitIndex + 1;
                 if (author.Length > 0)
                 {
@@ -167,6 +170,7 @@ public static class GitHistory
             entry.Added += added;
             entry.Removed += removed;
             entry.Commits.Add(commitIndex);
+            entry.LastChanged = Math.Max(entry.LastChanged, when);
             if (author.Length > 0)
             {
                 entry.Authors.Add(author);
@@ -450,11 +454,18 @@ public static class CodeAnalysisRepositoryReader
     // range's commits/authors and net churn. Independent of the working tree,
     // so an un-checked-out PR reads the same as the current branch.
     public static CodeAnalysisSnapshot LoadPullRequest(string root, PullRequestRange range, CancellationToken ct = default)
+        => LoadRange(root, range.BaseSha, range.HeadSha, $"PR #{range.PullRequest.Number}", ct);
+
+    // One commit: what it changed against its (first) parent.
+    public static CodeAnalysisSnapshot LoadCommit(string root, CommitDetails commit, CancellationToken ct = default)
+        => LoadRange(root, commit.BaseSha, commit.Sha, "commit " + commit.ShortSha, ct);
+
+    private static CodeAnalysisSnapshot LoadRange(string root, string baseSha, string headSha, string what, CancellationToken ct)
     {
-        var history = GitHistory.LoadRange(root, range.BaseSha, range.HeadSha, ct)
-            ?? throw new InvalidOperationException($"Could not read the history of PR #{range.PullRequest.Number}.");
-        var changed = GitHistory.ListChangedFiles(root, range.BaseSha, range.HeadSha, ct) ?? Array.Empty<string>();
-        var files = GitRepositoryReader.CountAtRevision(root, range.HeadSha, changed, ct);
+        var history = GitHistory.LoadRange(root, baseSha, headSha, ct)
+            ?? throw new InvalidOperationException($"Could not read the history of {what}.");
+        var changed = GitHistory.ListChangedFiles(root, baseSha, headSha, ct) ?? Array.Empty<string>();
+        var files = GitRepositoryReader.CountAtRevision(root, headSha, changed, ct);
         var scan = new ScanResult { Root = root, Files = files, HasGit = true };
         return new CodeAnalysisSnapshot(scan, history);
     }

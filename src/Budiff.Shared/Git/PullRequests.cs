@@ -31,7 +31,8 @@ public sealed record PullRequestInfo(
     string HeadRefOid,
     int? Additions,
     int? Deletions,
-    int? ChangedFiles)
+    int? ChangedFiles,
+    string Url = "")
 {
     // Null until fetched: lists come without them (see GetCountsAsync).
     public PullRequestCounts? Counts
@@ -224,7 +225,7 @@ public static class PullRequestSearch
 {
     // What a list row needs - not the counts (PullRequestCountFields).
     internal const string PullRequestFields =
-        "number title state isDraft author { login } updatedAt baseRefName headRefName baseRefOid headRefOid";
+        "number title state isDraft url author { login } updatedAt baseRefName headRefName baseRefOid headRefOid";
 
     internal const string PullRequestCountFields = "additions deletions changedFiles";
 
@@ -440,7 +441,8 @@ public static class PullRequestSearch
             String(node, "headRefOid"),
             IntOrNull(node, "additions"),
             IntOrNull(node, "deletions"),
-            IntOrNull(node, "changedFiles"));
+            IntOrNull(node, "changedFiles"),
+            String(node, "url"));
     }
 
     private static int? IntOrNull(JsonElement node, string name)

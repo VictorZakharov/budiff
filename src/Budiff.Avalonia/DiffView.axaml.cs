@@ -83,7 +83,21 @@ public partial class DiffView : UserControl
             WatchModel(DataContext as DiffViewModel);
         };
 
-        RowsScroller.ScrollChanged += (_, _) => ReportScroll(RowsScroller, preview: false);
+        // The UI font is inherited only once in a window: fit the blame
+        // column again with it.
+        AttachedToVisualTree += (_, _) =>
+        {
+            if (_model is not null)
+            {
+                _model.MeasureBlameLabel = MeasureBlameLabel;
+            }
+        };
+
+        RowsScroller.ScrollChanged += (_, _) =>
+        {
+            ReportScroll(RowsScroller, preview: false);
+            KeepTopAnchored();
+        };
 
         // Back after following a preview link: the mouse's back button
         // anywhere over the diff, or Alt+Left.
@@ -249,6 +263,15 @@ public partial class DiffView : UserControl
         }
     }
 
+    // A blame label's width as its cell draws it: this view's font, at the
+    // cell's size (DiffView.axaml, TextBlock.blameCell).
+    private double MeasureBlameLabel(string label)
+    {
+        var probe = new TextBlock { Text = label, FontSize = 11, FontFamily = FontFamily };
+        probe.Measure(Size.Infinity);
+        return probe.DesiredSize.Width;
+    }
+
     private void WatchModel(DiffViewModel? model)
     {
         if (_model is not null)
@@ -260,6 +283,7 @@ public partial class DiffView : UserControl
         if (_model is not null)
         {
             _model.PropertyChanged += OnModelPropertyChanged;
+            _model.MeasureBlameLabel = MeasureBlameLabel;
         }
 
         RefreshPreview();
@@ -267,6 +291,24 @@ public partial class DiffView : UserControl
 
     private void OnModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        // Wrap toggled: re-measure the rows from their panel down, in one pass.
+        // Otherwise the panel measures first and skips the rows (they still
+        // read as valid - only the text deep inside changed), the text then
+        // grows them on its own, and the panel, finding heights it did not
+        // measure, loses which row is at the top: it guesses another from the
+        // average height, jumps there and rebuilds every row on screen.
+        if (e.PropertyName == nameof(DiffViewModel.WrapLines) && RowsHost.ItemsPanelRoot is { } panel)
+        {
+            panel.InvalidateMeasure();
+            foreach (var row in panel.Children)
+            {
+                foreach (var layoutable in global::Avalonia.VisualTree.VisualExtensions.GetSelfAndVisualDescendants(row).OfType<global::Avalonia.Layout.Layoutable>())
+                {
+                    layoutable.InvalidateMeasure();
+                }
+            }
+        }
+
         if (e.PropertyName is nameof(DiffViewModel.IsPreviewActive) or nameof(DiffViewModel.PreviewVersion))
         {
             RefreshPreview();
@@ -316,6 +358,31 @@ public partial class DiffView : UserControl
         }
     }
 
+    // Scrolled back to the very top, the virtualizing panel sees its viewport
+    // start at exactly 0 and treats it as a jump: it rebinds every row on
+    // screen instead of adding the few above (~100ms). Shifted 1px up, it sees
+    // 1 and takes its usual path; only the first row's blank top pixel hides.
+    // Only while the diff scrolls: a diff shorter than the pane would then
+    // fill the panel from its end, by estimated heights, and can drop rows.
+    // (The gap between the two thresholds keeps the 1px from flipping it.)
+    private void KeepTopAnchored()
+    {
+        if (RowsHost.ItemsPanelRoot is not { } panel)
+        {
+            return;
+        }
+
+        var spare = RowsScroller.Extent.Height - RowsScroller.Viewport.Height;
+        if (spare > RowHeight && panel.Margin.Top == 0)
+        {
+            panel.Margin = new Thickness(0, -1, 0, 0);
+        }
+        else if (spare <= 0 && panel.Margin.Top != 0)
+        {
+            panel.Margin = default;
+        }
+    }
+
     // Where a line diff row starts in the scrolled content, once it has a
     // container: wrapped rows above it make that more than index * RowHeight.
     private double? RowTop(int index)
@@ -332,6 +399,18 @@ public partial class DiffView : UserControl
         }
 
         return container.TranslatePoint(default, RowsScroller) is { } at ? RowsScroller.Offset.Y + at.Y : null;
+    }
+
+    private void OnBlameTapped(object? sender, TappedEventArgs e)
+    {
+        // Uncommitted lines have no commit to open.
+        if (sender is Control { DataContext: DiffRowVm { Blame: { } blame } }
+            && _model?.OpenCommitHandler is { } open
+            && blame.Sha.Trim('0').Length > 0)
+        {
+            e.Handled = true;
+            open(blame);
+        }
     }
 
     private void ReportScroll(ScrollViewer scroller, bool preview)

@@ -21,6 +21,9 @@ public sealed class AnalysisPathHistory
     public HashSet<int> Commits { get; } = new();
 
     public HashSet<string> Authors { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    // The newest commit that touched it, as Unix seconds (0 = none seen).
+    public long LastChanged { get; set; }
 }
 
 public sealed class HistoryResult
@@ -237,6 +240,7 @@ public static class AnalysisTreeBuilder
         {
             leaf.CommitIds.UnionWith(h.Commits);
             leaf.Authors.UnionWith(h.Authors);
+            leaf.LastChanged = h.LastChanged;
             if (!allTime)
             {
                 leaf.Added = h.Added;

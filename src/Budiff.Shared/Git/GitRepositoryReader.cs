@@ -127,6 +127,33 @@ public static class GitRepositoryReader
         }, new ChangeSet(scope, target, Array.Empty<ChangedFile>()));
     }
 
+    // The commit rev names (a short sha from blame will do); null when it
+    // names none.
+    public static CommitDetails? ReadCommit(string repositoryRoot, string rev)
+    {
+        if (!GitCli.TryRun(repositoryRoot, out var output, "show", "-s", "--no-color", "--encoding=UTF-8", "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%B", rev + "^{commit}", "--"))
+        {
+            return null;
+        }
+
+        var parts = output.Split('\x1f', 6);
+        if (parts.Length < 6 || !DateTimeOffset.TryParse(parts[4], System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var when))
+        {
+            return null;
+        }
+
+        var parents = parts[1].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return new CommitDetails(parts[0].Trim(), parents.FirstOrDefault(), parents.Length, parts[2], parts[3], when, parts[5].Replace("\r\n", "\n").TrimEnd());
+    }
+
+    // What one commit changed against its first parent, repository-wide.
+    public static ChangeSet ListCommitChanges(GitRepositoryScope scope, CommitDetails commit)
+        => WithGit(scope.RepositoryRoot, git => new ChangeSet(
+                scope,
+                commit.Target,
+                ListTreeChanges(git, scope, commit.Target).OrderBy(f => f.Path, StringComparer.OrdinalIgnoreCase).ToList()),
+            new ChangeSet(scope, commit.Target, Array.Empty<ChangedFile>()));
+
     // Blame for the BASE side of a diff (the left side is what blame describes;
     // working-tree lines on the right have no commit yet). Indexed by 0-based
     // line; entries the blame does not cover stay null. Empty when the base ref

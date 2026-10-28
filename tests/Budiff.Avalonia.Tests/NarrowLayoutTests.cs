@@ -140,7 +140,7 @@ public sealed class NarrowLayoutTests
         var vm = window.ViewModel;
         WaitUntil(() => !vm.Analysis.IsScanning && vm.Analysis.Roots.Count > 0, "bird's-eye scan");
         var filterRow = window.FindControl<global::Avalonia.Controls.Grid>("FilterRow")!;
-        Assert.Equal(8, vm.FittingColumns);
+        Assert.Equal(9, vm.FittingColumns);
         Assert.Equal(0, global::Avalonia.Controls.Grid.GetRow(filterRow));
 
         var file = vm.Analysis.Roots.SelectMany(r => r.SelfAndDescendants()).First(r => r.IsFile && r.Name == "Program.cs");
@@ -162,6 +162,7 @@ public sealed class NarrowLayoutTests
             Assert.Equal(vm.ShowCodeColumn, headers[2].IsEffectivelyVisible);
             Assert.Equal(vm.ShowCommitsColumn, headers[8].IsEffectivelyVisible);
             Assert.Equal(vm.ShowAuthorsColumn, headers[9].IsEffectivelyVisible);
+            Assert.Equal(vm.ShowRecencyColumn, headers[10].IsEffectivelyVisible);
             Assert.True(headers[6].IsEffectivelyVisible && headers[7].IsEffectivelyVisible, context);
             Assert.False(headers[3].IsEffectivelyVisible || headers[4].IsEffectivelyVisible || headers[5].IsEffectivelyVisible, context);
 
@@ -181,7 +182,7 @@ public sealed class NarrowLayoutTests
             UiSnapshot.Capture(window, $"birdseye-columns-{vm.FittingColumns}");
         }
 
-        Assert.Equal(new[] { 4, 3, 2, 1, 0 }, seen);
+        Assert.Equal(new[] { 5, 3, 2, 1, 0 }, seen);
         Assert.True(global::Avalonia.Controls.Grid.GetRow(filterRow) > 0);
 
         // Wrapped, the filter box (Reset is its X) sits inside the pane.
@@ -192,10 +193,12 @@ public sealed class NarrowLayoutTests
         window.Close();
     }
 
-    // Keep order: Lines, Code, Commits, Authors, then (no docked diff only)
-    // Blank, Comment, Files, Size - so a narrow window keeps the essentials.
+    // Keep order: Lines, Code, Commits, Authors, Recency, then (no docked diff
+    // only) Blank, Comment, Files, Size - so a narrow window keeps the essentials.
     [AvaloniaTheory]
-    [InlineData(true, 2000, 4)]
+    [InlineData(true, 2000, 5)]
+    [InlineData(true, 638, 5)]
+    [InlineData(true, 637, 4)]
     [InlineData(true, 574, 4)]
     [InlineData(true, 573, 3)]
     [InlineData(true, 514, 3)]
@@ -205,8 +208,10 @@ public sealed class NarrowLayoutTests
     [InlineData(true, 378, 1)]
     [InlineData(true, 377, 0)]
     [InlineData(true, 100, 0)]
-    [InlineData(false, 858, 8)]
-    [InlineData(false, 857, 7)]
+    [InlineData(false, 922, 9)]
+    [InlineData(false, 921, 8)]
+    [InlineData(false, 832, 8)]
+    [InlineData(false, 831, 7)]
     [InlineData(false, 638, 5)]
     [InlineData(false, 637, 4)]
     [InlineData(false, 377, 0)]

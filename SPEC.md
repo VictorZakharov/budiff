@@ -36,7 +36,7 @@ Tagline: *"ls, but for your diffs."*
 
 ## 4. What v1 includes
 
-- The **Code Analysis bird's-eye** (the `ls` surface): folder/project tree, period selector, sortable columns for Lines / Code / Blank / Comment / Files / Added / Removed / Commits / Authors, file search, extension filters, and author filters. Folder-scoped (CWD subtree) by default; `--gitroot` for the whole repo.
+- The **Code Analysis bird's-eye** (the `ls` surface): folder/project tree, period selector, sortable columns for Lines / Code / Blank / Comment / Files / Added / Removed / Commits / Authors / Recency (how long ago the newest commit in the period touched it: <1min, 5min, 3hr, 2d, 4mo, 1y), file search, extension filters, and author filters. Folder-scoped (CWD subtree) by default; `--gitroot` for the whole repo.
 - **Drill-in side-by-side diff**: syntax-highlighted, intra-line highlighted, with the Rider-style centre "funnel" connectors (draggable to resize the split), collapse-unchanged, gap expansion, and line wrap (on by default). Markdown files can switch to a formatted **Preview** of the change.
 - A **commit / branch picker** so you can diff points other than working-tree-vs-HEAD.
 - Both surfaces in **terminal** (CLI) and **desktop GUI** (`-i` / `Budiff.App`).
@@ -59,7 +59,7 @@ Out of v1 (later, see section 9): deeper agent-specific repo summaries beyond th
 - `DiffLoader.cs` - the **pure** policy only: `Build`, `LooksBinary`, `BuildAgainstWorking`, and the size/binary thresholds. Loading blobs from git belongs with the git reader (5.5).
 
 ### `Budiff.Avalonia` (the control)
-- `DiffView.axaml` (+ `.axaml.cs`), `DiffFunnelGutter.cs`, `DiffInlines.cs`, and `HScrollOffsetConverter.cs`.
+- `DiffView.axaml` (+ `.axaml.cs`), `DiffFunnelGutter.cs`, `DiffInlines.cs`, `CodeClip.cs` (a code cell: clipped, shifted by the shared horizontal scroll), and `DiffRowsHost.cs` (the rows list; a recycled row keeps its controls and only rebinds).
 - **`DiffViewModel`**, the reusable core:
   - off-thread `BeginLoad(Func<DiffResult>)` with a **generation counter** (a diff re-pointed mid-load drops the stale result),
   - `SetDiff(rows)`,
@@ -98,6 +98,7 @@ A thin desktop window around the diff control - **no Dock dependency**:
 - a **Code Analysis bird's-eye** panel with grouping, period, sort, search, extension filters, and author filters; file rows carry a Material icon for their type (tinted in the language's colour; `*.module.ts` and `*.spec.ts` / `*.test.ts` get their own), a trimmed name shows in full as a tooltip, and a column chooser (right-click the header, or its corner button) turns any column but Name off, all on/off at once, or back to the default - remembered across restarts in `settings.json` under the user's app-data folder (`BUDIFF_SETTINGS_DIR` overrides),
 - selection -> the `DiffView` side-by-side pane; a file opens where it was last left (until restart), or - opened for the first time - at the top (a TypeScript file just past its header comments and imports, but never past a change),
 - a commit / branch picker to diff other points,
+- a **commit window**: clicking a blame cell opens the commit that last touched the line in a small window - id (copyable), author, date and message on the left, the files it changed (a folder tree with +/- counts) on the right; the PR it is part of (any state, from GitHub via `gh`) shows as a pill with its number in the state colour, which opens the PR; Esc closes it. Its expand button, or a double-clicked file or folder, opens a full window on the same folder (so the same files) scoped to that commit - temporary: it always shows the Added / Removed columns and never saves its column choices; the double-clicked file opens, a folder is expanded and selected; co-author / sign-off trailers show as names (the period list gains a "Commit" entry; the diffs compare the commit with its first parent, a root commit with nothing), with that file open,
 - a **pull request period**: the period list's "Pull request..." entry opens a picker (the user's PRs by default, 10 at a time with more on scroll; filter by author - a drop-down of Mine / Anyone / the repo's people, fetched on its first drop-down and kept until restart, or a typed login -, state, and free text / `#number` / GitHub qualifiers). Opened on a folder (not `--gitroot`), the picker lists only PRs that touch it: merged ones from the folder's first-parent history on the default branch (GitHub is asked only which PR each of those commits was), open ones and author/text searches through GitHub search, kept when their merge-base -> head range changes the folder (checked locally when both commits are present, else from the PR's file list); an explicit `#number` is shown regardless. The bird's-eye then shows only the files the PR changes (counted at its head, churn = the merge-base -> head net diff, commits/authors from the PR's commits) and the drill-in diffs the PR's merge-base against its head. PR data comes from the GitHub CLI (`gh`); a PR whose commits are not local is fetched from `refs/pull/N/head` without writing any ref.
 
 This is the surface the README screenshots show.

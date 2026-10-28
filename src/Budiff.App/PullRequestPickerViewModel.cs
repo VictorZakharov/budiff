@@ -73,7 +73,10 @@ public sealed partial class PullRequestRowVm(PullRequestInfo pullRequest, DateTi
 
     public string StateLabel => PullRequest.StateLabel;
 
-    public IBrush StateBrush => PullRequest.StateLabel switch
+    public IBrush StateBrush => BrushFor(PullRequest.StateLabel);
+
+    // The state pill's colour (GitHub's), also used by the commit window.
+    internal static IBrush BrushFor(string stateLabel) => stateLabel switch
     {
         "Open" => OpenBrush,
         "Draft" => DraftBrush,

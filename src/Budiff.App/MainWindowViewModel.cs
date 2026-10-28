@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Avalonia.Media;
 using Budiff;
 using Budiff.Avalonia;
 using Budiff.Avalonia.Markdown;
@@ -43,19 +44,36 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
     }
 
-    internal MainWindowViewModel(string startPath, bool gitRoot, AppSettings? settings)
+    // commit: open on that commit (what it changed against its parent);
+    // openPath: a file to show once it is loaded (repository-relative).
+    // A commit window is temporary: it always shows the Added / Removed
+    // columns, and its column choices are never saved over the user's own.
+    internal MainWindowViewModel(string startPath, bool gitRoot, AppSettings? settings, CommitDetails? commit = null, string? openPath = null)
     {
         _startPath = startPath;
         _gitRoot = gitRoot;
         _settings = settings ?? AppSettings.Load(AppSettings.DefaultPath);
+        if (commit is not null)
+        {
+            _settings = _settings.TemporaryCopy("Added", "Removed");
+        }
+
         ColumnOptions = BuildColumnOptions();
         FitColumns(_rowWidth);
         var highlighter = new TextMateSyntaxHighlighter();
         Diff.SyntaxHighlighter = highlighter;
         Diff.Previewer = new MarkdownPreviewer(highlighter);
         Diff.GoBackHandler = GoBack;
+        Diff.OpenCommitHandler = blame => _ = OpenCommitAsync(blame.Sha);
         Analysis = new CodeAnalysisPanelViewModel(OpenAnalysisFileAsync);
         Analysis.HistoryApplied += OnHistoryApplied;
+        if (commit is not null)
+        {
+            Analysis.StartWithCommit(commit);
+            _pendingOpen = openPath;
+            _expandOnCommit = true;
+        }
+
         Diff.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(DiffViewModel.ShowDiffOptions))
@@ -66,6 +84,48 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _ = LoadAsync(startPath, gitRoot);
     }
 
+    // The repository, and the commit while one is shown.
+    private void UpdateWindowTitle()
+    {
+        if (_scope is { } scope)
+        {
+            WindowTitle = "budiff - " + Path.GetFileName(scope.RepositoryRoot)
+                + (Analysis.IsCommitPeriod && Analysis.CommitButtonText.Length > 0 ? " @ " + Analysis.CommitButtonText : string.Empty);
+        }
+    }
+
+    // A file to open (or folder to expand) once the commit this window
+    // opened on is applied.
+    private string? _pendingOpen;
+
+    // A commit window opens with every folder expanded: its tree is only the
+    // files the commit touched, so showing them all is the point.
+    private bool _expandOnCommit;
+
+    // A bird's-eye row was revealed (expanded into view); the window
+    // selects it and scrolls to it.
+    public event Action<CodeAnalysisRow>? RowRevealed;
+
+    // Shows a commit (a blame cell was clicked); wired by the window.
+    public Action<GitRepositoryScope, CommitDetails>? ShowCommit { get; set; }
+
+    internal async Task OpenCommitAsync(string rev)
+    {
+        if (_scope is not { } scope || ShowCommit is not { } show)
+        {
+            return;
+        }
+
+        var commit = await Task.Run(() => GitRepositoryReader.ReadCommit(scope.RepositoryRoot, rev));
+        if (commit is null)
+        {
+            StatusText = "Commit not found: " + rev;
+            return;
+        }
+
+        show(scope, commit);
+    }
+
     // Period changed: an open diff follows when its comparison moved - a
     // period-aligned base, or entering / leaving / switching a pull request.
     private void OnHistoryApplied()
@@ -74,6 +134,33 @@ public sealed partial class MainWindowViewModel : ObservableObject
         if (_scope is not null)
         {
             StatusText = DescribeStatus();
+            UpdateWindowTitle();
+        }
+
+        if (_expandOnCommit && Analysis.AppliedCommit is not null)
+        {
+            _expandOnCommit = false;
+            Analysis.ExpandAll();
+        }
+
+        if (_pendingOpen is { } pending && _scope is { } scope && Analysis.AppliedCommit is not null)
+        {
+            _pendingOpen = null;
+            var inScope = scope.ScopePrefix.Length > 0 && pending.StartsWith(scope.ScopePrefix + "/", StringComparison.OrdinalIgnoreCase)
+                ? pending[(scope.ScopePrefix.Length + 1)..]
+                : pending;
+            var row = Analysis.Reveal(inScope);
+            if (row is not null)
+            {
+                RowRevealed?.Invoke(row);
+            }
+
+            if (row is null || row.IsFile)
+            {
+                ShowFile(Path.Combine(scope.RepositoryRoot, pending.Replace('/', Path.DirectorySeparatorChar)), pending);
+            }
+
+            return;
         }
 
         if (_openTarget is not null && CurrentTarget() != _openTarget)
@@ -84,7 +171,13 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     // Base + Working tree: meaningless for a plain file view, and a pull
     // request fixes both ends (its merge-base and its head).
-    public bool ShowCompareOptions => Diff.ShowDiffOptions && Analysis.AppliedPullRequest is null;
+    public bool ShowCompareOptions => Diff.ShowDiffOptions && AppliedRange is null;
+
+    // What a pull request or a commit compares; null in a time period.
+    private (string BaseSha, string HeadSha)? AppliedRange
+        => Analysis.AppliedPullRequest is { } pr ? (pr.BaseSha, pr.HeadSha)
+            : Analysis.AppliedCommit is { } commit ? (commit.BaseSha, commit.Sha)
+            : null;
 
     public CodeAnalysisPanelViewModel Analysis { get; }
 
@@ -140,17 +233,17 @@ public sealed partial class MainWindowViewModel : ObservableObject
     // Bird's-eye column widths (header cell = row cell + its margins). Name
     // always shows, and Added / Removed unless turned off in the chooser; the
     // optional ones drop as the pane narrows, from the end of this keep order:
-    // Lines, Code, Commits, Authors, then the wide-only Blank, Comment, Files,
-    // Size.
+    // Lines, Code, Commits, Authors, Recency, then the wide-only Blank, Comment,
+    // Files, Size.
     internal const double NameMinWidth = 150;
     internal const double ChurnColumnWidth = 78;
     internal const double AddedRemovedWidth = ChurnColumnWidth * 2;
 
     // Chooser indexes of Added / Removed, after the optional columns.
-    private const int AddedIndex = 8;
-    private const int RemovedIndex = 9;
-    internal static readonly double[] OptionalColumnWidths = { 72, 72, 64, 60, 64, 76, 54, 90 };
-    private const int DockedColumnCount = 4;
+    private const int AddedIndex = 9;
+    private const int RemovedIndex = 10;
+    internal static readonly double[] OptionalColumnWidths = { 72, 72, 64, 60, 64, 64, 76, 54, 90 };
+    private const int DockedColumnCount = 5;
 
     // The optional columns showing (bit i = OptionalColumnWidths[i]): the ones
     // the user keeps on that also fit, counted along the keep order.
@@ -161,11 +254,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(ShowCodeColumn))]
     [NotifyPropertyChangedFor(nameof(ShowCommitsColumn))]
     [NotifyPropertyChangedFor(nameof(ShowAuthorsColumn))]
+    [NotifyPropertyChangedFor(nameof(ShowRecencyColumn))]
     [NotifyPropertyChangedFor(nameof(ShowBlankColumn))]
     [NotifyPropertyChangedFor(nameof(ShowCommentColumn))]
     [NotifyPropertyChangedFor(nameof(ShowFilesColumn))]
     [NotifyPropertyChangedFor(nameof(ShowSizeColumn))]
-    private int _shownColumns = (1 << 8) - 1;
+    private int _shownColumns = (1 << 9) - 1;
 
     // How many optional columns show.
     public int FittingColumns => System.Numerics.BitOperations.PopCount((uint)ShownColumns);
@@ -178,13 +272,15 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     public bool ShowAuthorsColumn => IsShown(3);
 
-    public bool ShowBlankColumn => IsShown(4);
+    public bool ShowRecencyColumn => IsShown(4);
 
-    public bool ShowCommentColumn => IsShown(5);
+    public bool ShowBlankColumn => IsShown(5);
 
-    public bool ShowFilesColumn => IsShown(6);
+    public bool ShowCommentColumn => IsShown(6);
 
-    public bool ShowSizeColumn => IsShown(7);
+    public bool ShowFilesColumn => IsShown(7);
+
+    public bool ShowSizeColumn => IsShown(8);
 
     private bool IsShown(int column) => (ShownColumns & (1 << column)) != 0;
 
@@ -193,12 +289,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public bool ShowRemovedColumn => IsOn(RemovedIndex);
 
     // The bird's-eye grid columns showing, bit i = grid column i (1 = Lines
-    // ... 10 = Size); a row's name runs on over the empty ones.
+    // ... 10 = Recency, 11 = Size); a row's name runs on over the empty ones.
     public int VisibleCells =>
         (ShowLinesColumn ? 1 << 1 : 0) | (ShowCodeColumn ? 1 << 2 : 0) | (ShowBlankColumn ? 1 << 3 : 0)
         | (ShowCommentColumn ? 1 << 4 : 0) | (ShowFilesColumn ? 1 << 5 : 0) | (ShowAddedColumn ? 1 << 6 : 0)
         | (ShowRemovedColumn ? 1 << 7 : 0) | (ShowCommitsColumn ? 1 << 8 : 0) | (ShowAuthorsColumn ? 1 << 9 : 0)
-        | (ShowSizeColumn ? 1 << 10 : 0);
+        | (ShowRecencyColumn ? 1 << 10 : 0) | (ShowSizeColumn ? 1 << 11 : 0);
 
     // The column chooser (right-click the bird's-eye header), in on-screen
     // order: every column but Name. Turned-off columns are remembered across runs (AppSettings).
@@ -212,9 +308,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
         // (setting name, keep-order index), as the header lays them out.
         (string Name, int Index)[] columns =
         {
-            ("Lines", 0), ("Code", 1), ("Blank", 4), ("Comment", 5), ("Files", 6),
+            ("Lines", 0), ("Code", 1), ("Blank", 5), ("Comment", 6), ("Files", 7),
             ("Added", AddedIndex), ("Removed", RemovedIndex),
-            ("Commits", 2), ("Authors", 3), ("Size", 7),
+            ("Commits", 2), ("Authors", 3), ("Recency", 4), ("Size", 8),
         };
         return columns
             .Select(c => new BirdsEyeColumnOption(c.Name, c.Index, !_settings.HiddenColumns.Contains(c.Name), OnColumnOptionChanged))
@@ -390,62 +486,65 @@ public sealed partial class MainWindowViewModel : ObservableObject
         var ui = global::Avalonia.Threading.Dispatcher.UIThread;
         _ = Task.Run(() =>
         {
-            var forNewSide = false;
-            IReadOnlyList<BlameLineInfo?> blame;
+            // The new side's blame names who last changed each line as it is
+            // now - so its newest matches the file's Recency; the old side's
+            // covers only the lines this diff removes.
+            IReadOnlyList<BlameLineInfo?> oldBlame;
+            IReadOnlyList<BlameLineInfo?> newBlame;
             try
             {
-                blame = GitRepositoryReader.LoadBlame(scope, file.OldPath ?? file.Path, target.BaseRef);
-                if (blame.Count == 0)
-                {
-                    blame = GitHistory.BlameFile(
-                        scope.RepositoryRoot,
-                        file.Path,
-                        target.HeadIsWorkingTree ? null : target.HeadRef ?? "HEAD");
-                    forNewSide = true;
-                }
+                oldBlame = GitRepositoryReader.LoadBlame(scope, file.OldPath ?? file.Path, target.BaseRef);
+                newBlame = file.State == GitFileState.Deleted
+                    ? Array.Empty<BlameLineInfo?>()
+                    : GitHistory.BlameFile(scope.RepositoryRoot, file.Path, target.HeadIsWorkingTree ? null : target.HeadRef ?? "HEAD");
             }
             catch
             {
                 // Blame is decoration: on any git failure leave the column
                 // empty instead of dying as an unobserved task exception.
-                blame = Array.Empty<BlameLineInfo?>();
+                oldBlame = Array.Empty<BlameLineInfo?>();
+                newBlame = Array.Empty<BlameLineInfo?>();
             }
 
-            var entries = new BlameEntry?[blame.Count];
-            for (var i = 0; i < blame.Count; i++)
-            {
-                if (blame[i] is { } line)
-                {
-                    var uncommitted = line.ShortSha == "0000000";
-                    entries[i] = new BlameEntry(
-                        uncommitted ? "uncommitted" : $"{line.Author} {Age(line.When)}",
-                        line.ShortSha,
-                        line.Author,
-                        line.Email,
-                        uncommitted ? string.Empty : line.When.ToLocalTime().ToString("yyyy-MM-dd HH:mm"),
-                        line.Message);
-                }
-            }
-
+            var now = DateTimeOffset.Now;
+            var heat = BlameHeat.For(oldBlame.Concat(newBlame), line => Age(line.When, now));
+            var oldEntries = Entries(oldBlame, heat);
+            var newEntries = newBlame.Count > 0 ? Entries(newBlame, heat) : null;
             ui.Post(() =>
             {
                 if (gen == _blameGen)
                 {
-                    Diff.SetBlame(entries, forNewSide);
+                    Diff.SetBlame(oldEntries, newEntries);
                 }
             });
         });
     }
 
-    private static string Age(DateTimeOffset when)
+    private static BlameEntry?[] Entries(IReadOnlyList<BlameLineInfo?> blame, Func<BlameLineInfo, IBrush?> shade)
     {
-        var span = DateTimeOffset.Now - when;
-        return span.TotalDays >= 365 ? $"{(int)(span.TotalDays / 365)}y"
-            : span.TotalDays >= 30 ? $"{(int)(span.TotalDays / 30)}mo"
-            : span.TotalDays >= 1 ? $"{(int)span.TotalDays}d"
-            : span.TotalHours >= 1 ? $"{(int)span.TotalHours}h"
-            : "now";
+        var entries = new BlameEntry?[blame.Count];
+        for (var i = 0; i < blame.Count; i++)
+        {
+            if (blame[i] is { } line)
+            {
+                var uncommitted = line.ShortSha == "0000000";
+                entries[i] = new BlameEntry(
+                    uncommitted ? "uncommitted" : $"{line.Author} {Age(line.When, DateTimeOffset.Now)}",
+                    line.ShortSha,
+                    line.Author,
+                    line.Email,
+                    uncommitted ? string.Empty : $"{line.When.ToLocalTime():yyyy-MM-dd HH:mm}  ({Age(line.When, DateTimeOffset.Now)} ago)",
+                    line.Message,
+                    shade(line));
+            }
+        }
+
+        return entries;
     }
+
+    // The same ages the bird's-eye Recency column shows ("<1min", "8min", "3hr").
+    private static string Age(DateTimeOffset when, DateTimeOffset now)
+        => CodeAnalysisPanelViewModel.Age(when.ToUnixTimeSeconds(), now);
 
     [RelayCommand]
     private void ToggleTree() => IsTreeCollapsed = !IsTreeCollapsed;
@@ -499,7 +598,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        WindowTitle = "budiff - " + Path.GetFileName(_scope.RepositoryRoot);
+        UpdateWindowTitle();
         RepoTitle = Path.GetFileName(_scope.RepositoryRoot);
         ScopeTitle = _scope.ScopePrefix.Length == 0 ? "repo root" : _scope.ScopePrefix;
         IsGitRootScope = _scope.IsGitRootScope;
@@ -569,9 +668,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private DiffTarget CurrentTarget()
     {
-        if (Analysis.AppliedPullRequest is { } pr)
+        if (AppliedRange is { } range)
         {
-            return new DiffTarget(pr.BaseSha, pr.HeadSha, HeadIsWorkingTree: false);
+            return new DiffTarget(range.BaseSha, range.HeadSha, HeadIsWorkingTree: false);
         }
 
         var baseRef = SelectedBaseRef?.Id ?? "HEAD";
@@ -597,7 +696,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private string DescribeStatus()
         => Analysis.AppliedPullRequest is { } pr
             ? $"PR #{pr.PullRequest.Number} {pr.PullRequest.Title}  ({pr.PullRequest.BaseRefName} ← {pr.PullRequest.HeadRefName})"
-            : DescribeTarget(CurrentTarget());
+            : Analysis.AppliedCommit is { } commit
+                ? $"Commit {commit.ShortSha} {commit.Subject}  ({commit.Author}, {commit.When.LocalDateTime:yyyy-MM-dd})"
+                : DescribeTarget(CurrentTarget());
 
     // "Period start" resolves to a raw sha; describe it instead of printing it.
     private string DescribeTarget(DiffTarget target)
@@ -605,6 +706,13 @@ public sealed partial class MainWindowViewModel : ObservableObject
         if (Analysis.AppliedPullRequest is { } pr)
         {
             return $"PR #{pr.PullRequest.Number}: merge-base {Short(pr.BaseSha)} vs head {Short(pr.HeadSha)}";
+        }
+
+        if (Analysis.AppliedCommit is { } commit)
+        {
+            return commit.ParentSha is null
+                ? $"commit {commit.ShortSha} (first commit)"
+                : $"commit {commit.ShortSha} vs its parent {Short(commit.BaseSha)}";
         }
 
         if (SelectedBaseRef?.Id != PeriodStartId || target.BaseRef == "HEAD")
