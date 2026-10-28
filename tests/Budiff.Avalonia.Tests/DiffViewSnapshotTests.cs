@@ -354,8 +354,8 @@ public sealed class DiffViewSnapshotTests
 
         var snapshot = UiSnapshot.Capture(window, "diff-view");
 
-        Assert.Equal(920, snapshot.Width);
-        Assert.Equal(520, snapshot.Height);
+        Assert.Equal(TestScale.Px(920), snapshot.Width);
+        Assert.Equal(TestScale.Px(520), snapshot.Height);
         Assert.True(new FileInfo(snapshot.Path).Length > 1000);
     }
 }

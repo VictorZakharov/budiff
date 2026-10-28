@@ -60,6 +60,13 @@ jobs:
       - name: Test
         run: dotnet test Budiff.slnx -c Release --no-build --filter "Category!=Integration"
 
+      # Again at 125%, a common desktop scale: a row is then no whole number
+      # of device pixels, which once hung the diff (see TestScale).
+      - name: Test GUI at 125% display scale
+        env:
+          BUDIFF_TEST_SCALE: "1.25"
+        run: dotnet test tests/Budiff.Avalonia.Tests -c Release --no-build --filter "Category!=Integration"
+
   build-test:
     runs-on: windows-latest
 
@@ -82,3 +89,10 @@ jobs:
 
       - name: Test
         run: dotnet test Budiff.slnx -c Release --no-build --filter "Category!=Integration"
+
+      # Again at 125%, a common desktop scale: a row is then no whole number
+      # of device pixels, which once hung the diff (see TestScale).
+      - name: Test GUI at 125% display scale
+        env:
+          BUDIFF_TEST_SCALE: "1.25"
+        run: dotnet test tests/Budiff.Avalonia.Tests -c Release --no-build --filter "Category!=Integration"
