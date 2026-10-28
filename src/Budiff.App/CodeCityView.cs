@@ -7,8 +7,8 @@ using System.Windows.Input;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Media;
-using Avalonia.Media.Imaging;
 using Avalonia.Media.Immutable;
 using Avalonia.Threading;
 using Budiff.CodeAnalysis;
@@ -24,7 +24,7 @@ namespace Budiff.App;
 // pointer, WASD flies (Space up, Ctrl down, Shift faster), Home resets.
 // Hover shows a card; clicking a building opens its diff, clicking a
 // district flies to it.
-internal sealed class CodeCityView : Control
+internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustomHitTest
 {
     public static readonly StyledProperty<CityModel?> ModelProperty =
         AvaloniaProperty.Register<CodeCityView, CityModel?>(nameof(Model));
@@ -35,6 +35,9 @@ internal sealed class CodeCityView : Control
     public static readonly StyledProperty<ICommand?> OpenCommandProperty =
         AvaloniaProperty.Register<CodeCityView, ICommand?>(nameof(OpenCommand));
 
+    public static readonly StyledProperty<bool> ShowFpsProperty =
+        AvaloniaProperty.Register<CodeCityView, bool>(nameof(ShowFps));
+
     private const float FieldOfView = 0.70f;
     private const float MinPitch = 0.12f;
     private const float MaxPitch = 1.50f;
@@ -43,7 +46,7 @@ internal sealed class CodeCityView : Control
 
     private static readonly Color Background = Color.Parse("#1B1C1F");
     private static readonly IBrush BackgroundBrush = new ImmutableSolidColorBrush(Background);
-    private static readonly IBrush GroundBrush = new ImmutableSolidColorBrush(Color.Parse("#232529"));
+    private static readonly Color GroundColor = Color.Parse("#232529");
     private static readonly IBrush TextBrush = new ImmutableSolidColorBrush(Color.Parse("#DFE1E5"));
     private static readonly IBrush MutedBrush = new ImmutableSolidColorBrush(Color.Parse("#9DA0A8"));
     private static readonly IBrush AddedBrush = new ImmutableSolidColorBrush(Color.Parse("#6BB36B"));
@@ -53,7 +56,6 @@ internal sealed class CodeCityView : Control
     private static readonly IPen LabelPillPen = new ImmutablePen(new ImmutableSolidColorBrush(Color.Parse("#5A5E66")), 1);
     private static readonly IBrush CardBrush = new ImmutableSolidColorBrush(Color.Parse("#F02B2D31"));
     private static readonly IPen CardPen = new ImmutablePen(new ImmutableSolidColorBrush(Color.Parse("#4A4D55")), 1);
-    private static readonly IPen EdgePen = new ImmutablePen(new ImmutableSolidColorBrush(Color.Parse("#38000000")), 1);
     private static readonly IPen HoverPen = new ImmutablePen(new ImmutableSolidColorBrush(Colors.White), 2);
     private static readonly IPen HighlightPen = new ImmutablePen(new ImmutableSolidColorBrush(Color.Parse("#D0FFFFFF")), 1.5);
     private static readonly IBrush HighlightBrush = new ImmutableSolidColorBrush(Color.Parse("#40FFFFFF"));
@@ -101,17 +103,17 @@ internal sealed class CodeCityView : Control
     private Point? _pointer;
     private CityBlock? _hover;
 
-    private DispatcherTimer? _flyTimer;
-    private DispatcherTimer? _moveTimer;
+    private bool _flying;
+    private bool _frameRequested;
+    private TimeSpan? _lastFrameTime;
     private readonly HashSet<Key> _held = new();
-    private readonly System.Diagnostics.Stopwatch _moveClock = new();
     private (Vector3 Target, float Distance, float Yaw, float Pitch) _flyFrom;
     private (Vector3 Target, float Distance, float Yaw, float Pitch) _flyTo;
     private DateTime _flyStart;
 
     static CodeCityView()
     {
-        AffectsRender<CodeCityView>(ModelProperty, SearchTextProperty);
+        AffectsRender<CodeCityView>(ModelProperty, SearchTextProperty, ShowFpsProperty);
         FocusableProperty.OverrideDefaultValue<CodeCityView>(true);
         ClipToBoundsProperty.OverrideDefaultValue<CodeCityView>(true);
     }
@@ -134,6 +136,131 @@ internal sealed class CodeCityView : Control
         set => SetValue(OpenCommandProperty, value);
     }
 
+    // The performance panel (the "Show FPS" box).
+    public bool ShowFps
+    {
+        get => GetValue(ShowFpsProperty);
+        set => SetValue(ShowFpsProperty, value);
+    }
+
+    // The GPU view under this one (set by the window); when it is ready this
+    // control draws only the overlays and leaves the city to it.
+    public CityGlView? Gpu
+    {
+        get => _gpu;
+        set
+        {
+            _gpu = value;
+            if (value is not null)
+            {
+                value.Scene = this;
+            }
+
+            OnGpuChanged();
+        }
+    }
+
+    private CityGlView? _gpu;
+    private bool _gpuGeometryFresh;
+
+    internal bool UsesGpu => _gpu is { IsReady: true };
+
+    // The whole area takes the pointer, transparent or not.
+    public bool HitTest(Point point) => new Rect(Bounds.Size).Contains(point);
+
+    internal void OnGpuChanged()
+    {
+        _gpuGeometryFresh = false;
+        _faces = null;
+        InvalidateVisual();
+    }
+
+    // The camera for the GPU: the same eye, target and field of view the
+    // software projection (and so picking and the overlays) uses.
+    internal Matrix4x4 ViewProjection(float aspect)
+    {
+        UpdateCamera();
+        var near = Math.Max(0.5f, _distance * 0.01f);
+        var far = _distance * 4 + (float)(Model?.Size ?? CityLayout.DefaultSize) * 3;
+        return Matrix4x4.CreateLookAt(_eye, _target, Vector3.UnitY)
+            * Matrix4x4.CreatePerspectiveFieldOfView(FieldOfView, aspect, near, far);
+    }
+
+    // World-space triangles for every plinth and building (and the ground):
+    // five faces a box, each with its shade and a 0..1 uv so the shader can
+    // draw its edges. Colours go in a second buffer so a search only resends
+    // those.
+    private void PushGpuGeometry(CityModel model)
+    {
+        var blocks = model.Districts.Concat(model.Buildings).ToList();
+        var faces = blocks.Count * 5 + 1;
+        var vertices = new float[faces * 6 * CityGlView.Stride];
+        var count = 0;
+        void Face(Vector3 a, Vector3 b, Vector3 c, Vector3 d, float shade, float edge)
+        {
+            Span<(Vector3 P, float U, float V)> quad = stackalloc (Vector3, float, float)[] { (a, 0, 0), (b, 1, 0), (c, 1, 1), (d, 0, 1) };
+            foreach (var i in TriangleCorners)
+            {
+                var o = count++ * CityGlView.Stride;
+                var (p, u, v) = quad[i];
+                (vertices[o], vertices[o + 1], vertices[o + 2], vertices[o + 3]) = (p.X, p.Y, p.Z, shade);
+                (vertices[o + 4], vertices[o + 5], vertices[o + 6]) = (u, v, edge);
+            }
+        }
+
+        var size = (float)model.Size;
+        Face(new(0, 0, 0), new(size, 0, 0), new(size, 0, size), new(0, 0, size), 1, 0);
+        foreach (var block in blocks)
+        {
+            var f = block.Footprint;
+            var (x0, x1, z0, z1) = ((float)f.X, (float)(f.X + f.Width), (float)f.Y, (float)(f.Y + f.Height));
+            var (y0, y1) = ((float)block.Base, (float)block.Top);
+            var edge = block.IsFile ? 1f : 0.6f;
+            Face(new(x0, y1, z0), new(x1, y1, z0), new(x1, y1, z1), new(x0, y1, z1), 1f, edge);
+            Face(new(x0, y0, z0), new(x0, y1, z0), new(x0, y1, z1), new(x0, y0, z1), 0.70f, edge);
+            Face(new(x1, y0, z0), new(x1, y1, z0), new(x1, y1, z1), new(x1, y0, z1), 0.70f, edge);
+            Face(new(x0, y0, z0), new(x1, y0, z0), new(x1, y1, z0), new(x0, y1, z0), 0.52f, edge);
+            Face(new(x0, y0, z1), new(x1, y0, z1), new(x1, y1, z1), new(x0, y1, z1), 0.52f, edge);
+        }
+
+        _gpuBlocks = blocks;
+        _gpu!.SetGeometry(vertices, GpuColors(model), count);
+        _gpuGeometryFresh = true;
+    }
+
+    private static readonly int[] TriangleCorners = { 0, 1, 2, 0, 2, 3 };
+
+    private List<CityBlock> _gpuBlocks = new();
+
+    // RGBA per vertex, in the order PushGpuGeometry wrote the faces.
+    private byte[] GpuColors(CityModel model)
+    {
+        var colors = new byte[(_gpuBlocks.Count * 5 + 1) * 6 * 4];
+        var at = 0;
+        void Put(Color color, int vertices)
+        {
+            for (var i = 0; i < vertices; i++)
+            {
+                (colors[at], colors[at + 1], colors[at + 2], colors[at + 3]) = (color.R, color.G, color.B, 255);
+                at += 4;
+            }
+        }
+
+        Put(GroundColor, 6);
+        foreach (var block in _gpuBlocks)
+        {
+            var color = _colors[block];
+            if (_matches is not null && (!block.IsFile || !_matches.Contains(block)))
+            {
+                color = Blend(color, Background, block.IsFile ? 0.78 : 0.55);
+            }
+
+            Put(color, 30);
+        }
+
+        return colors;
+    }
+
     // The building or district under the pointer (for tests and the card).
     internal CityBlock? Hovered => _hover;
 
@@ -146,15 +273,15 @@ internal sealed class CodeCityView : Control
     internal Vector3 Eye => _eye;
 
     // Where the camera is flying to (its target when it is not flying).
-    internal Vector3 FlyDestination => _flyTimer?.IsEnabled == true ? _flyTo.Target : _target;
+    internal Vector3 FlyDestination => _flying ? _flyTo.Target : _target;
 
     // Lands a fly at once (headless tests have no running timers).
     internal void FinishFly()
     {
-        if (_flyTimer?.IsEnabled == true)
+        if (_flying)
         {
             _flyStart = DateTime.MinValue;
-            OnFlyTick(null, EventArgs.Empty);
+            FlyStep();
         }
     }
 
@@ -174,6 +301,10 @@ internal sealed class CodeCityView : Control
 
     private void OnModelChanged(bool resetCamera)
     {
+        _gpuGeometryFresh = false;
+        _labelCandidates = Model is { } labelled
+            ? labelled.Districts.Where(d => d.Level <= 2).OrderBy(d => d.Level).ThenByDescending(d => d.Footprint.Area).ToList()
+            : new List<CityBlock>();
         _colors.Clear();
         _topLevel.Clear();
         _contents.Clear();
@@ -219,6 +350,10 @@ internal sealed class CodeCityView : Control
         _matches = query.Length == 0 || Model is null
             ? null
             : Model.Buildings.Where(b => b.RelativePath.Contains(query, StringComparison.OrdinalIgnoreCase)).ToHashSet();
+        if (UsesGpu && _gpuGeometryFresh && Model is { } model)
+        {
+            _gpu!.SetColors(GpuColors(model));
+        }
         InvalidateVisual();
     }
 
@@ -311,7 +446,7 @@ internal sealed class CodeCityView : Control
 
     private void StartFly(Vector3 target, float distance, float yaw, float pitch, bool animate)
     {
-        _flyTimer?.Stop();
+        _flying = false;
         if (!animate || !_hasCamera)
         {
             (_target, _distance, _yaw, _pitch) = (target, distance, yaw, pitch);
@@ -323,11 +458,11 @@ internal sealed class CodeCityView : Control
         _flyFrom = (_target, _distance, _yaw, _pitch);
         _flyTo = (target, distance, yaw, pitch);
         _flyStart = DateTime.UtcNow;
-        _flyTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(15), DispatcherPriority.Render, OnFlyTick);
-        _flyTimer.Start();
+        _flying = true;
+        RequestFrame();
     }
 
-    private void OnFlyTick(object? sender, EventArgs e)
+    private void FlyStep()
     {
         var t = (float)Math.Min(1, (DateTime.UtcNow - _flyStart).TotalMilliseconds / 450);
         var ease = 1 - MathF.Pow(1 - t, 3);
@@ -337,10 +472,84 @@ internal sealed class CodeCityView : Control
         _pitch = _flyFrom.Pitch + (_flyTo.Pitch - _flyFrom.Pitch) * ease;
         if (t >= 1)
         {
-            _flyTimer!.Stop();
+            _flying = false;
         }
 
         InvalidateVisual();
+    }
+
+    // Flying and WASD advance once per display frame (not on a timer, which
+    // would cap them near 60 FPS).
+    private void RequestFrame()
+    {
+        if (_frameRequested || TopLevel.GetTopLevel(this) is not { } top)
+        {
+            return;
+        }
+
+        _frameRequested = true;
+        top.RequestAnimationFrame(OnAnimationFrame);
+    }
+
+    // The benchmark (BUDIFF_CITY_BENCH): orbit nonstop, then report.
+    private DateTime _benchStart;
+    private DateTime _benchUntil;
+    private Action<string>? _benchDone;
+    private bool _benchWarm;
+
+    internal void RunBench(TimeSpan warmUp, TimeSpan duration, Action<string> done)
+    {
+        _benchStart = DateTime.UtcNow + warmUp;
+        _benchUntil = _benchStart + duration;
+        _benchDone = done;
+        _benchWarm = false;
+        RequestFrame();
+    }
+
+    private void OnAnimationFrame(TimeSpan time)
+    {
+        _frameRequested = false;
+        var seconds = _lastFrameTime is { } last ? Math.Clamp((time - last).TotalSeconds, 0, 0.1) : 1 / 60.0;
+        _lastFrameTime = time;
+        if (_benchDone is { } done)
+        {
+            _yaw += (float)seconds * 0.6f;
+            InvalidateVisual();
+            if (!_benchWarm && DateTime.UtcNow >= _benchStart)
+            {
+                _benchWarm = true;
+                _hud.Reset();
+            }
+
+            if (DateTime.UtcNow >= _benchUntil)
+            {
+                _benchDone = null;
+                done(PerfReport());
+                return;
+            }
+
+            RequestFrame();
+            return;
+        }
+
+        var moving = _held.Any(k => k is not (Key.LeftShift or Key.RightShift));
+        if (_flying)
+        {
+            FlyStep();
+        }
+        else if (moving)
+        {
+            Move(seconds);
+        }
+
+        if (_flying || moving)
+        {
+            RequestFrame();
+        }
+        else
+        {
+            _lastFrameTime = null;
+        }
     }
 
     // ---- input ----
@@ -351,9 +560,8 @@ internal sealed class CodeCityView : Control
         var point = e.GetCurrentPoint(this);
         if (_hud.Bounds.Contains(point.Position))
         {
-            // The performance panel: a click opens or closes its debug lines.
-            _hud.Expanded = !_hud.Expanded;
-            InvalidateVisual();
+            // The performance panel: a click copies its report.
+            CopyReport();
             e.Handled = true;
             return;
         }
@@ -362,7 +570,7 @@ internal sealed class CodeCityView : Control
         _dragged = false;
         _panning = !point.Properties.IsLeftButtonPressed;
         _pressPoint = _lastPoint = point.Position;
-        _flyTimer?.Stop();
+        _flying = false;
         e.Pointer.Capture(this);
         Focus();
         e.Handled = true;
@@ -443,7 +651,7 @@ internal sealed class CodeCityView : Control
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
         base.OnPointerWheelChanged(e);
-        _flyTimer?.Stop();
+        _flying = false;
         var size = (float)(Model?.Size ?? CityLayout.DefaultSize);
         var old = _distance;
         _distance = Math.Clamp(_distance * MathF.Pow(0.85f, (float)e.Delta.Y), size * 0.04f, size * 3f);
@@ -471,12 +679,10 @@ internal sealed class CodeCityView : Control
         else if (IsMoveKey(e.Key))
         {
             // Shooter-style flying: held keys move the camera every tick.
-            if (_held.Add(e.Key) && _moveTimer?.IsEnabled != true)
+            if (_held.Add(e.Key))
             {
-                _flyTimer?.Stop();
-                _moveClock.Restart();
-                _moveTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(15), DispatcherPriority.Render, OnMoveTick);
-                _moveTimer.Start();
+                _flying = false;
+                RequestFrame();
             }
 
             e.Handled = true;
@@ -491,17 +697,12 @@ internal sealed class CodeCityView : Control
             e.Handled = true;
         }
 
-        if (!_held.Any(k => k is not (Key.LeftShift or Key.RightShift)))
-        {
-            _moveTimer?.Stop();
-        }
     }
 
     protected override void OnLostFocus(FocusChangedEventArgs e)
     {
         base.OnLostFocus(e);
         _held.Clear();
-        _moveTimer?.Stop();
     }
 
     private static bool IsMoveKey(Key key)
@@ -509,13 +710,6 @@ internal sealed class CodeCityView : Control
             or Key.LeftCtrl or Key.RightCtrl or Key.LeftShift or Key.RightShift;
 
     internal IReadOnlyCollection<Key> HeldKeys => _held;
-
-    private void OnMoveTick(object? sender, EventArgs e)
-    {
-        var seconds = Math.Min(0.1, _moveClock.Elapsed.TotalSeconds);
-        _moveClock.Restart();
-        Move(seconds);
-    }
 
     // One step of WASD flying for the keys held: W/S along the view on the
     // ground, A/D sideways, Space up, Ctrl down; Shift triples the speed.
@@ -711,12 +905,14 @@ internal sealed class CodeCityView : Control
 
     // ---- rendering ----
 
-    // The drawn city is kept as a bitmap and redrawn only when what it shows
-    // changes (camera, size, model, search); hovering only draws the outline
-    // and the card over it.
-    private RenderTargetBitmap? _scene;
-    private (Vector3, float, float, float, Size, double, CityModel?, HashSet<CityBlock>?) _sceneKey;
-
+    // The city's faces, projected and ordered, are kept until what they show
+    // changes (camera, size, model, search); a frame - a hover, say - only
+    // hands them to Skia again. They are drawn straight into the window's own
+    // Skia canvas (GPU-backed in the app), at its own scaling, so the overlay,
+    // the labels and picking all share one frame.
+    private FaceBatch? _faces;
+    private static readonly FaceBatch EmptyFaces = new(1);
+    private (Vector3, float, float, float, Size, CityModel?, HashSet<CityBlock>?) _sceneKey;
     private readonly CityPerfHud _hud = new();
 
     internal CityPerfHud Hud => _hud;
@@ -725,9 +921,14 @@ internal sealed class CodeCityView : Control
     {
         var frameClock = System.Diagnostics.Stopwatch.StartNew();
         var bounds = new Rect(Bounds.Size);
-        if (Model is not { } model || bounds.Width < 2 || bounds.Height < 2)
+        var gpu = UsesGpu;
+        if (!gpu)
         {
             context.FillRectangle(BackgroundBrush, bounds);
+        }
+
+        if (Model is not { } model || bounds.Width < 2 || bounds.Height < 2)
+        {
             return;
         }
 
@@ -739,25 +940,21 @@ internal sealed class CodeCityView : Control
         }
 
         UpdateCamera();
-        var scale = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1.0;
-        var key = (_target, _distance, _yaw, _pitch, bounds.Size, scale, Model, _matches);
-        if (_scene is null || key != _sceneKey)
+        var key = (_target, _distance, _yaw, _pitch, bounds.Size, Model, _matches);
+        if (gpu && !_gpuGeometryFresh)
         {
-            var pixels = new PixelSize(Math.Max(1, (int)Math.Ceiling(bounds.Width * scale)), Math.Max(1, (int)Math.Ceiling(bounds.Height * scale)));
-            if (_scene is null || _scene.PixelSize != pixels)
-            {
-                _scene?.Dispose();
-                _scene = new RenderTargetBitmap(pixels, new global::Avalonia.Vector(96 * scale, 96 * scale));
-            }
+            PushGpuGeometry(model);
+        }
 
+        if (_faces is null || key != _sceneKey)
+        {
             var redraw = System.Diagnostics.Stopwatch.StartNew();
-            _hud.Faces = 0;
             _hud.Labels = 0;
-            using (var scene = _scene.CreateDrawingContext())
-            {
-                RenderScene(scene, model, bounds);
-            }
-
+            _hud.OrderMs = 0;
+            _hud.Pairs = 0;
+            _faces = gpu ? EmptyFaces : BuildFaces(model);
+            _hud.Faces = gpu ? _gpuBlocks.Count * 10 + 2 : _faces.Count;
+            _gpu?.RequestNextFrameRendering();
             _hud.RedrawMs = redraw.Elapsed.TotalMilliseconds;
             _hud.Redraws++;
             _sceneKey = key;
@@ -767,7 +964,23 @@ internal sealed class CodeCityView : Control
             _hud.CachedFrames++;
         }
 
-        context.DrawImage(_scene, new Rect(_scene.Size), bounds);
+        if (!gpu)
+        {
+            context.Custom(new FacesDrawOperation(bounds, _faces));
+        }
+        // The overlays are drawn straight into the frame: recording them into
+        // a fresh DrawingGroup each frame cost ~250 KB of garbage a frame.
+        if (gpu && _matches is { Count: <= 300 } matches)
+        {
+            foreach (var match in matches)
+            {
+                DrawTopOutline(context, match, MatchPen);
+            }
+        }
+
+        _hud.Labels = 0;
+        DrawLabels(context, model);
+        DrawLegend(context, model, bounds);
         if (_hover is { } hover)
         {
             DrawHighlight(context, hover);
@@ -778,46 +991,60 @@ internal sealed class CodeCityView : Control
         }
 
         _hud.Frame(frameClock.Elapsed.TotalMilliseconds);
-        var degrees = 180 / Math.PI;
-        _hud.Draw(context, bounds, new[]
+        if (ShowFps)
         {
-            $"{model.Buildings.Count:N0} BUILDINGS · {model.Districts.Count:N0} DISTRICTS · {model.HotspotCount:N0} HOTSPOTS",
-            $"CAMERA {_target.X:0},{_target.Y:0},{_target.Z:0} · DIST {_distance:0}",
-            $"YAW {_yaw * degrees:0}° · PITCH {_pitch * degrees:0}°",
-            $"{bounds.Width:0}×{bounds.Height:0} DIP @ {scale:0.##}×",
+            _hud.Draw(context, bounds, UsesGpu ? "GPU" : "CPU");
+        }
+        else
+        {
+            _hud.Hide();
+        }
+    }
+
+    // The last report copied (for tests).
+    internal string? LastReport { get; private set; }
+
+    internal string PerfReport()
+    {
+        var degrees = 180 / Math.PI;
+        var model = Model;
+        return _hud.Report(new[]
+        {
+            model is null ? "No city" : $"{model.Buildings.Count:N0} buildings, {model.Districts.Count:N0} districts, {model.HotspotCount:N0} hotspots, {model.Mode} mode",
+            $"Camera target {_target.X:0},{_target.Y:0},{_target.Z:0}, distance {_distance:0}, yaw {_yaw * degrees:0} deg, pitch {_pitch * degrees:0} deg",
+            $"Viewport {Bounds.Width:0}x{Bounds.Height:0} DIP at {TopLevel.GetTopLevel(this)?.RenderScaling ?? 1:0.##}x scaling",
+            UsesGpu ? $"Renderer: GPU, {_gpu!.Renderer}, last submit {_gpu.LastGpuSubmitMs:0.00} ms" : $"Renderer: software (Skia paths){(_gpu is { Renderer.Length: > 0 } g ? ", " + g.Renderer : string.Empty)}",
         });
     }
 
-    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    private void CopyReport()
     {
-        base.OnDetachedFromVisualTree(e);
-        _scene?.Dispose();
-        _scene = null;
+        LastReport = PerfReport();
+        if (TopLevel.GetTopLevel(this)?.Clipboard is { } clipboard)
+        {
+            _ = clipboard.SetTextAsync(LastReport);
+        }
+
+        _hud.CopiedUntil = _hud.Now + TimeSpan.FromSeconds(1.5);
+        InvalidateVisual();
+        DispatcherTimer.RunOnce(InvalidateVisual, TimeSpan.FromSeconds(1.6));
     }
 
-    private void RenderScene(DrawingContext context, CityModel model, Rect bounds)
+    private FaceBatch BuildFaces(CityModel model)
     {
-        context.FillRectangle(BackgroundBrush, bounds);
-
+        var batch = new FaceBatch(model.Buildings.Count * 3 + model.Districts.Count * 3 + 1);
         var size = (float)model.Size;
-        DrawQuad(context, GroundBrush, null,
-            new Vector3(0, 0, 0), new Vector3(size, 0, 0), new Vector3(size, 0, size), new Vector3(0, 0, size));
-
+        AddQuad(batch, GroundColor, 0, new Vector3(0, 0, 0), new Vector3(size, 0, 0), new Vector3(size, 0, size), new Vector3(0, 0, size));
         var orderClock = System.Diagnostics.Stopwatch.StartNew();
         var drawOrder = DrawOrder(model);
         _hud.OrderMs = orderClock.Elapsed.TotalMilliseconds;
         foreach (var block in drawOrder)
         {
             var ghost = _matches is not null && (!block.IsFile || !_matches.Contains(block));
-            DrawBox(context, block, _colors[block], ghost);
-            if (block.IsFile && _matches is not null && !ghost)
-            {
-                DrawTopOutline(context, block, MatchPen);
-            }
+            AddBox(batch, block, _colors[block], ghost, match: block.IsFile && _matches is not null && !ghost);
         }
 
-        DrawLabels(context, model);
-        DrawLegend(context, model, bounds);
+        return batch;
     }
 
     // Every plinth and building, back to front. The treemap nests: all of a
@@ -920,7 +1147,7 @@ internal sealed class CodeCityView : Control
         return Vector3.DistanceSquared(_eye, new Vector3(x, y, z));
     }
 
-    private void DrawBox(DrawingContext context, CityBlock block, Color color, bool ghost)
+    private void AddBox(FaceBatch batch, CityBlock block, Color color, bool ghost, bool match)
     {
         var f = block.Footprint;
         if (f.Width <= 0 || f.Height <= 0)
@@ -943,27 +1170,52 @@ internal sealed class CodeCityView : Control
         // Only the faces turned toward the eye.
         if (_eye.X < x0)
         {
-            DrawQuad(context, Shade(color, 0.70), null, new(x0, y0, z0), new(x0, y1, z0), new(x0, y1, z1), new(x0, y0, z1));
+            AddQuad(batch, ShadeColor(color, 0.70), 0, new(x0, y0, z0), new(x0, y1, z0), new(x0, y1, z1), new(x0, y0, z1));
         }
         else if (_eye.X > x1)
         {
-            DrawQuad(context, Shade(color, 0.70), null, new(x1, y0, z0), new(x1, y1, z0), new(x1, y1, z1), new(x1, y0, z1));
+            AddQuad(batch, ShadeColor(color, 0.70), 0, new(x1, y0, z0), new(x1, y1, z0), new(x1, y1, z1), new(x1, y0, z1));
         }
 
         if (_eye.Z < z0)
         {
-            DrawQuad(context, Shade(color, 0.52), null, new(x0, y0, z0), new(x1, y0, z0), new(x1, y1, z0), new(x0, y1, z0));
+            AddQuad(batch, ShadeColor(color, 0.52), 0, new(x0, y0, z0), new(x1, y0, z0), new(x1, y1, z0), new(x0, y1, z0));
         }
         else if (_eye.Z > z1)
         {
-            DrawQuad(context, Shade(color, 0.52), null, new(x0, y0, z1), new(x1, y0, z1), new(x1, y1, z1), new(x0, y1, z1));
+            AddQuad(batch, ShadeColor(color, 0.52), 0, new(x0, y0, z1), new(x1, y0, z1), new(x1, y1, z1), new(x0, y1, z1));
         }
 
         if (_eye.Y > y1)
         {
-            DrawQuad(context, Shade(color, 1.0), EdgePen, new(x0, y1, z0), new(x1, y1, z0), new(x1, y1, z1), new(x0, y1, z1));
+            AddQuad(batch, color, match ? FaceBatch.Match : FaceBatch.Edge, new(x0, y1, z0), new(x1, y1, z0), new(x1, y1, z1), new(x0, y1, z1));
         }
     }
+
+    private void AddQuad(FaceBatch batch, Color color, byte flags, Vector3 a, Vector3 b, Vector3 c, Vector3 d)
+    {
+        if (Project(a) is not { } pa || Project(b) is not { } pb || Project(c) is not { } pc || Project(d) is not { } pd)
+        {
+            return;
+        }
+
+        var extent = Math.Max(Math.Max(Math.Abs(pa.X - pc.X), Math.Abs(pb.X - pd.X)), Math.Max(Math.Abs(pa.Y - pc.Y), Math.Abs(pb.Y - pd.Y)));
+        if (extent < 0.6 && flags != FaceBatch.Match)
+        {
+            return;
+        }
+
+        // Roof edges only where they help (and are cheap to see).
+        if (flags == FaceBatch.Edge && extent < 8)
+        {
+            flags = 0;
+        }
+
+        batch.Add(pa, pb, pc, pd, color, flags);
+    }
+
+    private static Color ShadeColor(Color color, double factor)
+        => Color.FromRgb((byte)(color.R * factor), (byte)(color.G * factor), (byte)(color.B * factor));
 
     // The hovered block lit up: every face turned to the eye of a building
     // (so pointing at a side shows it), the roof outline of a district.
@@ -1024,7 +1276,6 @@ internal sealed class CodeCityView : Control
             return;
         }
 
-        _hud.Faces++;
         var geometry = new StreamGeometry();
         using (var g = geometry.Open())
         {
@@ -1040,19 +1291,27 @@ internal sealed class CodeCityView : Control
 
     // District names on their plinths, the top level always, deeper ones when
     // there is room.
-    private void DrawLabels(DrawingContext context, CityModel model)
+    private readonly List<Rect> _taken = new();
+    private List<CityBlock> _labelCandidates = new();
+
+    private bool Place(Rect rect)
     {
-        var taken = new List<Rect>();
-        bool Place(Rect rect)
+        var padded = rect.Inflate(2);
+        foreach (var r in _taken)
         {
-            if (taken.Any(r => r.Intersects(rect.Inflate(2))))
+            if (r.Intersects(padded))
             {
                 return false;
             }
-
-            taken.Add(rect);
-            return true;
         }
+
+        _taken.Add(rect);
+        return true;
+    }
+
+    private void DrawLabels(DrawingContext context, CityModel model)
+    {
+        _taken.Clear();
 
         // Search matches first: a name tag over each (when they are few).
         if (_matches is { Count: > 0 and <= 25 } matches)
@@ -1080,7 +1339,7 @@ internal sealed class CodeCityView : Control
         // Top-level folders always get one; deeper ones when their plinth is
         // big enough on screen. Bigger districts win a clash, so the choice
         // stays steady while the camera moves.
-        foreach (var district in model.Districts.Where(d => d.Level <= 2).OrderBy(d => d.Level).ThenByDescending(d => d.Footprint.Area))
+        foreach (var district in _labelCandidates)
         {
             var f = district.Footprint;
             var y = (float)district.Top;
@@ -1297,7 +1556,7 @@ internal sealed class CodeCityView : Control
         => $"{value.ToString("N0", CultureInfo.CurrentCulture)} {noun}{(value == 1 ? string.Empty : "s")}";
 
     private static FormattedText Text(string text, double size, IBrush brush, bool bold = false)
-        => new(text, CultureInfo.CurrentCulture, FlowDirection.LeftToRight, bold ? UiBold : UiFont, size, brush);
+        => CityText.Get(text, size, brush, bold ? UiBold : UiFont);
 
     // ---- colours ----
 

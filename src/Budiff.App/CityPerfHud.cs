@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using Avalonia;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
@@ -11,9 +10,9 @@ using Avalonia.Media.Immutable;
 namespace Budiff.App;
 
 // The code city's performance panel (after the one in threejs-nanites): the
-// average FPS and 1% low over the last 15 s with a history graph; a click
-// opens the debug lines - frame cost, the last full redraw split into order
-// and draw, cache use, scene counters, the camera and the build.
+// average FPS and 1% low over the last 15 s with a history graph. A click
+// copies a plain-text report - frame cost, the last full redraw split into
+// order and draw, cache use, scene counters, the camera and the build.
 //
 // The city draws only when something changes, so FPS counts frames that come
 // in a run: a gap over 250 ms is idle time, not a slow frame.
@@ -44,10 +43,31 @@ internal sealed class CityPerfHud
     private double _lastFrame = -1;
     private double _lastSample;
 
-    public bool Expanded { get; set; }
-
-    // Where the panel was last drawn (for the click).
+    // Where the panel was last drawn (for the click); empty when hidden.
     public Rect Bounds { get; private set; }
+
+    // "Copied" shows in the footer until then.
+    public TimeSpan CopiedUntil { get; set; }
+
+    public TimeSpan Now => _clock.Elapsed;
+
+    public void Hide() => Bounds = default;
+
+    // Starts the statistics over (the benchmark, after its warm-up).
+    public void Reset()
+    {
+        _frames.Clear();
+        _avgHistory.Clear();
+        _lowHistory.Clear();
+        _lastFrame = -1;
+        Redraws = CachedFrames = 0;
+        _gcAtReset = (GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2));
+        _allocatedAtReset = GC.GetTotalAllocatedBytes();
+    }
+
+    private long _allocatedAtReset;
+
+    private (int, int, int) _gcAtReset;
 
     public int Redraws { get; set; }
 
@@ -110,45 +130,69 @@ internal sealed class CityPerfHud
         return (1000 / intervals.Average(), 1000 / slowMs);
     }
 
-    public void Draw(DrawingContext context, Rect area, IReadOnlyList<string> details)
+    // The report a click copies.
+    public string Report(IReadOnlyList<string> details)
     {
-        var intervals = _frames.Select(f => f.Interval).ToList();
-        var (avg, low) = Rates(intervals);
-        var costs = _frames.Select(f => f.Cost).OrderBy(c => c).ToList();
-        var costAvg = costs.Count > 0 ? costs.Average() : 0;
-        var costP95 = costs.Count > 0 ? costs[Math.Min(costs.Count - 1, (int)(costs.Count * 0.95))] : 0;
-        var idle = _lastFrame < 0 || _clock.Elapsed.TotalMilliseconds - _lastFrame > 600;
-
-        var lines = new List<FormattedText>();
-        if (Expanded)
+        var (avg, low) = Rates(_frames.Select(f => f.Interval).ToList());
+        var (costAvg, costP95) = Costs();
+        var lines = new List<string>
         {
-            lines.Add(Text($"{F(avg, 1)} AVG / {F(low, 1)} 1% LOW", 10.5, TextBrush));
-            lines.Add(Text($"{F(costAvg, 1)} MS FRAME / {F(costP95, 1)} P95", 10.5, TextBrush));
-            lines.Add(Text($"REDRAW {F(RedrawMs, 1)} MS (ORDER {F(OrderMs, 1)} + DRAW {F(RedrawMs - OrderMs, 1)})", 10.5, TextBrush));
-            lines.Add(Text($"{N(Redraws)} REDRAWS · {N(CachedFrames)} FROM CACHE", 10.5, MutedBrush));
-            lines.Add(Text($"{N(Faces)} FACES · {N(Pairs)} PAIRS · {N(Labels)} LABELS", 10.5, MutedBrush));
-            foreach (var detail in details)
-            {
-                lines.Add(Text(detail, 10.5, MutedBrush));
-            }
+            $"budiff code city performance report, {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}",
+            $"FPS {F(avg, 1)} avg / {F(low, 1)} 1% low over the last 15 s ({_frames.Count} frames in runs)",
+            $"Frame {F(costAvg, 2)} ms avg / {F(costP95, 2)} ms p95 on the UI thread",
+            $"Last redraw {F(RedrawMs, 2)} ms (order {F(OrderMs, 2)} + faces/labels {F(RedrawMs - OrderMs, 2)})",
+            $"{N(Redraws)} redraws, {N(CachedFrames)} frames from cache",
+            $"{N(Faces)} faces, {N(Pairs)} sibling pairs ordered, {N(Labels)} labels",
+            $"Longest frame gap {F(_frames.Select(f => f.Interval).DefaultIfEmpty().Max(), 1)} ms, longest frame cost {F(_frames.Select(f => f.Cost).DefaultIfEmpty().Max(), 1)} ms",
+            $"GC since reset: gen0 {GC.CollectionCount(0) - _gcAtReset.Item1}, gen1 {GC.CollectionCount(1) - _gcAtReset.Item2}, gen2 {GC.CollectionCount(2) - _gcAtReset.Item3}, {(GC.GetTotalAllocatedBytes() - _allocatedAtReset) / Math.Max(1, _frames.Count) / 1024.0:0} KB allocated per frame",
+        };
+        lines.AddRange(details);
+        lines.Add($"{(IsNativeAot ? "NativeAOT" : "JIT")} build, .NET {Environment.Version}, {System.Runtime.InteropServices.RuntimeInformation.OSDescription}");
+        return string.Join(Environment.NewLine, lines);
+    }
 
-            lines.Add(Text(RuntimeFeature.IsDynamicCodeSupported ? "JIT BUILD" : "NATIVEAOT BUILD", 10.5, MutedBrush));
+    private (double Avg, double P95) Costs()
+    {
+        var costs = _frames.Select(f => f.Cost).OrderBy(c => c).ToList();
+        return costs.Count == 0 ? (0, 0) : (costs.Average(), costs[Math.Min(costs.Count - 1, (int)(costs.Count * 0.95))]);
+    }
+
+    // NativeAOT runs without the .NET host, which is what sets the deps-file
+    // property (the feature switches can't tell: PublishAot turns
+    // IsDynamicCodeSupported off in a JIT build too).
+    private static bool IsNativeAot => AppContext.GetData("APP_CONTEXT_DEPS_FILES") is null;
+
+    // The numbers shown, refreshed four times a second (so the text repeats
+    // between refreshes and its shaping is reused).
+    private (double Avg, double Low) _shown;
+    private double _shownAt = double.MinValue;
+
+    public void Draw(DrawingContext context, Rect area, string renderer)
+    {
+        var nowMs = _clock.Elapsed.TotalMilliseconds;
+        if (nowMs - _shownAt >= SampleMs)
+        {
+            _shownAt = nowMs;
+            _shown = Rates(_frames.Select(f => f.Interval).ToList());
         }
 
-        var footer = Text(Expanded ? "CLICK TO COLLAPSE" : "CLICK FOR DEBUG INFO", 9.5, MutedBrush);
-        var width = Math.Max(Width, lines.Count > 0 ? lines.Max(l => l.Width) + 20 : 0);
-        var height = 30 + 16 + 36 + lines.Sum(l => l.Height + 1) + footer.Height + 12;
-        var panel = new Rect(area.Right - width - 10, area.Y + 10, width, height);
+        var (avg, low) = _shown;
+        var idle = _lastFrame < 0 || nowMs - _lastFrame > 600;
+        var copied = _clock.Elapsed < CopiedUntil;
+        var footer = Text(copied ? "COPIED TO CLIPBOARD" : "CLICK TO COPY DEBUG INFO", 9.5, copied ? AvgBrush : MutedBrush);
+        var panel = new Rect(area.Right - Width - 10, area.Y + 10, Width, 30 + 16 + 36 + footer.Height + 10);
         Bounds = panel;
         context.DrawRectangle(PanelBrush, PanelPen, panel, 4, 4);
 
         var big = Text(avg > 0 ? avg.ToString("0", CultureInfo.InvariantCulture) : "--", 22, TextBrush, bold: true);
         context.DrawText(big, new Point(panel.X + 10, panel.Y + 4));
         context.DrawText(Text("FPS AVG", 10.5, MutedBrush), new Point(panel.X + 16 + big.Width, panel.Y + 15));
-        var caption = idle ? "IDLE · DRAWS ONLY ON CHANGE" : "LAST 15S · 1% LOW";
+        var tag = Text(renderer, 9.5, AvgBrush, bold: true);
+        context.DrawText(tag, new Point(panel.Right - tag.Width - 10, panel.Y + 15));
+        var caption = idle ? "IDLE \u00B7 DRAWS ONLY ON CHANGE" : $"LAST 15S \u00B7 {F(low, 0)} 1% LOW";
         context.DrawText(Text(caption, 9.5, idle ? MutedBrush : LowBrush), new Point(panel.X + 10, panel.Y + 32));
 
-        var graph = new Rect(panel.X + 10, panel.Y + 48, width - 20, 32);
+        var graph = new Rect(panel.X + 10, panel.Y + 48, Width - 20, 32);
         context.DrawLine(GridPen, graph.TopLeft, graph.TopRight);
         context.DrawLine(GridPen, new Point(graph.X, graph.Center.Y), new Point(graph.Right, graph.Center.Y));
         context.DrawLine(GridPen, graph.BottomLeft, graph.BottomRight);
@@ -156,15 +200,7 @@ internal sealed class CityPerfHud
         DrawSeries(context, _lowHistory, graph, hi, LowPen);
         DrawSeries(context, _avgHistory, graph, hi, AvgPen);
         context.DrawText(Text(hi.ToString("0", CultureInfo.InvariantCulture), 8.5, AvgBrush), new Point(graph.Right - 18, graph.Y + 1));
-
-        var top = graph.Bottom + 6;
-        foreach (var line in lines)
-        {
-            context.DrawText(line, new Point(panel.X + 10, top));
-            top += line.Height + 1;
-        }
-
-        context.DrawText(footer, new Point(panel.X + 10, top + 2));
+        context.DrawText(footer, new Point(panel.X + 10, graph.Bottom + 6));
     }
 
     private static void DrawSeries(DrawingContext context, List<double> values, Rect graph, double hi, IPen pen)
@@ -204,5 +240,30 @@ internal sealed class CityPerfHud
     private static string N(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
 
     private static FormattedText Text(string text, double size, IBrush brush, bool bold = false)
-        => new(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, bold ? Bold : Font, size, brush);
+        => CityText.Get(text, size, brush, bold ? Bold : Font);
+}
+
+// Shaped text for the city's overlays, kept for reuse: labels, the legend and
+// the panel repeat the same strings every frame, and shaping them anew cost
+// hundreds of KB a frame (a GC, and a hitch, every few frames).
+internal static class CityText
+{
+    private static readonly Dictionary<(string, double, IBrush, Typeface), FormattedText> Cache = new();
+
+    public static FormattedText Get(string text, double size, IBrush brush, Typeface typeface)
+    {
+        var key = (text, size, brush, typeface);
+        if (!Cache.TryGetValue(key, out var formatted))
+        {
+            if (Cache.Count > 4096)
+            {
+                Cache.Clear();
+            }
+
+            formatted = new FormattedText(text, CultureInfo.CurrentCulture, FlowDirection.LeftToRight, typeface, size, brush);
+            Cache[key] = formatted;
+        }
+
+        return formatted;
+    }
 }

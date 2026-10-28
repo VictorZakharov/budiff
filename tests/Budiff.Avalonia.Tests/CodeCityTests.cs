@@ -145,16 +145,19 @@ public sealed class CodeCityTests
         window.KeyRelease(Key.W, RawInputModifiers.None, PhysicalKey.W, "w");
         Assert.Empty(city.HeldKeys);
 
-        // D after A comes back to the same spot.
+        // A goes left, D goes right (across the view).
+        var forward = new System.Numerics.Vector3(start.X - eye.X, 0, start.Z - eye.Z);
+        var right = System.Numerics.Vector3.Cross(forward, System.Numerics.Vector3.UnitY);
         var before = city.CameraTarget;
         window.KeyPress(Key.A, RawInputModifiers.None, PhysicalKey.A, "a");
         city.Move(0.05);
         window.KeyRelease(Key.A, RawInputModifiers.None, PhysicalKey.A, "a");
-        Assert.True(System.Numerics.Vector3.Distance(before, city.CameraTarget) > 1);
+        Assert.True(System.Numerics.Vector3.Dot(city.CameraTarget - before, right) < 0);
+        before = city.CameraTarget;
         window.KeyPress(Key.D, RawInputModifiers.None, PhysicalKey.D, "d");
         city.Move(0.05);
         window.KeyRelease(Key.D, RawInputModifiers.None, PhysicalKey.D, "d");
-        Assert.True(System.Numerics.Vector3.Distance(before, city.CameraTarget) < 0.5f);
+        Assert.True(System.Numerics.Vector3.Dot(city.CameraTarget - before, right) > 0);
 
         // Space rises, Ctrl comes down (never under the ground).
         window.KeyPress(Key.Space, RawInputModifiers.None, PhysicalKey.Space, " ");
@@ -193,11 +196,19 @@ public sealed class CodeCityTests
     }
 
     [AvaloniaFact]
-    public void PerformancePanel_ShowsFps_AndClickOpensDebugInfo()
+    public void ShowFps_IsOffByDefault_AndAClickCopiesTheReport()
     {
         var (window, vm) = Open("budiff-city-hud");
         ShowCity(window, vm);
         var city = window.FindControl<CodeCityView>("CodeCity")!;
+        var box = window.FindControl<CheckBox>("ShowFpsBox")!;
+        Assert.True(box.IsEffectivelyVisible);
+        Assert.False(box.IsChecked);
+        Assert.Equal(default, city.Hud.Bounds);
+
+        box.IsChecked = true;
+        UiSnapshot.Pump();
+        Assert.True(vm.Analysis.ShowCityFps);
 
         // A few frames in a run (an orbit drag).
         var mid = global::Avalonia.VisualExtensions.TranslatePoint(city, new global::Avalonia.Point(city.Bounds.Width / 2, city.Bounds.Height / 2), window)!.Value;
@@ -211,17 +222,59 @@ public sealed class CodeCityTests
         window.MouseUp(mid + new global::Avalonia.Point(48, 0), MouseButton.Left);
         UiSnapshot.Pump();
         Assert.True(city.Hud.Redraws > 0);
+        Assert.True(city.Hud.Faces > 0);
         Assert.True(city.Hud.Bounds.Width > 0);
-        Assert.False(city.Hud.Expanded);
 
+        // A click copies the report; it opens nothing.
         var hud = global::Avalonia.VisualExtensions.TranslatePoint(city, city.Hud.Bounds.Center, window)!.Value;
         window.MouseDown(hud, MouseButton.Left);
         window.MouseUp(hud, MouseButton.Left);
         UiSnapshot.Pump();
-        Assert.True(city.Hud.Expanded);
         Assert.False(vm.IsDiffOpen);
-        Assert.True(city.Hud.Faces > 0);
-        UiSnapshot.Capture(window, "city-hud-expanded");
+        Assert.NotNull(city.LastReport);
+        Assert.Contains("FPS", city.LastReport, StringComparison.Ordinal);
+        Assert.Contains("23 buildings", city.LastReport, StringComparison.Ordinal);
+        Assert.Contains("faces", city.LastReport, StringComparison.Ordinal);
+        UiSnapshot.Capture(window, "city-fps-copied");
+    }
+
+    // What you see is what you pick: wherever the pointer is over a coloured
+    // (building) pixel, the pick is a building, never the district under it.
+    [AvaloniaFact]
+    public void Picking_MatchesThePixelsDrawn()
+    {
+        var (window, vm) = Open("budiff-city-pixels");
+        ShowCity(window, vm);
+        var city = window.FindControl<CodeCityView>("CodeCity")!;
+        using var frame = window.CaptureRenderedFrame()!;
+        using var pixels = frame.Lock();
+        var origin = global::Avalonia.VisualExtensions.TranslatePoint(city, new global::Avalonia.Point(0, 0), window)!.Value;
+        var checkedPoints = 0;
+        var wrong = new List<string>();
+        for (var y = 20; y < city.Bounds.Height - 120; y += 7)
+        {
+            for (var x = 20; x < city.Bounds.Width - 20; x += 7)
+            {
+                var hit = city.PickNear(new global::Avalonia.Point(x, y));
+                if (hit is null || hit.IsFile)
+                {
+                    continue;
+                }
+
+                var at = pixels.Address + (int)(origin.Y + y) * pixels.RowBytes + (int)(origin.X + x) * 4;
+                var r = System.Runtime.InteropServices.Marshal.ReadByte(at, 0);
+                var g = System.Runtime.InteropServices.Marshal.ReadByte(at, 1);
+                var b = System.Runtime.InteropServices.Marshal.ReadByte(at, 2);
+                checkedPoints++;
+                if (Math.Max(r, Math.Max(g, b)) - Math.Min(r, Math.Min(g, b)) > 40)
+                {
+                    wrong.Add($"({x},{y}) {hit.Name} rgb {r},{g},{b}");
+                }
+            }
+        }
+
+        Assert.True(checkedPoints > 50);
+        Assert.Empty(wrong);
     }
 
     // Opt-in: the city of a real repository (BUDIFF_CITY_REPO), for review.

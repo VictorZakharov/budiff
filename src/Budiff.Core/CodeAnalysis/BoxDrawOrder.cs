@@ -17,12 +17,22 @@ public static class BoxDrawOrder
 {
     public readonly record struct Box(Vector3 Min, Vector3 Max);
 
+    // Cycles broken so far (a diagnostic for the performance panel).
+    [ThreadStatic]
+    public static int Cycles;
+
     // boxes: the scene; pairs: index pairs whose screen extents overlap;
     // farKey: a fallback distance (bigger = farther, drawn earlier).
     // Returns box indices in draw order.
     public static int[] Sort(IReadOnlyList<Box> boxes, Vector3 eye, IEnumerable<(int A, int B)> pairs, Func<int, float> farKey)
     {
         var count = boxes.Count;
+        var far = new float[count];
+        for (var i = 0; i < count; i++)
+        {
+            far[i] = farKey(i);
+        }
+
         var after = new List<int>?[count];
         var waiting = new int[count];
         foreach (var (a, b) in pairs)
@@ -50,7 +60,7 @@ public static class BoxDrawOrder
         {
             if (waiting[i] == 0)
             {
-                ready.Enqueue(i, -farKey(i));
+                ready.Enqueue(i, -far[i]);
             }
         }
 
@@ -63,17 +73,18 @@ public static class BoxDrawOrder
             {
                 // A cycle (three or more boxes covering each other in turn):
                 // break it at the farthest box still waiting.
-                var far = -1;
+                var farthest = -1;
                 for (var i = 0; i < count; i++)
                 {
-                    if (!done[i] && (far < 0 || farKey(i) > farKey(far)))
+                    if (!done[i] && waiting[i] > 0 && (farthest < 0 || far[i] > far[farthest]))
                     {
-                        far = i;
+                        farthest = i;
                     }
                 }
 
-                waiting[far] = 0;
-                ready.Enqueue(far, -farKey(far));
+                waiting[farthest] = 0;
+                ready.Enqueue(farthest, -far[farthest]);
+                Cycles++;
             }
 
             var next = ready.Dequeue();
@@ -90,7 +101,7 @@ public static class BoxDrawOrder
                 {
                     if (!done[then] && --waiting[then] == 0)
                     {
-                        ready.Enqueue(then, -farKey(then));
+                        ready.Enqueue(then, -far[then]);
                     }
                 }
             }
@@ -99,10 +110,14 @@ public static class BoxDrawOrder
         return order;
     }
 
-    // -1: a is behind b (draw a first); 1: b is behind a; 0: no constraint
-    // (the boxes intersect, or the eye stands between them).
+    // -1: a is behind b (draw a first); 1: b is behind a; 0: no constraint.
+    // Every separating plane gives a true statement ("the box beyond it from
+    // the eye cannot cover the other"). Boxes apart on two axes (diagonal
+    // neighbours) can get one statement each way: then neither can cover the
+    // other and no order is needed - picking one axis there made cycles.
     public static int Behind(Box a, Box b, Vector3 eye)
     {
+        var verdict = 0;
         for (var axis = 0; axis < 3; axis++)
         {
             var aMin = Get(a.Min, axis);
@@ -110,18 +125,30 @@ public static class BoxDrawOrder
             var bMin = Get(b.Min, axis);
             var bMax = Get(b.Max, axis);
             var e = Get(eye, axis);
+            int here;
             if (aMax <= bMin + 1e-4f)
             {
-                return e >= bMin ? -1 : e <= aMax ? 1 : 0;
+                here = e >= bMin ? -1 : e <= aMax ? 1 : 0;
+            }
+            else if (bMax <= aMin + 1e-4f)
+            {
+                here = e >= aMin ? 1 : e <= bMax ? -1 : 0;
+            }
+            else
+            {
+                continue;
             }
 
-            if (bMax <= aMin + 1e-4f)
+            // The eye between the two: neither can cover the other.
+            if (here == 0 || (verdict != 0 && verdict != here))
             {
-                return e >= aMin ? 1 : e <= bMax ? -1 : 0;
+                return 0;
             }
+
+            verdict = here;
         }
 
-        return 0;
+        return verdict;
     }
 
     private static float Get(Vector3 v, int axis) => axis == 0 ? v.X : axis == 1 ? v.Y : v.Z;

@@ -858,6 +858,10 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     [ObservableProperty]
     private CityModel _city = CityModel.Empty(CityMode.Hotspots);
 
+    // The city's performance panel; off unless asked for.
+    [ObservableProperty]
+    private bool _showCityFps;
+
     // Whether the city's heights and colours come from git history.
     public bool CityHasHistory => _history is not null;
 
