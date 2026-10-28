@@ -483,6 +483,7 @@
                                   Model="{Binding Analysis.City}"
                                   SearchText="{Binding Analysis.SearchText}"
                                   OpenCommand="{Binding Analysis.OpenCityFileCommand}"
+                                  RevealCommand="{Binding Analysis.RevealCityBlockCommand}"
                                   ShowFps="{Binding Analysis.ShowCityFps}" />
                 <DockPanel x:Name="TreeArea" ClipToBounds="True" IsVisible="{Binding Analysis.IsTreeView}">
                     <!-- Right-click the header (or the button in its corner) to pick columns. -->

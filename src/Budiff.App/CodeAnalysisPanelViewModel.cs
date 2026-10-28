@@ -885,6 +885,24 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             ? _openFile(Path.Combine(_root, block.RelativePath.Replace('/', Path.DirectorySeparatorChar)), block.RelativePath)
             : Task.CompletedTask;
 
+    // Opens the system file manager on a path (tests replace it).
+    internal Action<string> RevealInFileManager { get; set; } = FileManager.Reveal;
+
+    // Right-click -> Show in Explorer, from a tree row or a city building.
+    [RelayCommand]
+    private void RevealRow(CodeAnalysisRow? row) => ShowInFileManager(row?.RelativePath);
+
+    [RelayCommand]
+    private void RevealCityBlock(CityBlock? block) => ShowInFileManager(block?.RelativePath);
+
+    private void ShowInFileManager(string? relativePath)
+    {
+        if (relativePath is not null && _root.Length > 0)
+        {
+            RevealInFileManager(Path.Combine(_root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+        }
+    }
+
     partial void OnIsCityViewChanged(bool value) => RebuildCity();
 
     partial void OnCityModeChanged(CityMode value) => RebuildCity();

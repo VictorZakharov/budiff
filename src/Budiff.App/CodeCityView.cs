@@ -35,6 +35,10 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
     public static readonly StyledProperty<ICommand?> OpenCommandProperty =
         AvaloniaProperty.Register<CodeCityView, ICommand?>(nameof(OpenCommand));
 
+    // Right-click (without dragging) on a building or a district.
+    public static readonly StyledProperty<ICommand?> RevealCommandProperty =
+        AvaloniaProperty.Register<CodeCityView, ICommand?>(nameof(RevealCommand));
+
     public static readonly StyledProperty<bool> ShowFpsProperty =
         AvaloniaProperty.Register<CodeCityView, bool>(nameof(ShowFps));
 
@@ -102,6 +106,7 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
     private bool _panning;
     private Point? _pointer;
     private CityBlock? _hover;
+    private CityBlock? _menuBlock;
 
     private bool _flying;
     private bool _frameRequested;
@@ -135,6 +140,15 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
         get => GetValue(OpenCommandProperty);
         set => SetValue(OpenCommandProperty, value);
     }
+
+    public ICommand? RevealCommand
+    {
+        get => GetValue(RevealCommandProperty);
+        set => SetValue(RevealCommandProperty, value);
+    }
+
+    // The last building menu opened (tests).
+    internal ContextMenu? BlockMenu { get; private set; }
 
     // The performance panel (the "Show FPS" box).
     public bool ShowFps
@@ -263,6 +277,10 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
 
     // The building or district under the pointer (for tests and the card).
     internal CityBlock? Hovered => _hover;
+
+    // What is drawn highlighted: the right-clicked block while its menu is
+    // open (the pointer has left for the menu), else the hovered one.
+    internal CityBlock? Highlighted => _menuBlock ?? _hover;
 
     internal IReadOnlyCollection<CityBlock>? Matches => _matches;
 
@@ -632,7 +650,21 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
 
         _pressed = false;
         e.Pointer.Capture(null);
-        if (!_dragged && !_panning && PickNear(e.GetPosition(this)) is { } hit)
+        if (!_dragged && e.InitialPressMouseButton == MouseButton.Right && PickNear(e.GetPosition(this)) is { } picked
+            && RevealCommand is { } reveal && reveal.CanExecute(picked))
+        {
+            // A right-click that did not pan: the building's menu.
+            BlockMenu = FileManager.Menu(() => reveal.Execute(picked));
+            _menuBlock = picked;
+            BlockMenu.Closed += (_, _) =>
+            {
+                _menuBlock = null;
+                InvalidateVisual();
+            };
+            BlockMenu.Open(this);
+            InvalidateVisual();
+        }
+        else if (!_dragged && !_panning && PickNear(e.GetPosition(this)) is { } hit)
         {
             if (hit.IsFile)
             {
@@ -994,7 +1026,11 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
         _hud.Labels = 0;
         DrawLabels(context, model);
         DrawLegend(context, model, bounds);
-        if (_hover is { } hover)
+        if (_menuBlock is { } menuBlock)
+        {
+            DrawHighlight(context, menuBlock);
+        }
+        else if (_hover is { } hover)
         {
             DrawHighlight(context, hover);
             if (_pointer is { } pointer)
