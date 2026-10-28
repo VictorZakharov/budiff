@@ -19,9 +19,8 @@ public sealed class DiffViewSnapshotTests
         var model = new DiffViewModel { Title = "New.cs", Extension = ".cs" };
         model.SetDiff(LineDiff.Compute(string.Empty, "public class New\n{\n    public int Value => 1;\n}\n"));
         Assert.True(model.IsSinglePane);
-        // All change rows are Added; the missing old side leaves one blank
-        // Unchanged row (empty line pairing), which single-pane tolerates.
-        Assert.All(model.Rows.Where(r => r.Kind != DiffKind.Unchanged), r => Assert.Equal(DiffKind.Added, r.Kind));
+        // Every row is Added - the missing old side contributes no lines.
+        Assert.All(model.Rows, r => Assert.Equal(DiffKind.Added, r.Kind));
 
         // A wholly new file is not painted green line by line: a solid green
         // gutter bar marks its lines instead.

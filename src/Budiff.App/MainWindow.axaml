@@ -104,6 +104,31 @@
             <Setter Property="FontSize" Value="12" />
             <Setter Property="Margin" Value="8,0,8,0" />
         </Style>
+        <!-- The folder summary in the diff pane: count chips and the N / M / D
+             letter of each changed file. -->
+        <Style Selector="Border.summaryStat">
+            <Setter Property="Background" Value="{DynamicResource BudiffToolbarBrush}" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Padding" Value="10,5" />
+        </Style>
+        <Style Selector="Border.summaryStat TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontFamily" Value="Cascadia Code,Consolas,monospace" />
+        </Style>
+        <Style Selector="TextBlock.changeLetter">
+            <Setter Property="FontFamily" Value="Cascadia Code,Consolas,monospace" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="#E2C08D" />
+        </Style>
+        <Style Selector="TextBlock.changeLetter.new">
+            <Setter Property="Foreground" Value="#6BB36B" />
+        </Style>
+        <Style Selector="TextBlock.changeLetter.deleted">
+            <Setter Property="Foreground" Value="#D16969" />
+        </Style>
         <Style Selector="ProgressBar.size">
             <Setter Property="Height" Value="7" />
             <Setter Property="MinHeight" Value="7" />
@@ -338,13 +363,18 @@
                                         </Button>
                                     </TextBox.InnerRightContent>
                                 </TextBox>
+                                <!-- Scanning: a thin bar along the filter box's bottom edge.
+                                     It takes no toolbar width, so a narrow pane never has
+                                     controls painting over each other; the summary line
+                                     says "Scanning...". -->
+                                <ProgressBar x:Name="ScanIndicator"
+                                             IsIndeterminate="True"
+                                             IsVisible="{Binding Analysis.IsScanning}"
+                                             IsHitTestVisible="False"
+                                             MinHeight="2" Height="2"
+                                             VerticalAlignment="Bottom"
+                                             Margin="3,0,3,1" />
                             </Grid>
-
-                            <StackPanel Grid.Column="3" x:Name="ScanIndicator" Margin="10,0,0,0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"
-                                        IsVisible="{Binding Analysis.IsScanning}">
-                                <ProgressBar IsIndeterminate="True" Width="72" Height="6" />
-                                <TextBlock Text="Scanning" Foreground="{DynamicResource BudiffMutedTextBrush}" />
-                            </StackPanel>
                         </Grid>
 
                         <!-- The summary wraps in a narrow pane instead of running off its
@@ -733,7 +763,7 @@
                                               IsVisible="{Binding Diff.ShowDiffOptions}"
                                               IsChecked="{Binding Diff.CollapseUnchanged, Mode=TwoWay}" />
                                     <MenuItem Header="Wrap lines" ToggleType="CheckBox"
-                                              IsVisible="{Binding Diff.ShowWrapOption}"
+                                              IsVisible="{Binding ShowWrapToggle}"
                                               IsChecked="{Binding Diff.WrapLines, Mode=TwoWay}" />
                                     <MenuItem Header="Preview" ToggleType="CheckBox"
                                               IsVisible="{Binding Diff.CanPreview}"
@@ -828,7 +858,7 @@
                                   VerticalAlignment="Center"
                                   Foreground="{DynamicResource BudiffTextBrush}" />
                         <CheckBox Grid.Column="8"
-                                  IsVisible="{Binding Diff.ShowWrapOption}"
+                                  IsVisible="{Binding ShowWrapToggle}"
                                   IsChecked="{Binding Diff.WrapLines, Mode=TwoWay}"
                                   Content="Wrap"
                                   FontSize="12"
@@ -860,7 +890,87 @@
                                TextTrimming="CharacterEllipsis"
                                Foreground="{DynamicResource BudiffMutedTextBrush}" />
                 </Border>
-                <budiff:DiffView DataContext="{Binding Diff}" ShowHeader="False" />
+                <Grid>
+                    <Panel IsVisible="{Binding !IsFolderSummary}">
+                        <budiff:DiffView DataContext="{Binding Diff}" ShowHeader="False" />
+                    </Panel>
+
+                    <!-- A folder picked while the pane is open: its changes in
+                         the period, from the bird's-eye's own numbers. -->
+                    <!-- Visibility on a wrapper: inside, the context is the summary. -->
+                    <Panel IsVisible="{Binding IsFolderSummary}">
+                    <ScrollViewer x:Name="FolderSummaryPanel"
+                                  DataContext="{Binding FolderSummary}"
+                                  Background="{DynamicResource BudiffEditorBackgroundBrush}"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="18,14,18,18" Spacing="12">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <app:AppIcon Kind="FolderOutline" Width="18" Height="18" VerticalAlignment="Center"
+                                             Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                                <TextBlock Text="{Binding Path}" FontSize="15" FontWeight="SemiBold"
+                                           TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource BudiffTextBrush}" />
+                            </StackPanel>
+                            <TextBlock FontSize="12" Foreground="{DynamicResource BudiffMutedTextBrush}" TextWrapping="Wrap">
+                                <Run Text="{Binding Period}" />
+                                <Run Text=" - " />
+                                <Run Text="{Binding FilesText}" />
+                            </TextBlock>
+
+                            <TextBlock IsVisible="{Binding IsEmpty}" Text="{Binding EmptyText}" Margin="0,8,0,0"
+                                       FontSize="13" FontFamily="Cascadia Code,Consolas,monospace"
+                                       Foreground="{DynamicResource BudiffMutedTextBrush}" />
+
+                            <WrapPanel IsVisible="{Binding HasChanges}" Orientation="Horizontal" ItemSpacing="8" LineSpacing="8">
+                                <Border Classes="summaryStat">
+                                    <TextBlock Text="{Binding ChangedText}" Foreground="{DynamicResource BudiffTextBrush}" FontWeight="SemiBold" />
+                                </Border>
+                                <Border Classes="summaryStat">
+                                    <TextBlock Text="{Binding NewText}" Foreground="#6BB36B" />
+                                </Border>
+                                <Border Classes="summaryStat">
+                                    <TextBlock Text="{Binding ModifiedText}" Foreground="#E2C08D" />
+                                </Border>
+                                <Border Classes="summaryStat">
+                                    <TextBlock Text="{Binding DeletedText}" Foreground="#D16969" />
+                                </Border>
+                                <Border Classes="summaryStat">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="{Binding LinesAddedText}" Foreground="#6BB36B" />
+                                        <TextBlock Text="{Binding LinesRemovedText}" Foreground="#D16969" />
+                                        <TextBlock Text="lines" Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                                    </StackPanel>
+                                </Border>
+                            </WrapPanel>
+
+                            <StackPanel IsVisible="{Binding HasChanges}" Spacing="2">
+                                <TextBlock Text="CHANGED FILES" FontSize="11" FontWeight="SemiBold" Margin="0,4,0,4"
+                                           Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                                <ItemsControl ItemsSource="{Binding ChangedFiles}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid ColumnDefinitions="22,*,Auto,Auto" Height="22" ColumnSpacing="6">
+                                                <TextBlock Classes="changeLetter" Text="{Binding Letter}" ToolTip.Tip="{Binding ChangeTip}"
+                                                           Classes.new="{Binding IsNew}" Classes.deleted="{Binding IsDeleted}" />
+                                                <TextBlock Grid.Column="1" Text="{Binding Path}" FontSize="12" VerticalAlignment="Center"
+                                                           TextTrimming="CharacterEllipsis" Foreground="{DynamicResource BudiffTextBrush}"
+                                                           ToolTip.Tip="{Binding Path}" />
+                                                <TextBlock Grid.Column="2" Classes="num" MinWidth="44" TextAlignment="Right"
+                                                           Text="{Binding AddedText}" Foreground="#6BB36B" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="3" Classes="num" MinWidth="44" TextAlignment="Right"
+                                                           Text="{Binding RemovedText}" Foreground="#D16969" VerticalAlignment="Center" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock IsVisible="{Binding HasMore}" Text="{Binding MoreText}" FontSize="12" Margin="28,4,0,0"
+                                           Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                    </Panel>
+                </Grid>
             </DockPanel>
         </Grid>
     </Grid>

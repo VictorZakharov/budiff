@@ -58,6 +58,8 @@ public sealed partial class MainWindow : Window
         DataContext = _viewModel;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         _viewModel.Analysis.PropertyChanging += OnAnalysisPropertyChanging;
+        _viewModel.Analysis.TreeMerging += OnTreeMerging;
+        _viewModel.Analysis.TreeMerged += OnTreeMerged;
         _viewModel.Analysis.PropertyChanged += OnAnalysisPropertyChanged;
         _viewModel.Analysis.PickPullRequest = PickPullRequestAsync;
         // "Pull request..." may be next: start the list its picker opens on.
@@ -77,6 +79,8 @@ public sealed partial class MainWindow : Window
         AddColumnMenuItems();
 
         AnalysisTree.ContextRequested += OnAnalysisContextRequested;
+        AnalysisTree.SelectionChanged += OnAnalysisSelectionChanged;
+        AnalysisTree.AddHandler(KeyDownEvent, OnAnalysisTreeKeyDown, RoutingStrategies.Bubble, handledEventsToo: false);
 
         CodeCity.Gpu = CityGl;
         if (Environment.GetEnvironmentVariable("BUDIFF_CITY_BENCH") is { Length: > 0 } benchReport)
@@ -347,8 +351,11 @@ public sealed partial class MainWindow : Window
         {
             ApplyFilterSplit();
         }
-        else if (e.PropertyName is nameof(CodeAnalysisPanelViewModel.Roots) && _reselectPath is { } path)
+        else if (e.PropertyName is nameof(CodeAnalysisPanelViewModel.Roots) && _reselectPath is { } path
+            && _viewModel.Analysis.Roots.Count > 0)
         {
+            // (An empty tree - a refresh still scanning - keeps the path for
+            // the rows that follow.)
             // A rebuild (sort, filter, grouping, period) makes new rows: select
             // the same path again and scroll it into view once the tree has
             // taken the new items.
@@ -391,10 +398,61 @@ public sealed partial class MainWindow : Window
         viewer.Offset = new Vector(viewer.Offset.X, Math.Clamp(y, 0, max));
     }
 
+    // A refresh merges new numbers into the rows shown; rows coming or going
+    // above the selected one would push it along, so it is held at the same
+    // height in the tree's viewport.
+    private (CodeAnalysisRow Row, double Y)? _heldRow;
+
+    private void OnTreeMerging()
+    {
+        _heldRow = AnalysisTree.SelectedItem is CodeAnalysisRow row && RowTop(row) is { } y ? (row, y) : null;
+    }
+
+    private void OnTreeMerged()
+    {
+        if (_heldRow is not { } held)
+        {
+            return;
+        }
+
+        _heldRow = null;
+        global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            if (!ReferenceEquals(AnalysisTree.SelectedItem, held.Row) || TreeViewer() is not { } viewer)
+            {
+                return;
+            }
+
+            AnalysisTree.UpdateLayout();
+            if (RowTop(held.Row) is { } y && Math.Abs(y - held.Y) > 0.5)
+            {
+                var max = Math.Max(0, viewer.Extent.Height - viewer.Viewport.Height);
+                viewer.Offset = new Vector(viewer.Offset.X, Math.Clamp(viewer.Offset.Y + y - held.Y, 0, max));
+            }
+        }, global::Avalonia.Threading.DispatcherPriority.Loaded);
+    }
+
+    private ScrollViewer? TreeViewer()
+        => global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(AnalysisTree).OfType<ScrollViewer>().FirstOrDefault();
+
+    // Where the row's own line sits in the tree's viewport; null when it has
+    // no container (scrolled far away).
+    private double? RowTop(CodeAnalysisRow row)
+    {
+        if (AnalysisTree.TreeContainerFromItem(row) is not Control item || TreeViewer() is not { } viewer)
+        {
+            return null;
+        }
+
+        var line = global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(item)
+            .OfType<Control>().FirstOrDefault(c => c.Name == "PART_LayoutRoot") ?? item;
+        return line.TranslatePoint(default, viewer)?.Y;
+    }
+
     // The tree is about to get new rows: remember which one was selected.
     private void OnAnalysisPropertyChanging(object? sender, PropertyChangingEventArgs e)
     {
-        if (e.PropertyName is nameof(CodeAnalysisPanelViewModel.Roots))
+        if (e.PropertyName is nameof(CodeAnalysisPanelViewModel.Roots) && _viewModel.Analysis.Roots.Count > 0)
         {
             _reselectPath = (AnalysisTree.SelectedItem as CodeAnalysisRow)?.RelativePath;
         }
@@ -599,6 +657,90 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // While the diff pane is open it follows the bird's-eye selection (keys,
+    // type-to-search, a click). A lone move shows at once; a burst (a held
+    // arrow key) shows its first row, then only the row it ends on, once the
+    // keys have paused for FollowDelayMs - so a key repeat never queues a
+    // load per row it passes. Focus stays in the tree. (The pause is a
+    // delayed post, not a DispatcherTimer: the headless test dispatcher never
+    // ticks those.)
+    // (Settable for tests: a slow machine can take longer than 120 ms between
+    // two simulated key presses, which then are not one burst.)
+    internal int FollowDelayMs { get; set; } = 120;
+    private CodeAnalysisRow? _followRow;
+    private bool _followPending;
+    private int _followGen;
+    private long _lastFollow = long.MinValue / 2;
+
+    private void OnAnalysisSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (!_viewModel.IsDiffOpen || AnalysisTree.SelectedItem is not CodeAnalysisRow row)
+        {
+            CancelFollow();
+            return;
+        }
+
+        _followRow = row;
+        if (!_followPending && Environment.TickCount64 - _lastFollow >= FollowDelayMs)
+        {
+            FollowPendingSelection();
+            return;
+        }
+
+        // Each move restarts the pause.
+        _followPending = true;
+        var gen = ++_followGen;
+        var ui = global::Avalonia.Threading.Dispatcher.UIThread;
+        _ = Task.Delay(FollowDelayMs).ContinueWith(
+            _ => ui.Post(() =>
+            {
+                if (gen == _followGen)
+                {
+                    FollowPendingSelection();
+                }
+            }),
+            TaskScheduler.Default);
+    }
+
+    private void FollowPendingSelection()
+    {
+        var row = _followRow;
+        CancelFollow();
+        _lastFollow = Environment.TickCount64;
+        if (row is not null && ReferenceEquals(AnalysisTree.SelectedItem, row))
+        {
+            _viewModel.FollowSelection(row);
+        }
+    }
+
+    private void CancelFollow()
+    {
+        _followGen++;
+        _followPending = false;
+        _followRow = null;
+    }
+
+    // Enter on a file row opens it (pane open or not), like a double-click.
+    // async void: a throw here is an unhandled process crash, so guard.
+    private async void OnAnalysisTreeKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || e.KeyModifiers != KeyModifiers.None || AnalysisTree.SelectedItem is not CodeAnalysisRow { IsFile: true } row)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        try
+        {
+            CancelFollow();
+            await _viewModel.Analysis.OpenAsync(row);
+        }
+        catch (Exception ex)
+        {
+            _viewModel.StatusText = "Open file failed: " + ex.Message;
+        }
+    }
+
     // The last row menu opened (tests).
     internal ContextMenu? RowMenu { get; private set; }
 
@@ -613,7 +755,13 @@ public sealed partial class MainWindow : Window
 
         e.Handled = true;
         AnalysisTree.SelectedItem = row;
-        RowMenu = FileManager.Menu(() => _viewModel.Analysis.RevealRowCommand.Execute(row));
+        var analysis = _viewModel.Analysis;
+        RowMenu = row.IsFile
+            ? FileManager.Menu(() => analysis.RevealRowCommand.Execute(row))
+            : FileManager.Menu(
+                () => analysis.RevealRowCommand.Execute(row),
+                () => analysis.SetSubtreeExpanded(row, expanded: true),
+                () => analysis.SetSubtreeExpanded(row, expanded: false));
         RowMenu.Open(e.Source as Control ?? AnalysisTree);
     }
 

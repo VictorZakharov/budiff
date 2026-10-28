@@ -41,15 +41,33 @@ internal static class FileManager
         using var process = Process.Start(start);
     }
 
-    // The right-click menu of a tree row or a city building.
-    public static ContextMenu Menu(Action reveal)
+    public const string ExpandAllLabel = "Expand all";
+    public const string CollapseAllLabel = "Collapse all";
+
+    // The right-click menu of a tree row or a city building. A tree folder
+    // (expand / collapse given) also expands or collapses everything under it.
+    public static ContextMenu Menu(Action reveal, Action? expandAll = null, Action? collapseAll = null)
+    {
+        var items = new List<Control>();
+        if (expandAll is not null && collapseAll is not null)
+        {
+            items.Add(Item(ExpandAllLabel, AppIconKind.ChevronDown, expandAll));
+            items.Add(Item(CollapseAllLabel, AppIconKind.ChevronRight, collapseAll));
+            items.Add(new Separator());
+        }
+
+        items.Add(Item(RevealLabel, AppIconKind.FolderOpenOutline, reveal));
+        return new ContextMenu { ItemsSource = items };
+    }
+
+    private static MenuItem Item(string header, AppIconKind icon, Action click)
     {
         var item = new MenuItem
         {
-            Header = RevealLabel,
-            Icon = new AppIcon { Kind = AppIconKind.FolderOpenOutline, Width = 14, Height = 14 },
+            Header = header,
+            Icon = new AppIcon { Kind = icon, Width = 14, Height = 14 },
         };
-        item.Click += (_, _) => reveal();
-        return new ContextMenu { ItemsSource = new[] { item } };
+        item.Click += (_, _) => click();
+        return item;
     }
 }

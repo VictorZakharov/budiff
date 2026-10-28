@@ -33,6 +33,8 @@ public sealed class AnalysisSortTests
         var tree = window.FindControl<TreeView>("AnalysisTree")!;
 
         // Biggest first (Lines, descending): the row is on screen; click it.
+        vm.Analysis.SortCommand.Execute(AnalysisSortKey.Lines);
+        UiSnapshot.Pump();
         var row = vm.Analysis.Roots.First(r => r.Name == name);
         if (path != name)
         {

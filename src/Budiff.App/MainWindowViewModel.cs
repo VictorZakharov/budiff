@@ -23,8 +23,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private GitRepositoryScope? _scope;
     private ChangedFile? _openDiffFile;
     private DiffTarget? _openTarget;
-    private int _blameGen;
-    private string? _blamePath;
+
+    // The folder whose summary the diff pane shows (its tree path).
+    private string? _folderPath;
 
     // The open file (as the bird's-eye named it) and the files a preview
     // link was followed from - with where each was scrolled to - for Back.
@@ -80,6 +81,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
             {
                 OnPropertyChanged(nameof(ShowCompareOptions));
             }
+            else if (e.PropertyName == nameof(DiffViewModel.ShowWrapOption))
+            {
+                OnPropertyChanged(nameof(ShowWrapToggle));
+            }
         };
         _ = LoadAsync(startPath, gitRoot);
     }
@@ -130,6 +135,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     // period-aligned base, or entering / leaving / switching a pull request.
     private void OnHistoryApplied()
     {
+        _periodStart = null;
         OnPropertyChanged(nameof(ShowCompareOptions));
         if (_scope is not null)
         {
@@ -169,9 +175,69 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
     }
 
-    // Base + Working tree: meaningless for a plain file view, and a pull
-    // request fixes both ends (its merge-base and its head).
-    public bool ShowCompareOptions => Diff.ShowDiffOptions && AppliedRange is null;
+    // Base + Working tree: meaningless for a plain file view or a folder
+    // summary, and a pull request fixes both ends (its merge-base and its head).
+    public bool ShowCompareOptions => Diff.ShowDiffOptions && AppliedRange is null && FolderSummary is null;
+
+    // A folder picked in the bird's-eye while the diff pane is open: the pane
+    // shows this instead of a file diff (null while a file shows).
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsFolderSummary))]
+    [NotifyPropertyChangedFor(nameof(ShowCompareOptions))]
+    [NotifyPropertyChangedFor(nameof(ShowWrapToggle))]
+    private FolderSummary? _folderSummary;
+
+    public bool IsFolderSummary => FolderSummary is not null;
+
+    // Wrap belongs to a line diff, not to a folder summary.
+    public bool ShowWrapToggle => Diff.ShowWrapOption && FolderSummary is null;
+
+    // The bird's-eye selection moved while the diff pane is open: the pane
+    // follows it - a file's diff, or a folder's summary. The file already
+    // showing stays as it is (a re-selection after a sort, or the follow-up
+    // of a double-click that already opened it).
+    internal void FollowSelection(CodeAnalysisRow row)
+    {
+        if (!IsDiffOpen)
+        {
+            return;
+        }
+
+        if (row.IsFile)
+        {
+            if (FolderSummary is null && _openFile is { } open && open.RelativePath == row.RelativePath)
+            {
+                return;
+            }
+
+            _ = Analysis.OpenAsync(row);
+            return;
+        }
+
+        ShowFolder(row);
+    }
+
+    private void ShowFolder(CodeAnalysisRow row)
+    {
+        RememberScroll();
+        ClearLinkTrail();
+        _openFile = null;
+        _openDiffFile = null;
+        _openTarget = null;
+        var summary = Analysis.SummarizeFolder(row);
+        _folderPath = row.RelativePath;
+        Diff.CancelLoad();
+        Diff.Title = summary.Path;
+        Diff.Subtitle = "folder summary - " + summary.Period;
+        Diff.Extension = string.Empty;
+        Diff.FileName = string.Empty;
+
+        // Nothing to compare line by line: drops Blame and Collapse unchanged
+        // from the toolbar (the next file sets it back).
+        Diff.IsFileView = true;
+        Diff.SetPlaceholder(summary.PlainText);
+        FolderSummary = summary;
+    }
 
     // What a pull request or a commit compares; null in a time period.
     private (string BaseSha, string HeadSha)? AppliedRange
@@ -433,6 +499,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         IsDiffOpen = false;
         IsTreeCollapsed = false;
+        FolderSummary = null;
         _openDiffFile = null;
         _openTarget = null;
         RememberScroll();
@@ -463,28 +530,18 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _openTarget = target;
         Diff.Subtitle = DescribeTarget(target);
         Diff.PreviewContext = PreviewContext(target);
-        Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(scope, file, target));
-        BeginLoadBlame(scope, file, target);
+        Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(scope, file, target), LoadBlameAsync(scope, file, target));
     }
 
     // Blame describes the diff's BASE side; when the base has nothing to blame
     // (empty-tree base, or the file is absent there - a wholly new file), fall
     // back to blaming the NEW side: those lines were still written by someone.
-    // Loaded off-thread after the diff so the rows never wait on it; the
-    // generation guard drops a stale result when the user has already moved on.
-    // Reloading the SAME file keeps the old values on screen until the fresh
-    // ones land, so a working-tree/base toggle does not blank the column.
-    private void BeginLoadBlame(GitRepositoryScope scope, ChangedFile file, DiffTarget target)
+    // Loaded off-thread alongside the diff; the diff view swaps the old file's
+    // rows and blame for the new ones together (or fills in a slow blame
+    // after), and drops a result the reader has already moved on from.
+    private static Task<BlameSides> LoadBlameAsync(GitRepositoryScope scope, ChangedFile file, DiffTarget target)
     {
-        var gen = ++_blameGen;
-        if (!string.Equals(_blamePath, file.Path, StringComparison.OrdinalIgnoreCase))
-        {
-            Diff.SetBlame(null);
-        }
-
-        _blamePath = file.Path;
-        var ui = global::Avalonia.Threading.Dispatcher.UIThread;
-        _ = Task.Run(() =>
+        return Task.Run(() =>
         {
             // The new side's blame names who last changed each line as it is
             // now - so its newest matches the file's Recency; the old side's
@@ -510,13 +567,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             var heat = BlameHeat.For(oldBlame.Concat(newBlame), line => Age(line.When, now));
             var oldEntries = Entries(oldBlame, heat);
             var newEntries = newBlame.Count > 0 ? Entries(newBlame, heat) : null;
-            ui.Post(() =>
-            {
-                if (gen == _blameGen)
-                {
-                    Diff.SetBlame(oldEntries, newEntries);
-                }
-            });
+            return new BlameSides(oldEntries, newEntries);
         });
     }
 
@@ -618,7 +669,17 @@ public sealed partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        CloseDiff();
+        // What the diff pane shows stays through the reload and comes back
+        // fresh: the same file (where it was scrolled to) or the same
+        // folder's summary.
+        var file = IsDiffOpen && FolderSummary is null ? _openFile : null;
+        var folder = IsDiffOpen && FolderSummary is not null ? _folderPath : null;
+        if (file is null && folder is null)
+        {
+            CloseDiff();
+        }
+
+        _periodStart = null;
         StatusText = "Loading bird's-eye...";
         try
         {
@@ -631,7 +692,24 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
 
         StatusText = DescribeStatus();
-        Diff.SetPlaceholder("Select a file in the bird's-eye to open its diff.");
+        if (file is { } open)
+        {
+            ShowFile(open.FullPath, open.RelativePath);
+        }
+        else if (folder is not null && Analysis.FindShown(folder) is { IsFile: false } row)
+        {
+            ShowFolder(row);
+        }
+        else
+        {
+            // (A file the load itself opened - a commit's - stays open.)
+            if (folder is not null)
+            {
+                CloseDiff();
+            }
+
+            Diff.SetPlaceholder("Select a file in the bird's-eye to open its diff.");
+        }
     }
 
     [RelayCommand]
@@ -684,12 +762,28 @@ public sealed partial class MainWindowViewModel : ObservableObject
             : new DiffTarget(baseRef, "HEAD", HeadIsWorkingTree: false);
     }
 
+    // Asking git costs a process (~70 ms, on the UI thread) and every file
+    // opened asks, so the answer holds until the period is applied again or
+    // the bird's-eye reloads - the diff then compares against the same
+    // commit the bird's-eye counted from.
+    private (string Root, int Days, string Sha)? _periodStart;
+
     private string ResolvePeriodStart()
     {
         var days = Analysis.AppliedSinceDays;
-        return _scope is null || days is not > 0
-            ? "HEAD"
-            : GitHistory.FindWindowBaseCommit(_scope.ScopeRoot, days.Value);
+        if (_scope is null || days is not > 0)
+        {
+            return "HEAD";
+        }
+
+        if (_periodStart is { } cached && cached.Root == _scope.ScopeRoot && cached.Days == days.Value)
+        {
+            return cached.Sha;
+        }
+
+        var sha = GitHistory.FindWindowBaseCommit(_scope.ScopeRoot, days.Value);
+        _periodStart = (_scope.ScopeRoot, days.Value, sha);
+        return sha;
     }
 
     // The header line: the PR being shown, else what a drill-in compares.
@@ -817,14 +911,13 @@ public sealed partial class MainWindowViewModel : ObservableObject
         var reopened = _openFile?.FullPath == fullPath;
         RememberScroll();
         _openFile = (fullPath, relativePath);
+        FolderSummary = null;
         Diff.RestoreScroll = restore ?? (reopened ? null : _scrollByFile.GetValueOrDefault(fullPath) ?? DiffScrollSpot.Start);
         if (_scope is null)
         {
             // No git: nothing to compare against - show the file as it is now.
             _openDiffFile = null;
             _openTarget = null;
-            _blameGen++;
-            _blamePath = null;
             Diff.SetBlame(null);
             Diff.Title = relativePath.Replace('\\', '/');
             Diff.Subtitle = "current file - no git";
@@ -845,8 +938,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             _openTarget = target;
             Diff.PreviewContext = PreviewContext(target);
             IsDiffOpen = true;
-            Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(_scope, file, target));
-            BeginLoadBlame(_scope, file, target);
+            Diff.BeginLoad(() => GitRepositoryReader.LoadDiff(_scope, file, target), LoadBlameAsync(_scope, file, target));
         }
 
         // Only once the load is under way (its result lands later, on this
