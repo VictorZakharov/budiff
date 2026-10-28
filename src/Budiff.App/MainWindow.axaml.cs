@@ -30,6 +30,9 @@ public sealed partial class MainWindow : Window
     private DiffWindow? _floatWindow;
     private GridLength _diffWidth = new(640);
 
+    // The selected tree row's path while Roots is being replaced.
+    private string? _reselectPath;
+
     public MainWindow()
         : this(Environment.CurrentDirectory, gitRoot: false)
     {
@@ -54,6 +57,7 @@ public sealed partial class MainWindow : Window
         };
         DataContext = _viewModel;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        _viewModel.Analysis.PropertyChanging += OnAnalysisPropertyChanging;
         _viewModel.Analysis.PropertyChanged += OnAnalysisPropertyChanged;
         _viewModel.Analysis.PickPullRequest = PickPullRequestAsync;
         // "Pull request..." may be next: start the list its picker opens on.
@@ -342,6 +346,57 @@ public sealed partial class MainWindow : Window
             or nameof(CodeAnalysisPanelViewModel.Authors))
         {
             ApplyFilterSplit();
+        }
+        else if (e.PropertyName is nameof(CodeAnalysisPanelViewModel.Roots) && _reselectPath is { } path)
+        {
+            // A rebuild (sort, filter, grouping, period) makes new rows: select
+            // the same path again and scroll it into view once the tree has
+            // taken the new items.
+            _reselectPath = null;
+            global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                if (_viewModel.Analysis.FindShown(path) is not { } row)
+                {
+                    return;
+                }
+
+                AnalysisTree.SelectedItem = row;
+                CenterTreeRow(row);
+            }, global::Avalonia.Threading.DispatcherPriority.Loaded);
+        }
+    }
+
+    // Scrolls the tree so the row sits in the middle of the viewport (as far
+    // as the list allows at its ends). An expanded folder's container spans
+    // its children too, so the row's own header line is what gets centred.
+    private void CenterTreeRow(CodeAnalysisRow row)
+    {
+        AnalysisTree.UpdateLayout();
+        if (AnalysisTree.TreeContainerFromItem(row) is not Control item)
+        {
+            return;
+        }
+
+        var line = global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(item)
+            .OfType<Control>().FirstOrDefault(c => c.Name == "PART_LayoutRoot") ?? item;
+        var viewer = global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(AnalysisTree).OfType<ScrollViewer>().FirstOrDefault();
+        if (viewer is null || line.TranslatePoint(default, viewer) is not { } at)
+        {
+            item.BringIntoView();
+            return;
+        }
+
+        var y = viewer.Offset.Y + at.Y + line.Bounds.Height / 2 - viewer.Viewport.Height / 2;
+        var max = Math.Max(0, viewer.Extent.Height - viewer.Viewport.Height);
+        viewer.Offset = new Vector(viewer.Offset.X, Math.Clamp(y, 0, max));
+    }
+
+    // The tree is about to get new rows: remember which one was selected.
+    private void OnAnalysisPropertyChanging(object? sender, PropertyChangingEventArgs e)
+    {
+        if (e.PropertyName is nameof(CodeAnalysisPanelViewModel.Roots))
+        {
+            _reselectPath = (AnalysisTree.SelectedItem as CodeAnalysisRow)?.RelativePath;
         }
     }
 

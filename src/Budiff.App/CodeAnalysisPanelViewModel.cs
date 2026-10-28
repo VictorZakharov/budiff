@@ -658,6 +658,23 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         return trail[^1];
     }
 
+    // The row at exactly relativePath when the tree shows it as is: every
+    // folder above it expanded and nothing on the way hidden by search. Unlike
+    // Reveal it expands nothing; null otherwise.
+    internal CodeAnalysisRow? FindShown(string relativePath)
+    {
+        var trail = FindTrail(Roots, relativePath);
+        if (trail is null
+            || !string.Equals(trail[^1].RelativePath, relativePath, StringComparison.OrdinalIgnoreCase)
+            || trail.Any(r => !r.IsSearchVisible)
+            || trail.SkipLast(1).Any(r => !r.IsExpanded))
+        {
+            return null;
+        }
+
+        return trail[^1];
+    }
+
     private static List<CodeAnalysisRow>? FindTrail(IEnumerable<CodeAnalysisRow> rows, string path)
     {
         if (path.Length == 0)
