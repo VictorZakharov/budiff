@@ -11,16 +11,17 @@ using Xunit;
 namespace Budiff.Avalonia.Tests;
 
 // Sorting the bird's-eye tree by a column header keeps the selected row
-// selected and scrolls it into view - on the real window.
+// selected and scrolls it to the middle of the view - on the real window.
 public sealed class AnalysisSortTests
 {
     // Picked with the mouse and sorted from the header, like the user does:
-    // a file, a folder, and a file inside an expanded folder.
+    // a file, a folder, and a file inside an expanded folder. Each lands well
+    // inside the list after the sort, so it can be centred.
     [AvaloniaTheory]
-    [InlineData("item59.cs")]
-    [InlineData("pack59")]
-    [InlineData("pack59/code.cs")]
-    public void Sort_KeepsTheClickedRowSelectedAndInView(string path)
+    [InlineData("item50.cs")]
+    [InlineData("pack50")]
+    [InlineData("pack50/code.cs")]
+    public void Sort_KeepsTheClickedRowSelectedAndCentred(string path)
     {
         var name = path.Split('/')[0];
         var root = BuildFolder("budiff-sort-" + path.Replace('/', '-'));
@@ -63,6 +64,18 @@ public sealed class AnalysisSortTests
         Assert.Equal(path, selected.RelativePath);
         Assert.Same(vm.Analysis.FindShown(path), selected);
         Assert.True(IsInView(tree, selected), "the selected row is scrolled out of view after the sort");
+        var offCentre = OffCentre(tree, selected);
+        Assert.True(Math.Abs(offCentre) <= 24, $"the selected row is {offCentre:0} px off the middle of the view");
+    }
+
+    // How far the row's own line sits from the middle of the viewport.
+    private static double OffCentre(TreeView tree, CodeAnalysisRow row)
+    {
+        var item = (Control)tree.TreeContainerFromItem(row)!;
+        var line = item.GetVisualDescendants().OfType<Control>().First(c => c.Name == "PART_LayoutRoot");
+        var viewer = tree.GetVisualDescendants().OfType<ScrollViewer>().First();
+        var at = global::Avalonia.VisualExtensions.TranslatePoint(line, new global::Avalonia.Point(0, line.Bounds.Height / 2), viewer)!.Value;
+        return at.Y - viewer.Viewport.Height / 2;
     }
 
     // Realized, and inside the tree's scroll viewport.

@@ -361,10 +361,34 @@ public sealed partial class MainWindow : Window
                 }
 
                 AnalysisTree.SelectedItem = row;
-                AnalysisTree.UpdateLayout();
-                AnalysisTree.TreeContainerFromItem(row)?.BringIntoView();
+                CenterTreeRow(row);
             }, global::Avalonia.Threading.DispatcherPriority.Loaded);
         }
+    }
+
+    // Scrolls the tree so the row sits in the middle of the viewport (as far
+    // as the list allows at its ends). An expanded folder's container spans
+    // its children too, so the row's own header line is what gets centred.
+    private void CenterTreeRow(CodeAnalysisRow row)
+    {
+        AnalysisTree.UpdateLayout();
+        if (AnalysisTree.TreeContainerFromItem(row) is not Control item)
+        {
+            return;
+        }
+
+        var line = global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(item)
+            .OfType<Control>().FirstOrDefault(c => c.Name == "PART_LayoutRoot") ?? item;
+        var viewer = global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(AnalysisTree).OfType<ScrollViewer>().FirstOrDefault();
+        if (viewer is null || line.TranslatePoint(default, viewer) is not { } at)
+        {
+            item.BringIntoView();
+            return;
+        }
+
+        var y = viewer.Offset.Y + at.Y + line.Bounds.Height / 2 - viewer.Viewport.Height / 2;
+        var max = Math.Max(0, viewer.Extent.Height - viewer.Viewport.Height);
+        viewer.Offset = new Vector(viewer.Offset.X, Math.Clamp(y, 0, max));
     }
 
     // The tree is about to get new rows: remember which one was selected.
