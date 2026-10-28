@@ -91,9 +91,10 @@ public sealed partial class MainWindow : Window
 
     // A developer benchmark of the code city (BUDIFF_CITY_BENCH=<report file>,
     // optional BUDIFF_CITY_BENCH_SIZE=<width>x<height> in pixels): the window
-    // opens off-screen and never takes focus, shows the city of the start
-    // folder, orbits it for 8 s after a 2 s warm-up, writes the performance
-    // report, and closes.
+    // shows the city of the start folder, orbits it for 8 s after a 2 s
+    // warm-up, writes the performance report, and closes. It asks to open
+    // off-screen without focus, but Windows can still show and activate it,
+    // so run it only when nobody is using the desktop.
     private void StartCityBench(string reportPath)
     {
         ShowActivated = false;
