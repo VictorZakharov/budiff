@@ -210,6 +210,27 @@ public sealed class GitRepositoryReaderTests
         Assert.Contains("Binary", GitRepositoryReader.LoadDiff(scope, file, new DiffTarget(first, second, HeadIsWorkingTree: false)).Placeholder, StringComparison.OrdinalIgnoreCase);
     }
 
+    // Files open one after another through one warm git process; a commit
+    // made in between still counts - HEAD is what it is now, not then.
+    [Fact]
+    public void LoadDiff_AfterACommit_ComparesWithTheNewHead()
+    {
+        using var repo = TempRepo.Create();
+        repo.Write("a.txt", "one\n");
+        repo.Commit("initial", "Alice");
+        repo.Write("a.txt", "one\ntwo\n");
+        var scope = GitRepositoryReader.Open(repo.Root, gitRoot: true);
+        var file = Assert.Single(GitRepositoryReader.ListChanges(scope, DiffTarget.WorkingTree).Files);
+
+        var before = GitRepositoryReader.LoadDiff(scope, file, DiffTarget.WorkingTree).Rows!;
+        Assert.Contains(before, row => row.Kind == DiffKind.Added && row.NewText == "two");
+
+        repo.Commit("two", "Alice");
+        var after = GitRepositoryReader.LoadDiff(scope, file, DiffTarget.WorkingTree).Rows!;
+        Assert.All(after, row => Assert.Equal(DiffKind.Unchanged, row.Kind));
+        GitRepositoryReader.ReleaseSharedGit();
+    }
+
     // Branches for the pickers: local first (the current one marked), then
     // remote ones, never the symbolic origin/HEAD; then recent commits.
     [Fact]

@@ -160,7 +160,7 @@ public static class GitRepositoryReader
     // is not a commit (e.g. the empty tree) or the file is not tracked there.
     public static IReadOnlyList<BlameLineInfo?> LoadBlame(GitRepositoryScope scope, string path, string baseRef)
     {
-        var commit = WithGit(scope.RepositoryRoot, git => git.ResolveCommit(baseRef), null);
+        var commit = WithSharedGit(scope.RepositoryRoot, git => git.ResolveCommit(baseRef), null);
         return commit is null
             ? Array.Empty<BlameLineInfo?>()
             : GitHistory.BlameFile(scope.RepositoryRoot, path.Replace('\\', '/'), commit);
@@ -168,7 +168,7 @@ public static class GitRepositoryReader
 
     public static DiffResult LoadDiff(GitRepositoryScope scope, ChangedFile file, DiffTarget target)
     {
-        return WithGit(scope.RepositoryRoot, git =>
+        return WithSharedGit(scope.RepositoryRoot, git =>
         {
             var oldBlob = git.ReadBlob(git.ResolveCommit(target.BaseRef), RepoPath(file.OldPath ?? file.Path));
             var newBlob = target.HeadIsWorkingTree
@@ -553,6 +553,58 @@ public static class GitRepositoryReader
         catch
         {
             return fullPath;
+        }
+    }
+
+    // One warm `git cat-file` for opening files one after another: starting
+    // git costs ~50 ms on Windows, more than reading a file's two sides.
+    // Calls take turns (an instance serves one thread at a time); another
+    // repository, or a failure, replaces it. After SharedGitIdle without a
+    // call it quits - a git process started in the repository keeps that
+    // folder from being deleted or renamed on Windows.
+    private static readonly TimeSpan SharedGitIdle = TimeSpan.FromSeconds(30);
+    private static readonly object SharedGitLock = new();
+    private static readonly Timer SharedGitReaper = new(_ => ReleaseSharedGit());
+    private static GitObjects? _sharedGit;
+    private static string? _sharedGitRoot;
+
+    private static T WithSharedGit<T>(string repositoryRoot, Func<GitObjects, T> body, T fallback)
+    {
+        lock (SharedGitLock)
+        {
+            try
+            {
+                if (_sharedGit is null || !string.Equals(_sharedGitRoot, repositoryRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    _sharedGit?.Dispose();
+                    _sharedGit = new GitObjects(repositoryRoot);
+                    _sharedGitRoot = repositoryRoot;
+                }
+
+                return body(_sharedGit);
+            }
+            catch
+            {
+                // A dead or confused process: start afresh next time.
+                _sharedGit?.Dispose();
+                _sharedGit = null;
+                return fallback;
+            }
+            finally
+            {
+                SharedGitReaper.Change(SharedGitIdle, Timeout.InfiniteTimeSpan);
+            }
+        }
+    }
+
+    // Lets the warm git process go now (it starts again on the next call).
+    internal static void ReleaseSharedGit()
+    {
+        lock (SharedGitLock)
+        {
+            _sharedGit?.Dispose();
+            _sharedGit = null;
+            _sharedGitRoot = null;
         }
     }
 

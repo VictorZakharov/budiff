@@ -134,6 +134,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     // period-aligned base, or entering / leaving / switching a pull request.
     private void OnHistoryApplied()
     {
+        _periodStart = null;
         OnPropertyChanged(nameof(ShowCompareOptions));
         if (_scope is not null)
         {
@@ -685,6 +686,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
 
         CloseDiff();
+        _periodStart = null;
         StatusText = "Loading bird's-eye...";
         try
         {
@@ -750,12 +752,28 @@ public sealed partial class MainWindowViewModel : ObservableObject
             : new DiffTarget(baseRef, "HEAD", HeadIsWorkingTree: false);
     }
 
+    // Asking git costs a process (~70 ms, on the UI thread) and every file
+    // opened asks, so the answer holds until the period is applied again or
+    // the bird's-eye reloads - the diff then compares against the same
+    // commit the bird's-eye counted from.
+    private (string Root, int Days, string Sha)? _periodStart;
+
     private string ResolvePeriodStart()
     {
         var days = Analysis.AppliedSinceDays;
-        return _scope is null || days is not > 0
-            ? "HEAD"
-            : GitHistory.FindWindowBaseCommit(_scope.ScopeRoot, days.Value);
+        if (_scope is null || days is not > 0)
+        {
+            return "HEAD";
+        }
+
+        if (_periodStart is { } cached && cached.Root == _scope.ScopeRoot && cached.Days == days.Value)
+        {
+            return cached.Sha;
+        }
+
+        var sha = GitHistory.FindWindowBaseCommit(_scope.ScopeRoot, days.Value);
+        _periodStart = (_scope.ScopeRoot, days.Value, sha);
+        return sha;
     }
 
     // The header line: the PR being shown, else what a drill-in compares.
