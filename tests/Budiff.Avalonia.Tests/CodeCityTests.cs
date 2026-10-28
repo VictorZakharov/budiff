@@ -39,6 +39,15 @@ public sealed class CodeCityTests
         Assert.Equal("Renderer.cs", hottest.Name);
         UiSnapshot.Capture(window, "city-hotspots");
 
+        // The switches hug their buttons: stretched to the taller Show FPS
+        // box, they left a gap above and below the highlighted segment.
+        foreach (var name in new[] { "CityModeSwitch", "ViewSwitch" })
+        {
+            var box = window.FindControl<Border>(name)!;
+            var segment = global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(box).OfType<Button>().First();
+            Assert.Equal(box.Bounds.Height - 2, segment.Bounds.Height, 0.5);
+        }
+
         vm.Analysis.ShowAgeCommand.Execute(null);
         UiSnapshot.Pump();
         Assert.Equal(CityMode.Age, vm.Analysis.City.Mode);
@@ -69,10 +78,20 @@ public sealed class CodeCityTests
         var hovered = city.Hovered;
         Assert.NotNull(hovered);
         Assert.True(hovered!.IsFile);
-        var card = CodeCityView.Describe(hovered, hasHistory: true, CityMode.Hotspots).ToList();
+        var card = CodeCityView.Describe(hovered, vm.Analysis.City).ToList();
         Assert.Contains(card, line => line.Any(r => r.Text.Contains("commit", StringComparison.Ordinal)));
         Assert.Contains(card, line => line.Any(r => r.Tone == CodeCityView.CardTone.Added && r.Text.StartsWith('+')));
-        Assert.Contains(card, line => line.Any(r => r.Tone == CodeCityView.CardTone.Heat && r.Text.StartsWith("Hotspot #", StringComparison.Ordinal)));
+
+        // The card says why the building has its shape: what sets each
+        // dimension, and how it ranks in the city.
+        string Says(string label) => string.Concat(card.Single(line => line[0].Text == label + " ").Select(r => r.Text));
+        Assert.Matches(@"^Height [\d,]+ changed lines?, (taller than \d+% of files|among the (tallest|shortest))$", Says("Height"));
+        Assert.Matches(@"^Footprint [\d,]+ lines?, ", Says("Footprint"));
+        Assert.Contains(card, line => line.Any(r => r.Tone == CodeCityView.CardTone.Heat && r.Text.StartsWith("hotspot #", StringComparison.Ordinal)));
+        var district = CodeCityView.Describe(vm.Analysis.City.Districts[0], vm.Analysis.City).ToList();
+        Assert.Contains(district, line => line[0].Text == "Area ");
+        var renderer = vm.Analysis.City.Buildings.Single(b => b.Name == "Renderer.cs");
+        Assert.EndsWith("among the tallest", string.Concat(CodeCityView.Describe(renderer, vm.Analysis.City).Single(l => l[0].Text == "Height ").Select(r => r.Text)), StringComparison.Ordinal);
         UiSnapshot.Capture(window, "city-hover");
 
         window.MouseDown(at, MouseButton.Left);
@@ -256,7 +275,7 @@ public sealed class CodeCityTests
             for (var x = 20; x < city.Bounds.Width - 20; x += 7)
             {
                 var hit = city.PickNear(new global::Avalonia.Point(x, y));
-                if (hit is null || hit.IsFile)
+                if (hit is null || hit.IsFile || city.LabelBoxes.Any(l => l.Inflate(2).Contains(new global::Avalonia.Point(x, y))))
                 {
                     continue;
                 }
@@ -275,6 +294,30 @@ public sealed class CodeCityTests
 
         Assert.True(checkedPoints > 50);
         Assert.Empty(wrong);
+    }
+
+    // A district's label sits just inside its nearest (lowest) edge, not at
+    // its centre, where it seemed to name a sub-folder.
+    [Fact]
+    public void DistrictLabel_SitsInsideTheNearestVisibleEdge()
+    {
+        // A plinth seen from above and in front: the c2-c3 edge is lowest.
+        var (c0, c1, c2, c3) = (new global::Avalonia.Point(300, 100), new global::Avalonia.Point(700, 100), new global::Avalonia.Point(800, 500), new global::Avalonia.Point(200, 500));
+        var center = new global::Avalonia.Point(500, 300);
+        var at = CodeCityView.EdgeAnchor(c0, c1, c2, c3, center, new global::Avalonia.Rect(0, 0, 1000, 800), inset: 12)!.Value;
+        Assert.Equal(500, at.X, 1);
+        Assert.Equal(488, at.Y, 1);
+
+        // The front edge runs off the right of the view: the label follows
+        // its visible part.
+        at = CodeCityView.EdgeAnchor(c0, c1, c2, c3, center, new global::Avalonia.Rect(0, 0, 600, 800), inset: 12)!.Value;
+        Assert.InRange(at.X, 380, 420);
+        Assert.InRange(at.Y, 480, 495);
+
+        // The front edge is below the view: the next edge that shows wins.
+        at = CodeCityView.EdgeAnchor(c0, c1, c2, c3, center, new global::Avalonia.Rect(0, 0, 1000, 450), inset: 12)!.Value;
+        Assert.True(at.Y < 450 && (at.X < 300 || at.X > 700), $"{at}");
+        Assert.Null(CodeCityView.EdgeAnchor(c0, c1, c2, c3, center, new global::Avalonia.Rect(2000, 0, 100, 100), inset: 12));
     }
 
     // Opt-in: the city of a real repository (BUDIFF_CITY_REPO), for review.

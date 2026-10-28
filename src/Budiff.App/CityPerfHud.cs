@@ -37,11 +37,21 @@ internal sealed class CityPerfHud
     private static readonly Typeface Bold = new(FontFamily.Default, FontStyle.Normal, FontWeight.Bold);
 
     private readonly Stopwatch _clock = Stopwatch.StartNew();
-    private readonly Queue<(double At, double Interval, double Cost)> _frames = new();
+    private readonly Queue<(double At, double Interval, double Cost, long Allocated)> _frames = new();
     private readonly List<double> _avgHistory = new();
     private readonly List<double> _lowHistory = new();
     private double _lastFrame = -1;
     private double _lastSample;
+
+    // The city draws only when something changes, so a pause in the user's
+    // input is not a slow frame. An interval counts when the frame was asked
+    // for soon after the last one (a drag, a hover) or was already scheduled
+    // by the animation loop (flying, WASD, the benchmark).
+    private const double PromptMs = 50;
+    private double _requestedAt = -1;
+    private bool _scheduled;
+    private bool _nextScheduled;
+    private long _lastAllocated;
 
     // Where the panel was last drawn (for the click); empty when hidden.
     public Rect Bounds { get; private set; }
@@ -60,6 +70,8 @@ internal sealed class CityPerfHud
         _avgHistory.Clear();
         _lowHistory.Clear();
         _lastFrame = -1;
+        _requestedAt = -1;
+        _scheduled = _nextScheduled = false;
         Redraws = CachedFrames = 0;
         _gcAtReset = (GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2));
         _allocatedAtReset = GC.GetTotalAllocatedBytes();
@@ -84,16 +96,35 @@ internal sealed class CityPerfHud
 
     public int Labels { get; set; }
 
+    // A redraw was asked for (the first ask since the last frame counts).
+    public void Requested()
+    {
+        if (_requestedAt < 0)
+        {
+            _requestedAt = _clock.Elapsed.TotalMilliseconds;
+        }
+    }
+
+    // The animation loop has the next frame booked.
+    public void Scheduled() => _scheduled = true;
+
     // One drawn frame and what it cost on the UI thread.
     public void Frame(double costMs)
     {
         var now = _clock.Elapsed.TotalMilliseconds;
-        if (_lastFrame >= 0 && now - _lastFrame < IdleGapMs)
+        var allocated = GC.GetTotalAllocatedBytes();
+        var busy = _nextScheduled
+            || (_requestedAt >= 0 && _requestedAt - _lastFrame < PromptMs && now - _lastFrame < IdleGapMs * 4);
+        if (_lastFrame >= 0 && busy)
         {
-            _frames.Enqueue((now, now - _lastFrame, costMs));
+            _frames.Enqueue((now, now - _lastFrame, costMs, allocated - _lastAllocated));
         }
 
         _lastFrame = now;
+        _lastAllocated = allocated;
+        _requestedAt = -1;
+        _nextScheduled = _scheduled;
+        _scheduled = false;
         while (_frames.Count > 0 && _frames.Peek().At < now - WindowMs)
         {
             _frames.Dequeue();
@@ -144,12 +175,15 @@ internal sealed class CityPerfHud
             $"{N(Redraws)} redraws, {N(CachedFrames)} frames from cache",
             $"{N(Faces)} faces, {N(Pairs)} sibling pairs ordered, {N(Labels)} labels",
             $"Longest frame gap {F(_frames.Select(f => f.Interval).DefaultIfEmpty().Max(), 1)} ms, longest frame cost {F(_frames.Select(f => f.Cost).DefaultIfEmpty().Max(), 1)} ms",
-            $"GC since reset: gen0 {GC.CollectionCount(0) - _gcAtReset.Item1}, gen1 {GC.CollectionCount(1) - _gcAtReset.Item2}, gen2 {GC.CollectionCount(2) - _gcAtReset.Item3}, {(GC.GetTotalAllocatedBytes() - _allocatedAtReset) / Math.Max(1, _frames.Count) / 1024.0:0} KB allocated per frame",
+            $"GC since the panel opened: gen0 {GC.CollectionCount(0) - _gcAtReset.Item1}, gen1 {GC.CollectionCount(1) - _gcAtReset.Item2}, gen2 {GC.CollectionCount(2) - _gcAtReset.Item3}; {AllocatedPerFrame() / 1024.0:0} KB allocated per frame in the last 15 s",
         };
         lines.AddRange(details);
         lines.Add($"{(IsNativeAot ? "NativeAOT" : "JIT")} build, .NET {Environment.Version}, {System.Runtime.InteropServices.RuntimeInformation.OSDescription}");
         return string.Join(Environment.NewLine, lines);
     }
+
+    // What the counted frames allocated, on average.
+    private double AllocatedPerFrame() => _frames.Count == 0 ? 0 : _frames.Average(f => (double)f.Allocated);
 
     private (double Avg, double P95) Costs()
     {

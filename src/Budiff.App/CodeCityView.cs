@@ -297,6 +297,18 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
         {
             UpdateMatches();
         }
+        else if (change.Property == ShowFpsProperty && ShowFps)
+        {
+            _hud.Reset();
+        }
+    }
+
+    // Every redraw goes through here, so the FPS panel can tell a busy
+    // stretch from the user simply pausing.
+    private new void InvalidateVisual()
+    {
+        _hud.Requested();
+        base.InvalidateVisual();
     }
 
     private void OnModelChanged(bool resetCamera)
@@ -488,6 +500,7 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
         }
 
         _frameRequested = true;
+        _hud.Scheduled();
         top.RequestAnimationFrame(OnAnimationFrame);
     }
 
@@ -1292,6 +1305,9 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
     // District names on their plinths, the top level always, deeper ones when
     // there is room.
     private readonly List<Rect> _taken = new();
+
+    // The labels and name tags drawn last frame (for tests).
+    internal IReadOnlyList<Rect> LabelBoxes => _taken;
     private List<CityBlock> _labelCandidates = new();
 
     private bool Place(Rect rect)
@@ -1334,34 +1350,41 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
             }
         }
 
-        // Map-style labels: on top of everything in a dark pill at the
-        // district's centre, so orbiting never hides them behind a building.
-        // Top-level folders always get one; deeper ones when their plinth is
-        // big enough on screen. Bigger districts win a clash, so the choice
-        // stays steady while the camera moves.
+        // Map-style labels: on top of everything in a dark pill, so orbiting
+        // never hides them behind a building. A pill sits just inside the
+        // district's own front edge, like a street sign at its kerb: at the
+        // centre of a big district it landed among its sub-folders and seemed
+        // to name one of them. Top-level folders always get one; deeper ones
+        // when their plinth is big enough on screen. Bigger districts win a
+        // clash, so the choice stays steady while the camera moves.
+        var view = new Rect(Bounds.Size);
         foreach (var district in _labelCandidates)
         {
             var f = district.Footprint;
             var y = (float)district.Top;
-            if (Project(new Vector3((float)(f.X + f.Width / 2), y, (float)(f.Y + f.Height / 2))) is not { } center)
+            if (Project(new Vector3((float)f.X, y, (float)f.Y)) is not { } c0
+                || Project(new Vector3((float)(f.X + f.Width), y, (float)f.Y)) is not { } c1
+                || Project(new Vector3((float)(f.X + f.Width), y, (float)(f.Y + f.Height))) is not { } c2
+                || Project(new Vector3((float)f.X, y, (float)(f.Y + f.Height))) is not { } c3)
             {
                 continue;
             }
 
-            if (district.Level > 0)
+            if (district.Level > 0 && Distance(c0, c2) < 120 * district.Level)
             {
-                var corner = Project(new Vector3((float)f.X, y, (float)f.Y));
-                var opposite = Project(new Vector3((float)(f.X + f.Width), y, (float)(f.Y + f.Height)));
-                if (corner is null || opposite is null || Distance(corner.Value, opposite.Value) < 120 * district.Level)
-                {
-                    continue;
-                }
+                continue;
             }
 
             var top = district.Level == 0;
             var text = Text(district.Name, top ? 12.5 : 11, top ? TextBrush : LabelBrush, top);
-            var pill = new Rect(center.X - text.Width / 2 - 6, center.Y - text.Height / 2 - 2, text.Width + 12, text.Height + 4);
-            if (!new Rect(Bounds.Size).Contains(pill.Center) || !Place(pill))
+            var center = new Point((c0.X + c1.X + c2.X + c3.X) / 4, (c0.Y + c1.Y + c2.Y + c3.Y) / 4);
+            if (EdgeAnchor(c0, c1, c2, c3, center, view.Deflate(text.Width / 2 + 8), text.Height / 2 + 5) is not { } at)
+            {
+                continue;
+            }
+
+            var pill = new Rect(at.X - text.Width / 2 - 6, at.Y - text.Height / 2 - 2, text.Width + 12, text.Height + 4);
+            if (!Place(pill))
             {
                 continue;
             }
@@ -1370,6 +1393,67 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
             context.DrawText(text, pill.TopLeft + new Point(6, 2));
             _hud.Labels++;
         }
+    }
+
+    // Where a district's label goes: the middle of the visible part of its
+    // nearest edge on screen (the lowest), moved inward by `inset` so the
+    // pill sits on the district. The next edges are tried when that one is
+    // off screen; null when no edge shows.
+    internal static Point? EdgeAnchor(Point c0, Point c1, Point c2, Point c3, Point center, Rect view, double inset)
+    {
+        Span<(Point A, Point B)> edges = stackalloc (Point, Point)[] { (c0, c1), (c1, c2), (c2, c3), (c3, c0) };
+        edges.Sort((p, q) => (q.A.Y + q.B.Y).CompareTo(p.A.Y + p.B.Y));
+        foreach (var (a, b) in edges)
+        {
+            if (Clip(a, b, view) is not var (t0, t1))
+            {
+                continue;
+            }
+
+            var mid = a + (b - a) * ((t0 + t1) / 2);
+            var inward = center - mid;
+            var length = Math.Sqrt(inward.X * inward.X + inward.Y * inward.Y);
+            if (length < 1e-3)
+            {
+                continue;
+            }
+
+            return mid + inward * (Math.Min(inset, length / 2) / length);
+        }
+
+        return null;
+    }
+
+    // The part of segment a-b inside the view, as parameters 0..1
+    // (Liang-Barsky); null when none of it is.
+    private static (double, double)? Clip(Point a, Point b, Rect view)
+    {
+        double t0 = 0, t1 = 1;
+        var d = b - a;
+        bool Edge(double p, double q)
+        {
+            if (Math.Abs(p) < 1e-9)
+            {
+                return q >= 0;
+            }
+
+            var r = q / p;
+            if (p < 0)
+            {
+                t0 = Math.Max(t0, r);
+            }
+            else
+            {
+                t1 = Math.Min(t1, r);
+            }
+
+            return t0 <= t1;
+        }
+
+        return Edge(-d.X, a.X - view.Left) && Edge(d.X, view.Right - a.X)
+            && Edge(-d.Y, a.Y - view.Top) && Edge(d.Y, view.Bottom - a.Y) && t1 - t0 > 1e-6
+            ? (t0, t1)
+            : null;
     }
 
     private static void DrawLegend(DrawingContext context, CityModel model, Rect bounds)
@@ -1436,7 +1520,7 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
             new() { Text(block.Name, 13, TextBrush, bold: true) },
             new() { Text(block.RelativePath, 11, MutedBrush) },
         };
-        foreach (var detail in Describe(block, Model!.HasHistory, Model.Mode))
+        foreach (var detail in Describe(block, Model!))
         {
             lines.Add(detail.Select(run => Text(run.Text, 12, BrushOf(run.Tone))).ToList());
         }
@@ -1493,9 +1577,105 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
     internal readonly record struct CardRun(string Text, CardTone Tone);
 
     // The card's detail lines (each a row of coloured runs) for a building or
-    // district. The mode's own measure takes the building's colour: the
-    // hotspot rank in Hotspots, the last change in Age.
-    internal static IEnumerable<CardRun[]> Describe(CityBlock block, bool hasHistory, CityMode mode)
+    // district: the facts, then why it has its shape - what sets the height,
+    // the footprint and the colour, and how it ranks among the city's files.
+    internal static IEnumerable<CardRun[]> Describe(CityBlock block, CityModel model)
+    {
+        foreach (var line in Facts(block, model.HasHistory))
+        {
+            yield return line;
+        }
+
+        foreach (var line in Shape(block, model))
+        {
+            yield return line;
+        }
+    }
+
+    private static IEnumerable<CardRun[]> Shape(CityBlock block, CityModel model)
+    {
+        var node = block.Node;
+        if (!block.IsFile)
+        {
+            yield return new[]
+            {
+                new CardRun("Area ", CardTone.Muted),
+                new CardRun($"all {Count(node.Lines.Total, "line")} inside", CardTone.Text),
+                new CardRun(", a step up per folder level", CardTone.Muted),
+            };
+            yield break;
+        }
+
+        // The same measures CityLayout builds from.
+        Func<AnalysisNode, double> heightOf = !model.HasHistory ? n => n.Lines.Total
+            : model.Mode == CityMode.Hotspots ? n => n.Churn
+            : n => n.CommitCount;
+        var height = !model.HasHistory ? Count(node.Lines.Total, "line")
+            : model.Mode == CityMode.Hotspots ? Count(node.Churn, "changed line")
+            : Count(node.CommitCount, "commit");
+        yield return new[]
+        {
+            new CardRun("Height ", CardTone.Muted),
+            new CardRun(height, CardTone.Text),
+            new CardRun(Rank(model, block, heightOf, "taller", "tallest", "shortest"), CardTone.Muted),
+        };
+        yield return new[]
+        {
+            new CardRun("Footprint ", CardTone.Muted),
+            new CardRun(Count(node.Lines.Total, "line"), CardTone.Text),
+            new CardRun(Rank(model, block, n => n.Lines.Total, "bigger", "biggest", "smallest"), CardTone.Muted),
+        };
+
+        if (!model.HasHistory)
+        {
+            yield break;
+        }
+
+        if (block.Heat < 0)
+        {
+            yield return new[] { new CardRun("Colour ", CardTone.Muted), new CardRun("grey: no change in the period", CardTone.Muted) };
+        }
+        else if (model.Mode == CityMode.Hotspots)
+        {
+            yield return new[]
+            {
+                new CardRun("Colour ", CardTone.Muted),
+                new CardRun($"hotspot #{block.HotspotRank} of {model.HotspotCount:N0}", CardTone.Heat),
+                new CardRun(" (churn × size)", CardTone.Muted),
+            };
+        }
+        else
+        {
+            var age = CodeAnalysisPanelViewModel.Age(node.LastChanged, DateTimeOffset.Now);
+            yield return new[]
+            {
+                new CardRun("Colour ", CardTone.Muted),
+                new CardRun("changed " + age + " ago", CardTone.Heat),
+                new CardRun(" (brighter = newer)", CardTone.Muted),
+            };
+        }
+    }
+
+    // ", taller than 92% of files" - the share of the city's files this one beats.
+    private static string Rank(CityModel model, CityBlock block, Func<AnalysisNode, double> measure, string more, string most, string least)
+    {
+        var mine = measure(block.Node);
+        var below = 0;
+        foreach (var building in model.Buildings)
+        {
+            if (measure(building.Node) < mine)
+            {
+                below++;
+            }
+        }
+
+        var share = (int)(100.0 * below / Math.Max(1, model.Buildings.Count - 1));
+        return share >= 99 ? $", among the {most}"
+            : share == 0 ? $", among the {least}"
+            : $", {more} than {share}% of files";
+    }
+
+    private static IEnumerable<CardRun[]> Facts(CityBlock block, bool hasHistory)
     {
         var node = block.Node;
         var size = node.IsBinary ? "binary" : Count(node.Lines.Total, "line");
@@ -1540,16 +1720,8 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
         }
 
         var age = CodeAnalysisPanelViewModel.Age(node.LastChanged, DateTimeOffset.Now);
-        Add(age.Length > 0 ? "changed " + age + " ago" : "no change in period",
-            age.Length == 0 ? CardTone.Muted : block.IsFile && mode == CityMode.Age ? CardTone.Heat : CardTone.Text);
+        Add(age.Length > 0 ? "changed " + age + " ago" : "no change in period", age.Length == 0 ? CardTone.Muted : CardTone.Text);
         yield return git.ToArray();
-        if (block.HotspotRank > 0)
-        {
-            yield return new[]
-            {
-                new CardRun($"Hotspot #{block.HotspotRank}", mode == CityMode.Hotspots ? CardTone.Heat : CardTone.Text),
-            };
-        }
     }
 
     private static string Count(long value, string noun)

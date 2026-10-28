@@ -369,7 +369,8 @@
                                         BorderBrush="{DynamicResource BudiffBorderBrush}"
                                         BorderThickness="1"
                                         CornerRadius="4"
-                                        ClipToBounds="True">
+                                        ClipToBounds="True"
+                                        VerticalAlignment="Center">
                                     <StackPanel Orientation="Horizontal">
                                         <Button Classes="segment left small"
                                                 Classes.active="{Binding Analysis.IsCityHotspots}"
@@ -387,7 +388,8 @@
                                         BorderBrush="{DynamicResource BudiffBorderBrush}"
                                         BorderThickness="1"
                                         CornerRadius="4"
-                                        ClipToBounds="True">
+                                        ClipToBounds="True"
+                                        VerticalAlignment="Center">
                                     <StackPanel Orientation="Horizontal">
                                         <Button Classes="segment left small"
                                                 Classes.active="{Binding Analysis.IsTreeView}"
