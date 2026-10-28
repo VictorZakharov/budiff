@@ -41,6 +41,9 @@ internal sealed class ScrollRestore
     private readonly Func<double?>? _target;
     private bool _putting;
 
+    // Whether a layout pass has run since the restore started (see Put).
+    private bool _seenLayout;
+
     // Offsets already moved to while following _target, how far each left
     // the target once laid out, and how many moves that may take (see Put).
     private readonly List<double> _tried = new();
@@ -126,6 +129,7 @@ internal sealed class ScrollRestore
             return;
         }
 
+        _seenLayout = true;
         Put();
     }
 
@@ -148,6 +152,19 @@ internal sealed class ScrollRestore
     {
         // Moving the scroller re-enters through ScrollChanged.
         if (_putting)
+        {
+            return;
+        }
+
+        // Follow a row only once the new rows have been laid out. Brought into
+        // view before that, the row is placed by a guessed row height: in a
+        // pane not laid out yet (the diff pane just opening) its text wraps
+        // at no width and every row is guessed tall; at 125% a row is 22 or
+        // 23 device pixels and the guess is a little off. The panel keeps
+        // that guess for the rows above the target, so a short file opened
+        // past its imports - with nothing to scroll - showed line 1 below a
+        // blank band. LayoutUpdated runs the first Put.
+        if (_target is not null && !_seenLayout)
         {
             return;
         }
