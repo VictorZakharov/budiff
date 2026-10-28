@@ -30,6 +30,9 @@ public sealed partial class MainWindow : Window
     private DiffWindow? _floatWindow;
     private GridLength _diffWidth = new(640);
 
+    // The selected tree row's path while Roots is being replaced.
+    private string? _reselectPath;
+
     public MainWindow()
         : this(Environment.CurrentDirectory, gitRoot: false)
     {
@@ -54,6 +57,7 @@ public sealed partial class MainWindow : Window
         };
         DataContext = _viewModel;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        _viewModel.Analysis.PropertyChanging += OnAnalysisPropertyChanging;
         _viewModel.Analysis.PropertyChanged += OnAnalysisPropertyChanged;
         _viewModel.Analysis.PickPullRequest = PickPullRequestAsync;
         // "Pull request..." may be next: start the list its picker opens on.
@@ -342,6 +346,33 @@ public sealed partial class MainWindow : Window
             or nameof(CodeAnalysisPanelViewModel.Authors))
         {
             ApplyFilterSplit();
+        }
+        else if (e.PropertyName is nameof(CodeAnalysisPanelViewModel.Roots) && _reselectPath is { } path)
+        {
+            // A rebuild (sort, filter, grouping, period) makes new rows: select
+            // the same path again and scroll it into view once the tree has
+            // taken the new items.
+            _reselectPath = null;
+            global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                if (_viewModel.Analysis.FindShown(path) is not { } row)
+                {
+                    return;
+                }
+
+                AnalysisTree.SelectedItem = row;
+                AnalysisTree.UpdateLayout();
+                AnalysisTree.TreeContainerFromItem(row)?.BringIntoView();
+            }, global::Avalonia.Threading.DispatcherPriority.Loaded);
+        }
+    }
+
+    // The tree is about to get new rows: remember which one was selected.
+    private void OnAnalysisPropertyChanging(object? sender, PropertyChangingEventArgs e)
+    {
+        if (e.PropertyName is nameof(CodeAnalysisPanelViewModel.Roots))
+        {
+            _reselectPath = (AnalysisTree.SelectedItem as CodeAnalysisRow)?.RelativePath;
         }
     }
 
