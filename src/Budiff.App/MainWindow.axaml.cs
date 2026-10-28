@@ -349,8 +349,11 @@ public sealed partial class MainWindow : Window
         {
             ApplyFilterSplit();
         }
-        else if (e.PropertyName is nameof(CodeAnalysisPanelViewModel.Roots) && _reselectPath is { } path)
+        else if (e.PropertyName is nameof(CodeAnalysisPanelViewModel.Roots) && _reselectPath is { } path
+            && _viewModel.Analysis.Roots.Count > 0)
         {
+            // (An empty tree - a refresh still scanning - keeps the path for
+            // the rows that follow.)
             // A rebuild (sort, filter, grouping, period) makes new rows: select
             // the same path again and scroll it into view once the tree has
             // taken the new items.
@@ -396,7 +399,7 @@ public sealed partial class MainWindow : Window
     // The tree is about to get new rows: remember which one was selected.
     private void OnAnalysisPropertyChanging(object? sender, PropertyChangingEventArgs e)
     {
-        if (e.PropertyName is nameof(CodeAnalysisPanelViewModel.Roots))
+        if (e.PropertyName is nameof(CodeAnalysisPanelViewModel.Roots) && _viewModel.Analysis.Roots.Count > 0)
         {
             _reselectPath = (AnalysisTree.SelectedItem as CodeAnalysisRow)?.RelativePath;
         }
@@ -697,7 +700,13 @@ public sealed partial class MainWindow : Window
 
         e.Handled = true;
         AnalysisTree.SelectedItem = row;
-        RowMenu = FileManager.Menu(() => _viewModel.Analysis.RevealRowCommand.Execute(row));
+        var analysis = _viewModel.Analysis;
+        RowMenu = row.IsFile
+            ? FileManager.Menu(() => analysis.RevealRowCommand.Execute(row))
+            : FileManager.Menu(
+                () => analysis.RevealRowCommand.Execute(row),
+                () => analysis.SetSubtreeExpanded(row, expanded: true),
+                () => analysis.SetSubtreeExpanded(row, expanded: false));
         RowMenu.Open(e.Source as Control ?? AnalysisTree);
     }
 

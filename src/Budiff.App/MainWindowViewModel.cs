@@ -26,6 +26,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private int _blameGen;
     private string? _blamePath;
 
+    // The folder whose summary the diff pane shows (its tree path).
+    private string? _folderPath;
+
     // The open file (as the bird's-eye named it) and the files a preview
     // link was followed from - with where each was scrolled to - for Back.
     private (string FullPath, string RelativePath)? _openFile;
@@ -226,6 +229,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _blameGen++;
         _blamePath = null;
         var summary = Analysis.SummarizeFolder(row);
+        _folderPath = row.RelativePath;
         Diff.CancelLoad();
         Diff.Title = summary.Path;
         Diff.Subtitle = "folder summary - " + summary.Period;
@@ -685,7 +689,16 @@ public sealed partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        CloseDiff();
+        // What the diff pane shows stays through the reload and comes back
+        // fresh: the same file (where it was scrolled to) or the same
+        // folder's summary.
+        var file = IsDiffOpen && FolderSummary is null ? _openFile : null;
+        var folder = IsDiffOpen && FolderSummary is not null ? _folderPath : null;
+        if (file is null && folder is null)
+        {
+            CloseDiff();
+        }
+
         _periodStart = null;
         StatusText = "Loading bird's-eye...";
         try
@@ -699,7 +712,24 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
 
         StatusText = DescribeStatus();
-        Diff.SetPlaceholder("Select a file in the bird's-eye to open its diff.");
+        if (file is { } open)
+        {
+            ShowFile(open.FullPath, open.RelativePath);
+        }
+        else if (folder is not null && Analysis.FindShown(folder) is { IsFile: false } row)
+        {
+            ShowFolder(row);
+        }
+        else
+        {
+            // (A file the load itself opened - a commit's - stays open.)
+            if (folder is not null)
+            {
+                CloseDiff();
+            }
+
+            Diff.SetPlaceholder("Select a file in the bird's-eye to open its diff.");
+        }
     }
 
     [RelayCommand]

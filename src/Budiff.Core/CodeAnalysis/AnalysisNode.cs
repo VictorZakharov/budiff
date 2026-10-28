@@ -159,7 +159,11 @@ public sealed class AnalysisNode
             return cmp != 0 ? cmp : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
         };
 
-        Children.Sort(ascending ? ascendingCompare : (a, b) => ascendingCompare(b, a));
+        // By name, folders come first either way (as in a file manager); the
+        // direction orders the names within each group.
+        Children.Sort(key == AnalysisSortKey.Name
+            ? (a, b) => a.IsFile != b.IsFile ? (a.IsFile ? 1 : -1) : ascending ? ascendingCompare(a, b) : ascendingCompare(b, a)
+            : ascending ? ascendingCompare : (a, b) => ascendingCompare(b, a));
 
         // A date is no size: by name or recency, the bar shows lines.
         var barKey = key is AnalysisSortKey.Name or AnalysisSortKey.Recency ? AnalysisSortKey.Lines : key;

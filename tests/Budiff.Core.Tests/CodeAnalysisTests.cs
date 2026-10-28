@@ -57,6 +57,17 @@ public sealed class CodeAnalysisTests
         Assert.Equal("Main.cs", app.Children[0].Name);
     }
 
+    // By name, folders come first, then files - A-Z, or Z-A within each.
+    [Theory]
+    [InlineData(true, "src,web,README.md")]
+    [InlineData(false, "web,src,README.md")]
+    public void Name_sort_puts_folders_before_files(bool ascending, string expected)
+    {
+        var root = AnalysisTreeBuilder.Build(Sample(), null, AnalysisGrouping.Folders, AnalysisSortKey.Name, ascending);
+
+        Assert.Equal(expected, string.Join(",", root.Children.Select(c => c.Name)));
+    }
+
     [Fact]
     public void Projects_grouping_groups_by_marker_and_buckets_rest()
     {

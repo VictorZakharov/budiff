@@ -417,12 +417,22 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
         var reapplyCommit = SelectedPeriod.IsCommit ? _commit : null;
 
+        // A refresh of the same folder keeps what the reader set up: open
+        // folders (taken before the rows go), the filters and the sort. The
+        // rows are replaced, not cleared, so the window remembers the
+        // selected one to pick again once the new rows arrive.
+        var refresh = string.Equals(root, _root, StringComparison.OrdinalIgnoreCase);
+        CaptureExpansion();
         ClearPullRequest();
         _root = root;
         _ready = false;
-        Roots.Clear();
-        Extensions.Clear();
-        Authors.Clear();
+        Roots = new ObservableCollection<CodeAnalysisRow>();
+        if (!refresh)
+        {
+            _expanded.Clear();
+            Extensions.Clear();
+            Authors.Clear();
+        }
 
         if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
         {
@@ -450,7 +460,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             RecordTiming(sw.ElapsedMilliseconds, snapshot.History?.CommitCount ?? 0);
             _appliedPeriod = SelectedPeriod;
             _appliedDays = days;
-            LoadFrom(snapshot.Scan, snapshot.History);
+            LoadFrom(snapshot.Scan, snapshot.History, keepFilters: refresh);
         }
         catch (Exception ex)
         {
@@ -472,13 +482,13 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         HistoryApplied?.Invoke();
     }
 
-    public void LoadFrom(ScanResult scan, HistoryResult? history)
+    public void LoadFrom(ScanResult scan, HistoryResult? history, bool keepFilters = false)
     {
         _folderScan = scan;
         _scan = scan;
         _history = history;
         GitAvailable = scan.HasGit && history is not null;
-        LoadFilters(scan, history);
+        LoadFilters(scan, history, preserveSelection: keepFilters);
         _ready = true;
         Rebuild();
     }
@@ -724,6 +734,24 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         {
             row.IsExpanded = true;
             _expanded.Add(row.RelativePath);
+        }
+    }
+
+    // A folder's right-click menu: it and every folder under it expand (or
+    // collapse); folders elsewhere stay as they are.
+    internal void SetSubtreeExpanded(CodeAnalysisRow folder, bool expanded)
+    {
+        foreach (var row in folder.SelfAndDescendants().Where(r => !r.IsFile))
+        {
+            row.IsExpanded = expanded;
+            if (expanded)
+            {
+                _expanded.Add(row.RelativePath);
+            }
+            else
+            {
+                _expanded.Remove(row.RelativePath);
+            }
         }
     }
 

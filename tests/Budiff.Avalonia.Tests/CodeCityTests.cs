@@ -169,13 +169,71 @@ public sealed class CodeCityTests
             Assert.Same(row, tree.SelectedItem);
             var menu = window.RowMenu!;
             Assert.True(menu.IsOpen);
-            ((MenuItem)menu.Items[0]!).RaiseEvent(new global::Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+            ItemNamed(menu, FileManager.RevealLabel).RaiseEvent(new global::Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
             menu.Close();
         }
 
         Assert.Equal(new[] { file.FullPath!, Path.GetDirectoryName(file.FullPath)! }, shown);
         Assert.False(vm.IsDiffOpen);
     }
+
+    // A folder's menu expands or collapses that folder and everything under
+    // it; other folders stay as they were. A file's menu has no such items.
+    [AvaloniaFact]
+    public void RightClick_AFolder_ExpandsAndCollapsesItsSubtree()
+    {
+        var (window, vm) = Open("budiff-tree-subtree");
+        var roots = vm.Analysis.Roots;
+        var folder = roots.First(r => !r.IsFile && r.Children.Any(c => !c.IsFile));
+        var other = roots.First(r => !r.IsFile && r != folder);
+        other.IsExpanded = true;
+        folder.IsExpanded = false;
+        UiSnapshot.Pump();
+        var tree = window.FindControl<TreeView>("AnalysisTree")!;
+        var under = folder.SelfAndDescendants().Where(r => !r.IsFile).ToList();
+        Assert.True(under.Count > 1);
+
+        OpenRowMenu(window, tree, folder);
+        ItemNamed(window.RowMenu!, FileManager.ExpandAllLabel).RaiseEvent(new global::Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        window.RowMenu!.Close();
+        UiSnapshot.Pump();
+        Assert.All(under, r => Assert.True(r.IsExpanded, r.RelativePath));
+        Assert.True(other.IsExpanded);
+        Assert.All(other.SelfAndDescendants().Where(r => !r.IsFile).Skip(1), r => Assert.False(r.IsExpanded, r.RelativePath));
+
+        OpenRowMenu(window, tree, folder);
+        ItemNamed(window.RowMenu!, FileManager.CollapseAllLabel).RaiseEvent(new global::Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        window.RowMenu!.Close();
+        UiSnapshot.Pump();
+        Assert.All(under, r => Assert.False(r.IsExpanded, r.RelativePath));
+        Assert.True(other.IsExpanded);
+
+        // Collapsed stays collapsed through a tree rebuild (a new sort).
+        vm.Analysis.SortCommand.Execute(global::Budiff.CodeAnalysis.AnalysisSortKey.Name);
+        UiSnapshot.Pump();
+        Assert.All(vm.Analysis.Roots.Single(r => r.RelativePath == folder.RelativePath).SelfAndDescendants().Where(r => !r.IsFile), r => Assert.False(r.IsExpanded, r.RelativePath));
+
+        var file = vm.Analysis.Roots.SelectMany(r => r.SelfAndDescendants()).First(r => r.IsFile);
+        vm.Analysis.Reveal(file.RelativePath);
+        UiSnapshot.Pump();
+        UiSnapshot.Pump();
+        OpenRowMenu(window, tree, file);
+        Assert.Equal(new[] { FileManager.RevealLabel }, window.RowMenu!.Items.OfType<MenuItem>().Select(i => i.Header));
+        window.RowMenu!.Close();
+    }
+
+    private static void OpenRowMenu(MainWindow window, TreeView tree, CodeAnalysisRow row)
+    {
+        var item = (Control)tree.TreeContainerFromItem(row)!;
+        var at = global::Avalonia.VisualExtensions.TranslatePoint(item, new global::Avalonia.Point(80, 12), window)!.Value;
+        window.MouseDown(at, MouseButton.Right);
+        window.MouseUp(at, MouseButton.Right);
+        UiSnapshot.Pump();
+        Assert.True(window.RowMenu!.IsOpen);
+    }
+
+    private static MenuItem ItemNamed(ContextMenu menu, string header)
+        => menu.Items.OfType<MenuItem>().Single(i => Equals(i.Header, header));
 
     [AvaloniaFact]
     public void Drag_OrbitsWithoutOpening()
