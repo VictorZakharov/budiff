@@ -13,6 +13,8 @@
          affected - build, test, and the dev-fallback exe stay JIT. -->
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <PublishAot>true</PublishAot>
+    <!-- The code city's GPU view passes matrices and buffers to OpenGL by pointer. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Smaller native code, and identical method bodies stored once: the exe
          drops from 34.7 to 29.4 MB. Measured under AOT on budiff's own
          sources, the line diff and TextMate highlighting run no slower

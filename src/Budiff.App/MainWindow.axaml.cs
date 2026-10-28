@@ -71,6 +71,65 @@ public sealed partial class MainWindow : Window
         DiffToolbarGrid.LayoutUpdated += (_, _) => UpdateDiffOptionsOverflow();
         ApplyDiffLayout();
         AddColumnMenuItems();
+
+        CodeCity.Gpu = CityGl;
+        if (Environment.GetEnvironmentVariable("BUDIFF_CITY_BENCH") is { Length: > 0 } benchReport)
+        {
+            StartCityBench(benchReport);
+        }
+
+        // In the city, Enter in the search box flies to the best match.
+        FilterBox.AddHandler(KeyDownEvent, (_, e) =>
+        {
+            if (e.Key == Key.Enter && _viewModel.Analysis.IsCityView)
+            {
+                CodeCity.FlyToBestMatch();
+                e.Handled = true;
+            }
+        }, RoutingStrategies.Tunnel);
+    }
+
+    // A developer benchmark of the code city (BUDIFF_CITY_BENCH=<report file>,
+    // optional BUDIFF_CITY_BENCH_SIZE=<width>x<height> in pixels): the window
+    // shows the city of the start folder, orbits it for 8 s after a 2 s
+    // warm-up, writes the performance report, and closes. It asks to open
+    // off-screen without focus, but Windows can still show and activate it,
+    // so run it only when nobody is using the desktop.
+    private void StartCityBench(string reportPath)
+    {
+        ShowActivated = false;
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        Position = new PixelPoint(-9000, 50);
+        Opened += (_, _) =>
+        {
+            if (Environment.GetEnvironmentVariable("BUDIFF_CITY_BENCH_SIZE") is { } size
+                && size.Split('x') is [var w, var h]
+                && int.TryParse(w, out var width) && int.TryParse(h, out var height))
+            {
+                var scale = RenderScaling;
+                Width = width / scale;
+                Height = height / scale;
+            }
+        };
+
+        var started = false;
+        _viewModel.Analysis.PropertyChanged += (_, _) =>
+        {
+            if (started || _viewModel.Analysis.IsScanning || _viewModel.Analysis.Roots.Count == 0)
+            {
+                return;
+            }
+
+            started = true;
+            _viewModel.Analysis.IsCityView = true;
+            _viewModel.Analysis.ShowCityFps = true;
+            CodeCity.RunBench(TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(8), report =>
+            {
+                System.IO.File.WriteAllText(reportPath, report + Environment.NewLine
+                    + $"Window {ClientSize.Width * RenderScaling:0}x{ClientSize.Height * RenderScaling:0} px" + Environment.NewLine);
+                Close();
+            });
+        };
     }
 
     // A row's name tip shows only when the name is cut short by the ellipsis.

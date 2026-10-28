@@ -625,6 +625,8 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         Roots = new ObservableCollection<CodeAnalysisRow>(root.Children.Select(n => BuildRow(n, depth: 0)));
         SetSummary(root);
         ApplySearch();
+        _lastRoot = root;
+        RebuildCity();
     }
 
     // Expands every folder, and remembers it across tree rebuilds.
@@ -835,6 +837,67 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
     [RelayCommand]
     private void SelectGrouping(GroupingOption option) => SelectedGrouping = option;
+
+    // The code city: the same tree (filters, period, grouping) as a 3D city
+    // instead of rows. Laid out only while it shows.
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsTreeView))]
+    private bool _isCityView;
+
+    public bool IsTreeView => !IsCityView;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsCityHotspots))]
+    [NotifyPropertyChangedFor(nameof(IsCityAge))]
+    private CityMode _cityMode = CityMode.Hotspots;
+
+    public bool IsCityHotspots => CityMode == CityMode.Hotspots;
+
+    public bool IsCityAge => CityMode == CityMode.Age;
+
+    [ObservableProperty]
+    private CityModel _city = CityModel.Empty(CityMode.Hotspots);
+
+    // The city's performance panel; off unless asked for.
+    [ObservableProperty]
+    private bool _showCityFps;
+
+    // Whether the city's heights and colours come from git history.
+    public bool CityHasHistory => _history is not null;
+
+    private AnalysisNode? _lastRoot;
+
+    [RelayCommand]
+    private void ShowTree() => IsCityView = false;
+
+    [RelayCommand]
+    private void ShowCity() => IsCityView = true;
+
+    [RelayCommand]
+    private void ShowHotspots() => CityMode = CityMode.Hotspots;
+
+    [RelayCommand]
+    private void ShowAge() => CityMode = CityMode.Age;
+
+    [RelayCommand]
+    private Task OpenCityFile(CityBlock? block)
+        => block is { IsFile: true }
+            ? _openFile(Path.Combine(_root, block.RelativePath.Replace('/', Path.DirectorySeparatorChar)), block.RelativePath)
+            : Task.CompletedTask;
+
+    partial void OnIsCityViewChanged(bool value) => RebuildCity();
+
+    partial void OnCityModeChanged(CityMode value) => RebuildCity();
+
+    private void RebuildCity()
+    {
+        if (!IsCityView || _lastRoot is null)
+        {
+            return;
+        }
+
+        City = CityLayout.Build(_lastRoot, CityMode, DateTimeOffset.Now.ToUnixTimeSeconds(), hasHistory: _history is not null);
+    }
 
     partial void OnSelectedGroupingChanged(GroupingOption value)
     {

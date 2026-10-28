@@ -87,6 +87,10 @@
              RECTANGULAR bounds, so a square highlight pokes into the rounded
              corners. Round each segment's outer corners instead (4 minus the
              1px border). -->
+        <Style Selector="Button.segment.small">
+            <Setter Property="Padding" Value="9,2" />
+            <Setter Property="FontSize" Value="11.5" />
+        </Style>
         <Style Selector="Button.segment.left">
             <Setter Property="CornerRadius" Value="3,0,0,3" />
         </Style>
@@ -343,9 +347,64 @@
                             </StackPanel>
                         </Grid>
 
-                        <!-- Wraps in a narrow pane instead of running off its edge. -->
-                        <TextBlock x:Name="SummaryLine" Text="{Binding Analysis.SummaryText}" FontSize="12" TextWrapping="Wrap"
-                                   Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                        <!-- The summary wraps in a narrow pane instead of running off its
+                             edge; the Tree/City switch (and the city's colouring) sit at its end. -->
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock x:Name="SummaryLine" Text="{Binding Analysis.SummaryText}" FontSize="12" TextWrapping="Wrap"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" Margin="10,0,0,0" VerticalAlignment="Center">
+                                <CheckBox x:Name="ShowFpsBox"
+                                          IsVisible="{Binding Analysis.IsCityView}"
+                                          IsChecked="{Binding Analysis.ShowCityFps, Mode=TwoWay}"
+                                          Content="Show FPS"
+                                          FontSize="11.5"
+                                          MinHeight="0"
+                                          Padding="4,0,0,0"
+                                          VerticalAlignment="Center"
+                                          Foreground="{DynamicResource BudiffMutedTextBrush}"
+                                          ToolTip.Tip="A performance panel in the city: FPS over the last 15 s; click it to copy a debug report" />
+                                <Border x:Name="CityModeSwitch"
+                                        IsVisible="{Binding Analysis.IsCityView}"
+                                        BorderBrush="{DynamicResource BudiffBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="4"
+                                        ClipToBounds="True"
+                                        VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button Classes="segment left small"
+                                                Classes.active="{Binding Analysis.IsCityHotspots}"
+                                                Content="Hotspots"
+                                                ToolTip.Tip="Height = churn, colour = churn &#215; size: big files that keep changing glow red"
+                                                Command="{Binding Analysis.ShowHotspotsCommand}" />
+                                        <Button Classes="segment right small"
+                                                Classes.active="{Binding Analysis.IsCityAge}"
+                                                Content="Age"
+                                                ToolTip.Tip="Height = commits, colour = how recently it changed"
+                                                Command="{Binding Analysis.ShowAgeCommand}" />
+                                    </StackPanel>
+                                </Border>
+                                <Border x:Name="ViewSwitch"
+                                        BorderBrush="{DynamicResource BudiffBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="4"
+                                        ClipToBounds="True"
+                                        VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button Classes="segment left small"
+                                                Classes.active="{Binding Analysis.IsTreeView}"
+                                                Content="Tree"
+                                                Command="{Binding Analysis.ShowTreeCommand}" />
+                                        <Button x:Name="CityButton"
+                                                Classes="segment right small"
+                                                Classes.active="{Binding Analysis.IsCityView}"
+                                                Content="City"
+                                                ToolTip.Tip="The code as a 3D city: folders are districts, files are buildings"
+                                                Command="{Binding Analysis.ShowCityCommand}" />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </Grid>
                     </StackPanel>
                 </Border>
 
@@ -417,7 +476,15 @@
                 <!-- ClipToBounds: the fixed-width columns overflow to the right in a
                      very narrow pane; clip them at the pane edge instead of letting
                      the header/rows paint under the filter panes. -->
-                <DockPanel x:Name="TreeArea" ClipToBounds="True">
+                <Panel>
+                <app:CityGlView x:Name="CityGl" IsVisible="{Binding Analysis.IsCityView}" />
+                <app:CodeCityView x:Name="CodeCity"
+                                  IsVisible="{Binding Analysis.IsCityView}"
+                                  Model="{Binding Analysis.City}"
+                                  SearchText="{Binding Analysis.SearchText}"
+                                  OpenCommand="{Binding Analysis.OpenCityFileCommand}"
+                                  ShowFps="{Binding Analysis.ShowCityFps}" />
+                <DockPanel x:Name="TreeArea" ClipToBounds="True" IsVisible="{Binding Analysis.IsTreeView}">
                     <!-- Right-click the header (or the button in its corner) to pick columns. -->
                     <Border DockPanel.Dock="Top"
                             Background="Transparent"
@@ -618,6 +685,7 @@
                         </TreeView.ItemTemplate>
                     </TreeView>
                 </DockPanel>
+                </Panel>
             </DockPanel>
 
             <GridSplitter Grid.Column="1"
