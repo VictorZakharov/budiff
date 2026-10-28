@@ -69,8 +69,10 @@ public sealed class CodeCityTests
         var hovered = city.Hovered;
         Assert.NotNull(hovered);
         Assert.True(hovered!.IsFile);
-        var card = CodeCityView.Describe(hovered, hasHistory: true).ToList();
-        Assert.Contains(card, line => line.Contains("commit", StringComparison.Ordinal));
+        var card = CodeCityView.Describe(hovered, hasHistory: true, CityMode.Hotspots).ToList();
+        Assert.Contains(card, line => line.Any(r => r.Text.Contains("commit", StringComparison.Ordinal)));
+        Assert.Contains(card, line => line.Any(r => r.Tone == CodeCityView.CardTone.Added && r.Text.StartsWith('+')));
+        Assert.Contains(card, line => line.Any(r => r.Tone == CodeCityView.CardTone.Heat && r.Text.StartsWith("Hotspot #", StringComparison.Ordinal)));
         UiSnapshot.Capture(window, "city-hover");
 
         window.MouseDown(at, MouseButton.Left);

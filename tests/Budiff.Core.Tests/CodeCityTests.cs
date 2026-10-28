@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Numerics;
 using Budiff.CodeAnalysis;
 using Xunit;
 
@@ -115,6 +116,39 @@ public sealed class CodeCityTests
         var model = CityLayout.Build(SampleTree(), CityMode.Hotspots, Now, hasHistory: true);
 
         Assert.True(Building(model, "Engine.cs").Footprint.Area > Building(model, "Util.cs").Footprint.Area * 5);
+    }
+
+    // The orbit bug: a long flat plinth whose nearest point is closer to the
+    // eye than a tall building standing in front of it. Distance order paints
+    // the plinth over the building; the separating plane (z between them,
+    // eye on the building's side) puts the plinth first.
+    [Fact]
+    public void DrawOrder_puts_a_near_looking_flat_slab_behind_the_tall_building_in_front()
+    {
+        var slab = new BoxDrawOrder.Box(new Vector3(0, 0, 0), new Vector3(300, 5, 40));
+        var tower = new BoxDrawOrder.Box(new Vector3(0, 0, 60), new Vector3(40, 150, 100));
+        var eye = new Vector3(600, 300, 300);
+        static float Nearest(BoxDrawOrder.Box b, Vector3 e) => Vector3.Distance(e, Vector3.Clamp(e, b.Min, b.Max));
+        var boxes = new[] { slab, tower };
+
+        // Distance alone gets it wrong: the slab looks nearer.
+        Assert.True(Nearest(slab, eye) < Nearest(tower, eye));
+
+        var order = BoxDrawOrder.Sort(boxes, eye, new[] { (0, 1) }, i => Nearest(boxes[i], eye));
+        Assert.Equal(new[] { 0, 1 }, order);
+    }
+
+    [Fact]
+    public void DrawOrder_puts_a_plinth_before_what_stands_on_it_and_survives_a_cycle()
+    {
+        var plinth = new BoxDrawOrder.Box(new Vector3(0, 0, 0), new Vector3(100, 5, 100));
+        var house = new BoxDrawOrder.Box(new Vector3(10, 5, 10), new Vector3(20, 50, 20));
+        Assert.Equal(-1, BoxDrawOrder.Behind(plinth, house, new Vector3(15, 200, 300)));
+
+        // Three boxes each "behind" the next: every box still comes out once.
+        var a = new BoxDrawOrder.Box(new Vector3(0, 0, 0), new Vector3(1, 1, 1));
+        var order = BoxDrawOrder.Sort(new[] { a, a, a }, Vector3.Zero, new[] { (0, 1), (1, 2), (2, 0) }, i => i);
+        Assert.Equal(new[] { 0, 1, 2 }, order.OrderBy(i => i));
     }
 
     private static CityBlock Building(CityModel model, string name) => model.Buildings.Single(b => b.Name == name);

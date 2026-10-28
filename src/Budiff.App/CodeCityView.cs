@@ -8,6 +8,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using Avalonia.Media.Immutable;
 using Avalonia.Threading;
 using Budiff.CodeAnalysis;
@@ -44,8 +45,11 @@ internal sealed class CodeCityView : Control
     private static readonly IBrush GroundBrush = new ImmutableSolidColorBrush(Color.Parse("#232529"));
     private static readonly IBrush TextBrush = new ImmutableSolidColorBrush(Color.Parse("#DFE1E5"));
     private static readonly IBrush MutedBrush = new ImmutableSolidColorBrush(Color.Parse("#9DA0A8"));
+    private static readonly IBrush AddedBrush = new ImmutableSolidColorBrush(Color.Parse("#6BB36B"));
+    private static readonly IBrush RemovedBrush = new ImmutableSolidColorBrush(Color.Parse("#D16969"));
     private static readonly IBrush LabelBrush = new ImmutableSolidColorBrush(Color.Parse("#C8DFE1E5"));
-    private static readonly IBrush LabelShadowBrush = new ImmutableSolidColorBrush(Color.Parse("#C0101114"));
+    private static readonly IBrush LabelPillBrush = new ImmutableSolidColorBrush(Color.Parse("#C8181A1D"));
+    private static readonly IPen LabelPillPen = new ImmutablePen(new ImmutableSolidColorBrush(Color.Parse("#5A5E66")), 1);
     private static readonly IBrush CardBrush = new ImmutableSolidColorBrush(Color.Parse("#F02B2D31"));
     private static readonly IPen CardPen = new ImmutablePen(new ImmutableSolidColorBrush(Color.Parse("#4A4D55")), 1);
     private static readonly IPen EdgePen = new ImmutablePen(new ImmutableSolidColorBrush(Color.Parse("#38000000")), 1);
@@ -62,6 +66,10 @@ internal sealed class CodeCityView : Control
 
     private readonly Dictionary<uint, IBrush> _brushes = new();
     private readonly Dictionary<CityBlock, Color> _colors = new();
+
+    // The model as a tree: top-level blocks, and each district's contents.
+    private readonly List<CityBlock> _topLevel = new();
+    private readonly Dictionary<CityBlock, List<CityBlock>> _contents = new();
     private HashSet<CityBlock>? _matches;
 
     // Camera: orbits target at distance; yaw around Y, pitch above the ground.
@@ -159,9 +167,25 @@ internal sealed class CodeCityView : Control
     private void OnModelChanged(bool resetCamera)
     {
         _colors.Clear();
+        _topLevel.Clear();
+        _contents.Clear();
         _hover = null;
         if (Model is { } model)
         {
+            var byNode = model.Districts.Concat(model.Buildings).ToDictionary(b => b.Node);
+            foreach (var block in byNode.Values)
+            {
+                if (block.Level == 0)
+                {
+                    _topLevel.Add(block);
+                }
+            }
+
+            foreach (var district in model.Districts)
+            {
+                _contents[district] = district.Node.Children.Select(n => byNode.GetValueOrDefault(n)).OfType<CityBlock>().ToList();
+            }
+
             foreach (var building in model.Buildings)
             {
                 _colors[building] = BuildingColor(model.Mode, building.Heat);
@@ -559,12 +583,18 @@ internal sealed class CodeCityView : Control
 
     // ---- rendering ----
 
+    // The drawn city is kept as a bitmap and redrawn only when what it shows
+    // changes (camera, size, model, search); hovering only draws the outline
+    // and the card over it.
+    private RenderTargetBitmap? _scene;
+    private (Vector3, float, float, float, Size, double, CityModel?, HashSet<CityBlock>?) _sceneKey;
+
     public override void Render(DrawingContext context)
     {
         var bounds = new Rect(Bounds.Size);
-        context.FillRectangle(BackgroundBrush, bounds);
         if (Model is not { } model || bounds.Width < 2 || bounds.Height < 2)
         {
+            context.FillRectangle(BackgroundBrush, bounds);
             return;
         }
 
@@ -576,43 +606,152 @@ internal sealed class CodeCityView : Control
         }
 
         UpdateCamera();
+        var scale = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1.0;
+        var key = (_target, _distance, _yaw, _pitch, bounds.Size, scale, Model, _matches);
+        if (_scene is null || key != _sceneKey)
+        {
+            var pixels = new PixelSize(Math.Max(1, (int)Math.Ceiling(bounds.Width * scale)), Math.Max(1, (int)Math.Ceiling(bounds.Height * scale)));
+            if (_scene is null || _scene.PixelSize != pixels)
+            {
+                _scene?.Dispose();
+                _scene = new RenderTargetBitmap(pixels, new global::Avalonia.Vector(96 * scale, 96 * scale));
+            }
+
+            using (var scene = _scene.CreateDrawingContext())
+            {
+                RenderScene(scene, model, bounds);
+            }
+
+            _sceneKey = key;
+        }
+
+        context.DrawImage(_scene, new Rect(_scene.Size), bounds);
+        if (_hover is { } hover)
+        {
+            DrawTopOutline(context, hover, HoverPen);
+            if (_pointer is { } pointer)
+            {
+                DrawCard(context, hover, pointer, bounds);
+            }
+        }
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+        _scene?.Dispose();
+        _scene = null;
+    }
+
+    private void RenderScene(DrawingContext context, CityModel model, Rect bounds)
+    {
+        context.FillRectangle(BackgroundBrush, bounds);
+
         var size = (float)model.Size;
         DrawQuad(context, GroundBrush, null,
             new Vector3(0, 0, 0), new Vector3(size, 0, 0), new Vector3(size, 0, size), new Vector3(0, 0, size));
 
-        // Plinths first (parents before children), then buildings far to
-        // near. A near plinth is low, so drawing it under a far building
-        // costs a few pixels at most.
-        foreach (var district in model.Districts.OrderBy(d => d.Level).ThenByDescending(FarDistance))
+        foreach (var block in DrawOrder(model))
         {
-            DrawBox(context, district, _colors[district], ghost: _matches is not null);
-        }
-
-        foreach (var building in model.Buildings.OrderByDescending(FarDistance))
-        {
-            var ghost = _matches is not null && !_matches.Contains(building);
-            DrawBox(context, building, _colors[building], ghost);
-            if (_matches is not null && !ghost)
+            var ghost = _matches is not null && (!block.IsFile || !_matches.Contains(block));
+            DrawBox(context, block, _colors[block], ghost);
+            if (block.IsFile && _matches is not null && !ghost)
             {
-                DrawTopOutline(context, building, MatchPen);
+                DrawTopOutline(context, block, MatchPen);
             }
         }
 
         DrawLabels(context, model);
-        if (_hover is { } hover)
-        {
-            DrawTopOutline(context, hover, HoverPen);
-        }
-
         DrawLegend(context, model, bounds);
-        if (_hover is { } hovered && _pointer is { } pointer)
+    }
+
+    // Every plinth and building, back to front. The treemap nests: all of a
+    // district's contents stand inside its footprint, on top of it. So a
+    // district goes before its contents, and two siblings' whole subtrees
+    // follow the order of the siblings themselves - which BoxDrawOrder sets
+    // exactly from their separating plane. Only siblings are ever compared.
+    internal List<CityBlock> DrawOrder(CityModel model)
+    {
+        var order = new List<CityBlock>(model.Districts.Count + model.Buildings.Count);
+        Emit(_topLevel);
+        return order;
+
+        void Emit(List<CityBlock> siblings)
         {
-            DrawCard(context, hovered, pointer, bounds);
+            var boxes = new BoxDrawOrder.Box[siblings.Count];
+            var extents = new Rect[siblings.Count];
+            for (var i = 0; i < siblings.Count; i++)
+            {
+                boxes[i] = BoxOf(siblings[i]);
+                extents[i] = ScreenExtent(boxes[i]);
+            }
+
+            foreach (var i in BoxDrawOrder.Sort(boxes, _eye, OverlappingPairs(extents), i => FarDistance(siblings[i])))
+            {
+                var block = siblings[i];
+                order.Add(block);
+                if (_contents.TryGetValue(block, out var inside))
+                {
+                    Emit(inside);
+                }
+            }
         }
     }
 
-    // Distance from the eye to the nearest point of the footprint on the
-    // ground: a good back-to-front key for non-overlapping boxes.
+    // Pairs whose screen extents overlap: a sweep along x, so a folder of
+    // hundreds of small files costs about one pass, not every pair.
+    private static List<(int, int)> OverlappingPairs(Rect[] extents)
+    {
+        var pairs = new List<(int, int)>();
+        var byLeft = Enumerable.Range(0, extents.Length).OrderBy(i => extents[i].X).ToArray();
+        for (var a = 0; a < byLeft.Length; a++)
+        {
+            var ea = extents[byLeft[a]];
+            for (var b = a + 1; b < byLeft.Length && extents[byLeft[b]].X <= ea.Right; b++)
+            {
+                var eb = extents[byLeft[b]];
+                if (eb.Y <= ea.Bottom && ea.Y <= eb.Bottom)
+                {
+                    pairs.Add((byLeft[a], byLeft[b]));
+                }
+            }
+        }
+
+        return pairs;
+    }
+
+    // A box's screen bounding rectangle; a huge one when part of it is behind
+    // the camera (so it is ordered against everything).
+    private Rect ScreenExtent(BoxDrawOrder.Box box)
+    {
+        double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
+        for (var corner = 0; corner < 8; corner++)
+        {
+            var world = new Vector3(
+                (corner & 1) == 0 ? box.Min.X : box.Max.X,
+                (corner & 2) == 0 ? box.Min.Y : box.Max.Y,
+                (corner & 4) == 0 ? box.Min.Z : box.Max.Z);
+            if (Project(world) is not { } p)
+            {
+                return new Rect(-1e6, -1e6, 2e6, 2e6);
+            }
+
+            (minX, maxX, minY, maxY) = (Math.Min(minX, p.X), Math.Max(maxX, p.X), Math.Min(minY, p.Y), Math.Max(maxY, p.Y));
+        }
+
+        return new Rect(minX, minY, maxX - minX, maxY - minY);
+    }
+
+    private static BoxDrawOrder.Box BoxOf(CityBlock block)
+    {
+        var f = block.Footprint;
+        return new BoxDrawOrder.Box(
+            new Vector3((float)f.X, (float)block.Base, (float)f.Y),
+            new Vector3((float)(f.X + f.Width), (float)block.Top, (float)(f.Y + f.Height)));
+    }
+
+    // Distance from the eye to the nearest point of the box: the fallback
+    // order between boxes that do not overlap on screen.
     private float FarDistance(CityBlock block)
     {
         var f = block.Footprint;
@@ -645,20 +784,20 @@ internal sealed class CodeCityView : Control
         // Only the faces turned toward the eye.
         if (_eye.X < x0)
         {
-            DrawQuad(context, Shade(color, 0.70), EdgePen, new(x0, y0, z0), new(x0, y1, z0), new(x0, y1, z1), new(x0, y0, z1));
+            DrawQuad(context, Shade(color, 0.70), null, new(x0, y0, z0), new(x0, y1, z0), new(x0, y1, z1), new(x0, y0, z1));
         }
         else if (_eye.X > x1)
         {
-            DrawQuad(context, Shade(color, 0.70), EdgePen, new(x1, y0, z0), new(x1, y1, z0), new(x1, y1, z1), new(x1, y0, z1));
+            DrawQuad(context, Shade(color, 0.70), null, new(x1, y0, z0), new(x1, y1, z0), new(x1, y1, z1), new(x1, y0, z1));
         }
 
         if (_eye.Z < z0)
         {
-            DrawQuad(context, Shade(color, 0.52), EdgePen, new(x0, y0, z0), new(x1, y0, z0), new(x1, y1, z0), new(x0, y1, z0));
+            DrawQuad(context, Shade(color, 0.52), null, new(x0, y0, z0), new(x1, y0, z0), new(x1, y1, z0), new(x0, y1, z0));
         }
         else if (_eye.Z > z1)
         {
-            DrawQuad(context, Shade(color, 0.52), EdgePen, new(x0, y0, z1), new(x1, y0, z1), new(x1, y1, z1), new(x0, y1, z1));
+            DrawQuad(context, Shade(color, 0.52), null, new(x0, y0, z1), new(x1, y0, z1), new(x1, y1, z1), new(x0, y1, z1));
         }
 
         if (_eye.Y > y1)
@@ -702,7 +841,7 @@ internal sealed class CodeCityView : Control
             g.EndFigure(true);
         }
 
-        context.DrawGeometry(fill, fill is null || extent >= 5 ? pen : null, geometry);
+        context.DrawGeometry(fill, fill is null || extent >= 8 ? pen : null, geometry);
     }
 
     // District names on their plinths, the top level always, deeper ones when
@@ -742,54 +881,40 @@ internal sealed class CodeCityView : Control
             }
         }
 
-        foreach (var district in model.Districts.OrderBy(d => d.Level))
+        // Map-style labels: on top of everything in a dark pill at the
+        // district's centre, so orbiting never hides them behind a building.
+        // Top-level folders always get one; deeper ones when their plinth is
+        // big enough on screen. Bigger districts win a clash, so the choice
+        // stays steady while the camera moves.
+        foreach (var district in model.Districts.Where(d => d.Level <= 2).OrderBy(d => d.Level).ThenByDescending(d => d.Footprint.Area))
         {
-            if (district.Level > 2)
-            {
-                continue;
-            }
-
             var f = district.Footprint;
             var y = (float)district.Top;
-            if (Project(new Vector3((float)f.X, y, (float)(f.Y + f.Height / 2))) is not { } left
-                || Project(new Vector3((float)(f.X + f.Width), y, (float)(f.Y + f.Height / 2))) is not { } right
-                || Project(new Vector3((float)(f.X + f.Width / 2), y, (float)f.Y)) is not { } back
-                || Project(new Vector3((float)(f.X + f.Width / 2), y, (float)(f.Y + f.Height))) is not { } front)
+            if (Project(new Vector3((float)(f.X + f.Width / 2), y, (float)(f.Y + f.Height / 2))) is not { } center)
             {
                 continue;
             }
 
-            var width = Math.Max(Distance(left, right), Distance(back, front));
-            var minWidth = district.Level == 0 ? 50 : 130 * district.Level;
-            if (width < minWidth)
+            if (district.Level > 0)
+            {
+                var corner = Project(new Vector3((float)f.X, y, (float)f.Y));
+                var opposite = Project(new Vector3((float)(f.X + f.Width), y, (float)(f.Y + f.Height)));
+                if (corner is null || opposite is null || Distance(corner.Value, opposite.Value) < 120 * district.Level)
+                {
+                    continue;
+                }
+            }
+
+            var top = district.Level == 0;
+            var text = Text(district.Name, top ? 12.5 : 11, top ? TextBrush : LabelBrush, top);
+            var pill = new Rect(center.X - text.Width / 2 - 6, center.Y - text.Height / 2 - 2, text.Width + 12, text.Height + 4);
+            if (!new Rect(Bounds.Size).Contains(pill.Center) || !Place(pill))
             {
                 continue;
             }
 
-            var text = Text(district.Name, district.Level == 0 ? 13 : 11.5, LabelBrush, district.Level == 0);
-            if (text.Width > width * 0.9)
-            {
-                continue;
-            }
-
-            // The middle of the plinth's nearest edge, so the label sits at the
-            // district's front - unless a building stands in front of it.
-            var near = new[] { left, right, back, front }.OrderByDescending(p => p.Y).First();
-            if (Pick(near - new Point(0, 2)) is { } seen && seen != district
-                && !seen.RelativePath.StartsWith(district.RelativePath + "/", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            var anchor = new Point(near.X - text.Width / 2, near.Y - text.Height - 2);
-            if (!Place(new Rect(anchor, new Size(text.Width, text.Height))))
-            {
-                continue;
-            }
-
-            var shadow = Text(district.Name, district.Level == 0 ? 13 : 11.5, LabelShadowBrush, district.Level == 0);
-            context.DrawText(shadow, anchor + new Point(1, 1));
-            context.DrawText(text, anchor);
+            context.DrawRectangle(LabelPillBrush, top ? LabelPillPen : null, pill, 4, 4);
+            context.DrawText(text, pill.TopLeft + new Point(6, 2));
         }
     }
 
@@ -841,18 +966,32 @@ internal sealed class CodeCityView : Control
 
     private void DrawCard(DrawingContext context, CityBlock block, Point pointer, Rect bounds)
     {
-        var lines = new List<FormattedText>
+        var heat = Shade(_colors.TryGetValue(block, out var c) ? Blend(c, Colors.White, 0.2) : Colors.White, 1.0);
+        IBrush BrushOf(CardTone tone) => tone switch
         {
-            Text(block.Name, 13, TextBrush, bold: true),
-            Text(block.RelativePath, 11, MutedBrush),
+            CardTone.Muted => MutedBrush,
+            CardTone.Added => AddedBrush,
+            CardTone.Removed => RemovedBrush,
+            CardTone.Heat => heat,
+            _ => TextBrush,
         };
-        foreach (var detail in Describe(block, Model!.HasHistory))
+
+        // Each line is a row of coloured runs.
+        var lines = new List<List<FormattedText>>
         {
-            lines.Add(Text(detail, 12, TextBrush));
+            new() { Text(block.Name, 13, TextBrush, bold: true) },
+            new() { Text(block.RelativePath, 11, MutedBrush) },
+        };
+        foreach (var detail in Describe(block, Model!.HasHistory, Model.Mode))
+        {
+            lines.Add(detail.Select(run => Text(run.Text, 12, BrushOf(run.Tone))).ToList());
         }
 
-        var width = lines.Max(l => l.Width) + 20;
-        var height = lines.Sum(l => l.Height + 2) + 14;
+        const double Swatch = 10;
+        double LineWidth(List<FormattedText> line) => line.Sum(t => t.WidthIncludingTrailingWhitespace);
+        double LineHeight(List<FormattedText> line) => line.Max(t => t.Height);
+        var width = Math.Max(LineWidth(lines[0]) + Swatch + 6, lines.Skip(1).Max(LineWidth)) + 20;
+        var height = lines.Sum(l => LineHeight(l) + 2) + 14;
         var x = pointer.X + 16;
         var y = pointer.Y + 18;
         if (x + width > bounds.Width - 4)
@@ -867,19 +1006,48 @@ internal sealed class CodeCityView : Control
 
         context.DrawRectangle(CardBrush, CardPen, new Rect(x, y, width, height), 4, 4);
         var top = y + 7;
-        foreach (var line in lines)
+        for (var i = 0; i < lines.Count; i++)
         {
-            context.DrawText(line, new Point(x + 10, top));
-            top += line.Height + 2;
+            var left = x + 10;
+            if (i == 0)
+            {
+                // The building's own colour beside its name.
+                var mid = top + LineHeight(lines[0]) / 2;
+                context.DrawRectangle(Shade(c, 1.0), null, new Rect(left, mid - Swatch / 2, Swatch, Swatch), 2, 2);
+                left += Swatch + 6;
+            }
+
+            foreach (var run in lines[i])
+            {
+                context.DrawText(run, new Point(left, top));
+                left += run.WidthIncludingTrailingWhitespace;
+            }
+
+            top += LineHeight(lines[i]) + 2;
         }
     }
 
-    // The card's detail lines for a building or district.
-    internal static IEnumerable<string> Describe(CityBlock block, bool hasHistory)
+    internal enum CardTone
+    {
+        Text,
+        Muted,
+        Added,
+        Removed,
+        Heat,
+    }
+
+    internal readonly record struct CardRun(string Text, CardTone Tone);
+
+    // The card's detail lines (each a row of coloured runs) for a building or
+    // district. The mode's own measure takes the building's colour: the
+    // hotspot rank in Hotspots, the last change in Age.
+    internal static IEnumerable<CardRun[]> Describe(CityBlock block, bool hasHistory, CityMode mode)
     {
         var node = block.Node;
         var size = node.IsBinary ? "binary" : Count(node.Lines.Total, "line");
-        yield return block.IsFile ? size : $"{Count(node.FileCount, "file")} · {size}";
+        yield return block.IsFile
+            ? new[] { new CardRun(size, CardTone.Text) }
+            : new[] { new CardRun(Count(node.FileCount, "file"), CardTone.Text), new CardRun(" · ", CardTone.Muted), new CardRun(size, CardTone.Text) };
         if (!hasHistory)
         {
             yield break;
@@ -887,26 +1055,46 @@ internal sealed class CodeCityView : Control
 
         if (node.Churn > 0)
         {
-            yield return $"+{node.Added:N0} −{node.Removed:N0} churn";
+            yield return new[]
+            {
+                new CardRun($"+{node.Added:N0}", CardTone.Added),
+                new CardRun(" ", CardTone.Text),
+                new CardRun($"−{node.Removed:N0}", CardTone.Removed),
+                new CardRun(" churn", CardTone.Muted),
+            };
         }
 
-        var git = new List<string>();
+        var git = new List<CardRun>();
+        void Add(string text, CardTone tone)
+        {
+            if (git.Count > 0)
+            {
+                git.Add(new CardRun(" · ", CardTone.Muted));
+            }
+
+            git.Add(new CardRun(text, tone));
+        }
+
         if (node.CommitCount > 0)
         {
-            git.Add(Count(node.CommitCount, "commit"));
+            Add(Count(node.CommitCount, "commit"), CardTone.Text);
         }
 
         if (node.AuthorCount > 0)
         {
-            git.Add(Count(node.AuthorCount, "author"));
+            Add(Count(node.AuthorCount, "author"), CardTone.Text);
         }
 
         var age = CodeAnalysisPanelViewModel.Age(node.LastChanged, DateTimeOffset.Now);
-        git.Add(age.Length > 0 ? "changed " + age + " ago" : "no change in period");
-        yield return string.Join(" · ", git);
+        Add(age.Length > 0 ? "changed " + age + " ago" : "no change in period",
+            age.Length == 0 ? CardTone.Muted : block.IsFile && mode == CityMode.Age ? CardTone.Heat : CardTone.Text);
+        yield return git.ToArray();
         if (block.HotspotRank > 0)
         {
-            yield return $"Hotspot #{block.HotspotRank}";
+            yield return new[]
+            {
+                new CardRun($"Hotspot #{block.HotspotRank}", mode == CityMode.Hotspots ? CardTone.Heat : CardTone.Text),
+            };
         }
     }
 
