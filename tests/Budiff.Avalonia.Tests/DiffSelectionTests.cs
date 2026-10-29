@@ -52,8 +52,13 @@ public sealed class DiffSelectionTests
         Assert.Equal("beta two\n    gamma three\ndelta", copied);
 
         // The new side on its own: a whole line, indent included.
+        // (Pressed in the left half of the indent - line start - measured,
+        // whatever the font's widths.)
         var lineStart = CharPoint(host, 2, window, side: 1, index: 0);
-        window.MouseDown(new Point(lineStart.X - 26, lineStart.Y), MouseButton.Left);
+        var cell = (CodeClip)newLine.Parent!;
+        Assert.True(cell.IndentWidth > 4);
+        var cellLeft = cell.TranslatePoint(default, window)!.Value.X;
+        window.MouseDown(new Point(cellLeft + (cell.IndentWidth / 4), lineStart.Y), MouseButton.Left);
         window.MouseMove(new Point(lineStart.X + 2000, lineStart.Y));
         window.MouseUp(new Point(lineStart.X + 2000, lineStart.Y), MouseButton.Left);
         Assert.True(view.Selection!.Value.NewSide);
