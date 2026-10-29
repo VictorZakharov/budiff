@@ -132,7 +132,7 @@ internal static class ReadmeFixture
         return $"namespace Budiff.Sample;\n\npublic static class {name}\n{{\n{body}\n}}\n";
     }
 
-    private static void ForceDelete(string path)
+    internal static void ForceDelete(string path)
     {
         if (!Directory.Exists(path))
         {

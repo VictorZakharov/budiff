@@ -551,6 +551,16 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             return;
         }
 
+        // A refreshed PR is read again from GitHub and loaded at its head
+        // now; like a commit it needs no working-tree scan (one runs when a
+        // time period is picked later).
+        if (reapply is not null)
+        {
+            _folderScan = null;
+            await ApplyPullRequestAsync(reapply, refresh: true);
+            return;
+        }
+
         // A commit needs only its own files: no working-tree scan and no
         // period history (both load if a time period is picked later).
         if (reapplyCommit is not null)
@@ -564,8 +574,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         ShowMessage("Scanning...");
         try
         {
-            // Re-applying a PR only needs the folder scan; skip an all-time history.
-            var days = reapply is not null ? DefaultPeriod.Days : SinceDays;
+            var days = SinceDays;
             var sw = Stopwatch.StartNew();
             var snapshot = await Task.Run(() =>
             {
@@ -595,12 +604,6 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         {
             // Never leave the spinner stuck when the scan throws.
             EndLoad(gen);
-        }
-
-        if (reapply is not null)
-        {
-            await ApplyPullRequestAsync(reapply);
-            return;
         }
 
         HistoryApplied?.Invoke();
@@ -1415,7 +1418,10 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         }
     }
 
-    public async Task ApplyPullRequestAsync(PullRequestInfo pullRequest)
+    // refresh: the PR shown, reloaded - first asked anew where its head and
+    // base are now (a force-push rewrites them); the tree, the filters and
+    // the selection stay.
+    public async Task ApplyPullRequestAsync(PullRequestInfo pullRequest, bool refresh = false)
     {
         // Before the first load is done git is not known to work yet - but
         // with a PR source it is a repository, so a PR picked meanwhile loads.
@@ -1428,6 +1434,19 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         ShowMessage($"Loading PR #{pullRequest.Number}...");
         try
         {
+            if (refresh)
+            {
+                var shown = pullRequest;
+                pullRequest = await LatestAsync(PullRequests, pullRequest, ct);
+                if (pullRequest.HeadRefOid != shown.HeadRefOid || pullRequest.BaseRefOid != shown.BaseRefOid)
+                {
+                    // Rewritten: the commits may arrive in a fetch below. The
+                    // warm cat-file would find them too (git rescans its packs
+                    // on a miss), but a fresh one starts from the new state.
+                    Budiff.Git.GitRepositoryReader.ReleaseSharedGit();
+                }
+            }
+
             var range = await PullRequests.ResolveAsync(pullRequest, ct);
             var root = _root;
             if (!IsCurrentLoad(gen))
@@ -1451,7 +1470,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             PullRequestLabel = $"#{pullRequest.Number} {pullRequest.Title}";
             ForgetCommitReturn();
             GitAvailable = true;
-            LoadFilters(_scan, _history, preserveSelection: _ready);
+            LoadFilters(_scan, _history, preserveSelection: _ready || refresh);
             _ready = true;
         }
         catch (Exception) when (!IsCurrentLoad(gen))
@@ -1477,6 +1496,20 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
         Rebuild();
         HistoryApplied?.Invoke();
+    }
+
+    // GitHub's current view of the PR; the known one when GitHub cannot be
+    // asked (offline, signed out) - its commits are local, so it still loads.
+    private static async Task<PullRequestInfo> LatestAsync(IPullRequestSource source, PullRequestInfo pullRequest, CancellationToken ct)
+    {
+        try
+        {
+            return await source.RefreshAsync(pullRequest, ct);
+        }
+        catch (PullRequestSourceException)
+        {
+            return pullRequest;
+        }
     }
 
     public async Task ApplyCommitAsync(CommitDetails commit)

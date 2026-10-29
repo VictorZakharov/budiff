@@ -206,6 +206,11 @@ public interface IPullRequestSource
 
     Task<PullRequestRange> ResolveAsync(PullRequestInfo pullRequest, CancellationToken ct);
 
+    // The PR as GitHub has it now: a force-pushed rebase or amend moves its
+    // head (one the clone may not have), a moved base branch its base. The
+    // one given when there is nothing newer to ask.
+    Task<PullRequestInfo> RefreshAsync(PullRequestInfo pullRequest, CancellationToken ct) => Task.FromResult(pullRequest);
+
     // The folder the list is limited to (repository path), or empty for the
     // whole repository. A scoped page has no total (TotalCount -1).
     string Scope => string.Empty;
@@ -662,6 +667,14 @@ public sealed class GitHubCliPullRequestSource : IPullRequestSource, IPullReques
 
     public Task<PullRequestRange> ResolveAsync(PullRequestInfo pullRequest, CancellationToken ct)
         => Task.Run(() => PullRequestRanges.Resolve(_root, pullRequest, () => Repo(ct), FetchTimeoutMs, ct), ct);
+
+    public Task<PullRequestInfo> RefreshAsync(PullRequestInfo pullRequest, CancellationToken ct)
+        => Task.Run(() =>
+        {
+            var query = new PullRequestQuery(null, PullRequestStateFilter.All, "#" + pullRequest.Number.ToString(CultureInfo.InvariantCulture));
+            var page = ((IPullRequestApi)this).Search(query, null, 1, ct);
+            return page.Items.FirstOrDefault(p => p.Number == pullRequest.Number) ?? pullRequest;
+        }, ct);
 
     // owner/name, once: from the clone's remotes when that is clear (instant),
     // else gh's answer (~0.5 s). Concurrent searches wait for the one answer.
