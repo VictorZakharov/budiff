@@ -1,7 +1,6 @@
 using System;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Data;
 using Avalonia.Media;
 using Budiff.Avalonia;
 
@@ -19,12 +18,20 @@ public sealed class DiffWindow : Window
         MinWidth = 480;
         MinHeight = 320;
         Background = HexBrush.Parse("#1E1F22");
-        Bind(TitleProperty, new Binding(nameof(DiffViewModel.Title))
+        // The file's name in the title, kept up by hand: a reflection
+        // binding is not AOT-safe.
+        void ShowTitle() => Title = string.IsNullOrEmpty(diff.Title) ? "budiff" : "budiff - " + diff.Title;
+        void OnDiffChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
         {
-            Source = diff,
-            StringFormat = "budiff - {0}",
-            FallbackValue = "budiff",
-        });
+            if (e.PropertyName is nameof(DiffViewModel.Title))
+            {
+                ShowTitle();
+            }
+        }
+
+        ShowTitle();
+        diff.PropertyChanged += OnDiffChanged;
+        Closed += (_, _) => diff.PropertyChanged -= OnDiffChanged;
 
         // Icon button, mirroring the docked pane's OpenInNew undock icon.
         var dockButton = new Button

@@ -446,8 +446,10 @@ public sealed partial class DiffViewModel : ObservableObject
     {
         var gen = ++_loadGen;
         IsLoading = true;
-        _tokenizeGen++;
-        IsHighlighting = false;
+
+        // The highlighting under way goes on: a reload that gives back the
+        // same rows keeps them, and needs it to finish; new rows start their
+        // own (SetDiff), which ends it.
 
         _loadingTimer?.Stop();
         _loadingTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(LoadingIndicatorDelayMs) };
@@ -604,6 +606,9 @@ public sealed partial class DiffViewModel : ObservableObject
         Placeholder = text;
         IsPlaceholder = true;
     }
+
+    // Every row of the diff, collapsed or not (the text a selection copies).
+    public IReadOnlyList<DiffRow> AllRows => _all;
 
     public void SetDiff(IReadOnlyList<DiffRow> rows)
     {

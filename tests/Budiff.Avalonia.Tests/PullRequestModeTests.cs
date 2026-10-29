@@ -20,7 +20,7 @@ using Xunit;
 
 namespace Budiff.Avalonia.Tests;
 
-public sealed class PullRequestModeTests
+public sealed partial class PullRequestModeTests
 {
     [Fact]
     public async Task Picker_DefaultsToMine_TenAtATime_AndPagesUntilExhausted()
@@ -790,6 +790,17 @@ public sealed class PullRequestModeTests
 
         public Task<PullRequestRange> ResolveAsync(PullRequestInfo pullRequest, CancellationToken ct)
             => Task.Run(() => PullRequestRanges.Resolve(Root!, pullRequest, () => null, 10_000, ct), ct);
+
+        // What GitHub says the PR is now (a refresh asks), when set.
+        public PullRequestInfo? Latest { get; set; }
+
+        public int RefreshCalls { get; private set; }
+
+        public Task<PullRequestInfo> RefreshAsync(PullRequestInfo pullRequest, CancellationToken ct)
+        {
+            RefreshCalls++;
+            return Task.FromResult(Latest is { } latest && latest.Number == pullRequest.Number ? latest : pullRequest);
+        }
 
         // Counts are held until this completes, when set.
         public Task? CountsGate { get; init; }

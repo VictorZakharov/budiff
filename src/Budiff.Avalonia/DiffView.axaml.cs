@@ -75,6 +75,9 @@ public partial class DiffView : UserControl
     public DiffView()
     {
         InitializeComponent();
+        Focusable = true;
+        InitSelection();
+        InitFind();
         DataContextChanged += (_, _) =>
         {
             ApplyThemeToViewModel();

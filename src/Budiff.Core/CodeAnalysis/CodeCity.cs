@@ -7,10 +7,14 @@ namespace Budiff.CodeAnalysis;
 // What the city's buildings show.
 // Hotspots: height = churn (+/-), colour = churn x size (big files that keep changing).
 // Age: height = commits, colour = recency (fresh bright, stale faded).
+// Debt: height = code lines, colour and wear = the file's technical-debt
+// score (CodeDebt): clean files stand bright and whole, the worst ones dark,
+// sagging and with broken windows.
 public enum CityMode
 {
     Hotspots,
     Age,
+    Debt,
 }
 
 // One box of the city: a folder's plinth (a district) or a file's building.
@@ -37,7 +41,8 @@ public sealed class CityBlock
 
     public double Top => Base + Height;
 
-    // 0..1 along the mode's colour ramp; -1 = no data (no change in the period).
+    // 0..1 along the mode's colour ramp; -1 = no data (no change in the period;
+    // in the Debt city: a binary file). In the Debt city it is the debt score.
     public double Heat { get; init; } = -1;
 
     // 1 = the hottest file by churn x size; 0 = not a hotspot (no churn).
@@ -85,7 +90,13 @@ public static class CityLayout
     {
         var districts = new List<CityBlock>();
         var files = new List<(AnalysisNode Node, int Level, TreemapRect Footprint, double Base)>();
-        Lay(root.Children, new TreemapRect(0, 0, size, size), level: 0, ground: 0, size, districts, files);
+        // The Debt city stands only on code: data and prose files get no lot,
+        // and a folder of nothing else no district.
+        var weights = new Dictionary<AnalysisNode, double>();
+        Func<AnalysisNode, double> weightOf = mode == CityMode.Debt
+            ? n => DebtWeight(n, weights)
+            : n => Math.Max(1, n.Lines.Total);
+        Lay(root.Children, new TreemapRect(0, 0, size, size), level: 0, ground: 0, size, weightOf, districts, files);
 
         var leaves = files.Select(f => f.Node).ToList();
         var maxLines = Math.Max(1, leaves.Select(n => (double)n.Lines.Total).DefaultIfEmpty().Max());
@@ -138,21 +149,39 @@ public static class CityLayout
     public static double HotspotScore(AnalysisNode node) => (double)node.Churn * Math.Max(1, node.Lines.Total);
 
     private static Func<AnalysisNode, double> HeightMetric(CityMode mode, bool hasHistory)
-        => !hasHistory ? _ => 0
+        => mode == CityMode.Debt ? n => n.Lines.Code
+            : !hasHistory ? _ => 0
             : mode == CityMode.Hotspots ? n => n.Churn
             : n => n.CommitCount;
 
+    // Lines of code files under a node (each at least 1); 0 = nothing to show.
+    private static double DebtWeight(AnalysisNode node, Dictionary<AnalysisNode, double> memo)
+    {
+        if (memo.TryGetValue(node, out var known))
+        {
+            return known;
+        }
+
+        var weight = node.IsFile
+            ? CodeDebt.IsCode(node) ? Math.Max(1, node.Lines.Total) : 0
+            : node.Children.Sum(c => DebtWeight(c, memo));
+        memo[node] = weight;
+        return weight;
+    }
+
     private static void Lay(
-        IReadOnlyList<AnalysisNode> nodes,
+        IReadOnlyList<AnalysisNode> all,
         TreemapRect bounds,
         int level,
         double ground,
         double size,
+        Func<AnalysisNode, double> weightOf,
         List<CityBlock> districts,
         List<(AnalysisNode, int, TreemapRect, double)> files)
     {
-        // Binary and empty files still get a small lot.
-        var weights = nodes.Select(n => (double)Math.Max(1, n.Lines.Total)).ToArray();
+        // Binary and empty files still get a small lot (outside the Debt city).
+        var nodes = all.Where(n => weightOf(n) > 0).ToList();
+        var weights = nodes.Select(weightOf).ToArray();
         var tiles = Treemap.Squarify(weights, bounds);
         var plinth = size * PlinthShare;
         for (var i = 0; i < nodes.Count; i++)
@@ -183,13 +212,26 @@ public static class CityLayout
                 Height = plinth,
             });
             var inner = lot.Inset(Math.Min(size * 0.004, Math.Min(lot.Width, lot.Height) * 0.04));
-            Lay(node.Children, inner, level + 1, ground + plinth, size, districts, files);
+            Lay(node.Children, inner, level + 1, ground + plinth, size, weightOf, districts, files);
         }
     }
 
     private static Dictionary<AnalysisNode, double> Heat(List<AnalysisNode> files, CityMode mode, long nowUnix, bool hasHistory)
     {
         var heat = new Dictionary<AnalysisNode, double>();
+        if (mode == CityMode.Debt)
+        {
+            foreach (var file in files)
+            {
+                if (CodeDebt.Score(file, hasHistory) is var score and >= 0)
+                {
+                    heat[file] = score;
+                }
+            }
+
+            return heat;
+        }
+
         if (!hasHistory)
         {
             return heat;

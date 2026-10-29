@@ -8,15 +8,21 @@
         <!-- Line wrap (the root's "wrap" class): code wraps inside its pane and
              rows grow taller; otherwise each code cell (CodeClip) shifts
              sideways with the shared horizontal scrollbar. -->
-        <Style Selector="TextBlock.code">
+        <Style Selector=":is(TextBlock).code">
             <Setter Property="TextWrapping" Value="NoWrap" />
         </Style>
-        <Style Selector="DockPanel.wrap TextBlock.code">
+        <Style Selector="local|CodeClip">
+            <Setter Property="Cursor" Value="Ibeam" />
+        </Style>
+        <Style Selector="SelectableTextBlock.code">
+            <Setter Property="SelectionBrush" Value="#664A88C7" />
+        </Style>
+        <Style Selector="DockPanel.wrap :is(TextBlock).code">
             <Setter Property="TextWrapping" Value="Wrap" />
         </Style>
         <!-- Unchanged context rows stay one line (trimmed) while collapsing;
              declared after the wrap style so it wins. -->
-        <Style Selector="DockPanel.wrap Panel.compact TextBlock.code">
+        <Style Selector="DockPanel.wrap Panel.compact :is(TextBlock).code">
             <Setter Property="TextWrapping" Value="NoWrap" />
             <Setter Property="TextTrimming" Value="CharacterEllipsis" />
         </Style>
@@ -239,8 +245,10 @@
                                                            FontSize="12.5"
                                                            Foreground="{Binding MutedTextBrush, ElementName=Root}" />
                                                 <local:CodeClip Grid.Column="1"
+                                                                Classes="single"
+                                                                WrapMarkBrush="{Binding MutedTextBrush, ElementName=Root}"
                                                                 ScrollX="{Binding $parent[ItemsControl].DataContext.HorizontalScroll}">
-                                                    <TextBlock local:DiffInlines.Runs="{Binding SingleRuns}"
+                                                    <SelectableTextBlock local:DiffInlines.Runs="{Binding SingleRuns}"
                                                                Classes="code"
                                                                Padding="2,0,4,0"
                                                                FontFamily="Cascadia Code,Consolas,monospace"
@@ -289,8 +297,10 @@
                                                            FontSize="12.5"
                                                            Foreground="{Binding MutedTextBrush, ElementName=Root}" />
                                                 <local:CodeClip Grid.Column="1"
+                                                                Classes="old"
+                                                                WrapMarkBrush="{Binding MutedTextBrush, ElementName=Root}"
                                                                 ScrollX="{Binding $parent[ItemsControl].DataContext.HorizontalScroll}">
-                                                    <TextBlock local:DiffInlines.Runs="{Binding OldRuns}"
+                                                    <SelectableTextBlock local:DiffInlines.Runs="{Binding OldRuns}"
                                                                Classes="code"
                                                                Padding="2,0,4,0"
                                                                FontFamily="Cascadia Code,Consolas,monospace"
@@ -310,8 +320,10 @@
                                                            FontSize="12.5"
                                                            Foreground="{Binding MutedTextBrush, ElementName=Root}" />
                                                 <local:CodeClip Grid.Column="1"
+                                                                Classes="new"
+                                                                WrapMarkBrush="{Binding MutedTextBrush, ElementName=Root}"
                                                                 ScrollX="{Binding $parent[ItemsControl].DataContext.HorizontalScroll}">
-                                                    <TextBlock local:DiffInlines.Runs="{Binding NewRuns}"
+                                                    <SelectableTextBlock local:DiffInlines.Runs="{Binding NewRuns}"
                                                                Classes="code"
                                                                Padding="2,0,4,0"
                                                                FontFamily="Cascadia Code,Consolas,monospace"
@@ -338,6 +350,44 @@
                                             HorizontalAlignment="Stretch" />
                 </Grid>
             </ScrollViewer>
+
+            <!-- Find in the diff (Ctrl+F, DiffView.Find.cs): one side at a time. -->
+            <Border x:Name="FindBar"
+                    IsVisible="False"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Top"
+                    Margin="0,4,18,0"
+                    Padding="6,4"
+                    CornerRadius="4"
+                    BorderThickness="1"
+                    BorderBrush="#4A4D55"
+                    Background="{Binding ToolbarBrush, ElementName=Root}">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <TextBlock x:Name="FindSide"
+                               VerticalAlignment="Center"
+                               FontSize="11.5"
+                               FontWeight="SemiBold"
+                               ToolTip.Tip="The side searched: point at the other side's code and press Ctrl+F to search it"
+                               Foreground="{Binding MutedTextBrush, ElementName=Root}" />
+                    <TextBox x:Name="FindBox"
+                             Width="220"
+                             MinHeight="0"
+                             Padding="6,3"
+                             FontSize="12.5"
+                             PlaceholderText="Find" />
+                    <TextBlock x:Name="FindCount"
+                               MinWidth="64"
+                               VerticalAlignment="Center"
+                               FontSize="11.5"
+                               Foreground="{Binding MutedTextBrush, ElementName=Root}" />
+                    <Button x:Name="FindPreviousButton" Content="↑" ToolTip.Tip="Previous (Shift+Enter)" Padding="7,1" MinHeight="0"
+                            Background="Transparent" Foreground="{Binding TextBrush, ElementName=Root}" />
+                    <Button x:Name="FindNextButton" Content="↓" ToolTip.Tip="Next (Enter)" Padding="7,1" MinHeight="0"
+                            Background="Transparent" Foreground="{Binding TextBrush, ElementName=Root}" />
+                    <Button x:Name="FindCloseButton" Content="✕" ToolTip.Tip="Close (Esc)" Padding="7,1" MinHeight="0"
+                            Background="Transparent" Foreground="{Binding MutedTextBrush, ElementName=Root}" />
+                </StackPanel>
+            </Border>
 
             <!-- Formatted preview (e.g. markdown), rendered by the model's
                  IDocumentPreviewer in place of the line diff. -->

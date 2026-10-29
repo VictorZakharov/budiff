@@ -292,6 +292,11 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     private ScanResult? _folderScan;
     private PullRequestRange? _appliedPullRequest;
 
+    // Commits made here on top of the applied PR, not pushed to it yet (the
+    // commit picker lists them, marked local); kept while a commit picked
+    // from that PR is shown.
+    private (int Number, IReadOnlyList<HistoryCommit> Commits)? _localCommits;
+
     // Commit mode (a window opened on one commit): the commit, kept to apply
     // again when its period entry is picked again, and whether it is applied.
     private CommitDetails? _commit;
@@ -306,6 +311,16 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     private int _appliedCommitCount;
 
     private const int WarnThresholdMs = 3000;
+
+    // One load at a time: a newer one - a period or pull request picked while
+    // the first load still runs - cancels the older, whose results are then
+    // dropped (git may finish its step before it notices the cancel).
+    private CancellationTokenSource? _loadCts;
+    private int _loadGen;
+
+    // Tests: runs on the load's thread before a folder load (root, days,
+    // token) - holds a load to pick a period while it runs.
+    internal static Action<string, int?, CancellationToken>? FolderLoadHook { get; set; }
 
     public CodeAnalysisPanelViewModel(Func<string, string, Task> openFile)
     {
@@ -541,6 +556,16 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             return;
         }
 
+        // A refreshed PR is read again from GitHub and loaded at its head
+        // now; like a commit it needs no working-tree scan (one runs when a
+        // time period is picked later).
+        if (reapply is not null)
+        {
+            _folderScan = null;
+            await ApplyPullRequestAsync(reapply, refresh: true);
+            return;
+        }
+
         // A commit needs only its own files: no working-tree scan and no
         // period history (both load if a time period is picked later).
         if (reapplyCommit is not null)
@@ -550,18 +575,30 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             return;
         }
 
-        IsScanning = true;
+        var (gen, ct) = StartLoad();
         ShowMessage("Scanning...");
         try
         {
-            // Re-applying a PR only needs the folder scan; skip an all-time history.
-            var days = reapply is not null ? DefaultPeriod.Days : SinceDays;
+            var days = SinceDays;
             var sw = Stopwatch.StartNew();
-            var snapshot = await Task.Run(() => CodeAnalysisRepositoryReader.Load(root, days));
+            var snapshot = await Task.Run(() =>
+            {
+                FolderLoadHook?.Invoke(root, days, ct);
+                return CodeAnalysisRepositoryReader.Load(root, days, ct);
+            });
+            if (!IsCurrentLoad(gen))
+            {
+                return;
+            }
+
             RecordTiming(sw.ElapsedMilliseconds, snapshot.History?.CommitCount ?? 0);
             _appliedPeriod = SelectedPeriod;
             _appliedDays = days;
             LoadFrom(snapshot.Scan, snapshot.History, keepFilters: refresh);
+        }
+        catch (Exception) when (!IsCurrentLoad(gen))
+        {
+            return;
         }
         catch (Exception ex)
         {
@@ -571,13 +608,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         finally
         {
             // Never leave the spinner stuck when the scan throws.
-            IsScanning = false;
-        }
-
-        if (reapply is not null)
-        {
-            await ApplyPullRequestAsync(reapply);
-            return;
+            EndLoad(gen);
         }
 
         HistoryApplied?.Invoke();
@@ -1010,12 +1041,24 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     // Just the counts: files, lines, and (with git) commits and authors.
     private void SetSummary(AnalysisNode root)
     {
+        // A PR or commit that changes nothing here (it works elsewhere in the
+        // repository): say so rather than show an unexplained empty tree.
+        if (_scan is { Files.Count: 0 } && (_appliedPullRequest is not null || _appliedCommit is not null))
+        {
+            ShowMessage(_appliedPullRequest is { } pr
+                ? $"PR #{pr.PullRequest.Number} changes no files in this folder - it works elsewhere in the repository (Use repo root to see them)."
+                : $"Commit {_appliedCommit!.ShortSha} changes no files in this folder - it works elsewhere in the repository (Use repo root to see them).");
+            return;
+        }
+
         var parts = new List<string> { Count(root.FileCount, "file"), Count(root.Lines.Total, "line") };
         var commits = -1;
         if (_history is not null)
         {
             commits = parts.Count;
-            parts.Add(Count(root.CommitCount, "commit"));
+            // A PR's local commits (picker entries too) come with its count.
+            var local = _appliedPullRequest is { } applied && _localCommits is { } mine && mine.Number == applied.PullRequest.Number ? mine.Commits.Count : 0;
+            parts.Add(Count(root.CommitCount, "commit") + (local > 0 ? $"\u00A0+{N(local)}\u00A0local" : string.Empty));
             parts.Add(Count(root.AuthorCount, "author"));
         }
         else if (!GitAvailable)
@@ -1104,6 +1147,19 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         return _history.Commits.Where((_, i) => ids is null || ids.Contains(i)).ToList();
     }
 
+    // A failure to read them only leaves them out.
+    private static IReadOnlyList<HistoryCommit> LocalCommitsOf(string root, PullRequestInfo pullRequest, CancellationToken ct)
+    {
+        try
+        {
+            return PullRequestRanges.LocalCommits(root, pullRequest, ct);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return Array.Empty<HistoryCommit>();
+        }
+    }
+
     internal void LoadCommitChoices()
     {
         var picked = _appliedCommit is not null ? _pickedFrom : null;
@@ -1120,6 +1176,13 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
                 Subject = commits.Count == 1 ? "All (1 commit)" : $"All ({N(commits.Count)} commits)",
                 IsCurrent = _appliedCommit is null,
             });
+        }
+
+        // A PR's local commits first: they come after its head.
+        var pullRequest = _appliedPullRequest?.PullRequest ?? (picked is not null ? _returnPullRequest : null);
+        if (pullRequest is not null && _localCommits is { } local && local.Number == pullRequest.Number)
+        {
+            choices.AddRange(local.Commits.Select(c => CommitChoice.From(c, now, c.Sha == _appliedCommit?.Sha, isLocal: true)));
         }
 
         choices.AddRange(commits.Select(c => CommitChoice.From(c, now, c.Sha == _appliedCommit?.Sha)));
@@ -1252,16 +1315,30 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
     // The code city: the same tree (filters, period, grouping) as a 3D city
     // instead of rows. Laid out only while it shows.
+    // The Debt view is the city in CityMode.Debt: the same 3D city, its
+    // buildings worn by each file's technical-debt score (CodeDebt).
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsTreeView))]
+    [NotifyPropertyChangedFor(nameof(IsHistoryCityView))]
+    [NotifyPropertyChangedFor(nameof(IsDebtView))]
     private bool _isCityView;
 
     public bool IsTreeView => !IsCityView;
 
+    // The City segment: the city coloured by history (Hotspots or Age).
+    public bool IsHistoryCityView => IsCityView && CityMode != CityMode.Debt;
+
+    public bool IsDebtView => IsCityView && CityMode == CityMode.Debt;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsCityHotspots))]
     [NotifyPropertyChangedFor(nameof(IsCityAge))]
+    [NotifyPropertyChangedFor(nameof(IsHistoryCityView))]
+    [NotifyPropertyChangedFor(nameof(IsDebtView))]
     private CityMode _cityMode = CityMode.Hotspots;
+
+    // What the City segment returns to from Debt.
+    private CityMode _historyCityMode = CityMode.Hotspots;
 
     public bool IsCityHotspots => CityMode == CityMode.Hotspots;
 
@@ -1283,13 +1360,24 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     private void ShowTree() => IsCityView = false;
 
     [RelayCommand]
-    private void ShowCity() => IsCityView = true;
+    private void ShowCity()
+    {
+        CityMode = _historyCityMode;
+        IsCityView = true;
+    }
 
     [RelayCommand]
-    private void ShowHotspots() => CityMode = CityMode.Hotspots;
+    private void ShowDebt()
+    {
+        CityMode = CityMode.Debt;
+        IsCityView = true;
+    }
 
     [RelayCommand]
-    private void ShowAge() => CityMode = CityMode.Age;
+    private void ShowHotspots() => CityMode = _historyCityMode = CityMode.Hotspots;
+
+    [RelayCommand]
+    private void ShowAge() => CityMode = _historyCityMode = CityMode.Age;
 
     [RelayCommand]
     private Task OpenCityFile(CityBlock? block)
@@ -1392,20 +1480,50 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         }
     }
 
-    public async Task ApplyPullRequestAsync(PullRequestInfo pullRequest)
+    // refresh: the PR shown, reloaded - first asked anew where its head and
+    // base are now (a force-push rewrites them); the tree, the filters and
+    // the selection stay.
+    public async Task ApplyPullRequestAsync(PullRequestInfo pullRequest, bool refresh = false)
     {
-        if (PullRequests is null || string.IsNullOrEmpty(_root) || !GitAvailable)
+        // Before the first load is done git is not known to work yet - but
+        // with a PR source it is a repository, so a PR picked meanwhile loads.
+        if (PullRequests is null || string.IsNullOrEmpty(_root) || (_ready && !GitAvailable))
         {
             return;
         }
 
-        IsScanning = true;
+        var (gen, ct) = StartLoad();
         ShowMessage($"Loading PR #{pullRequest.Number}...");
         try
         {
-            var range = await PullRequests.ResolveAsync(pullRequest, CancellationToken.None);
+            if (refresh)
+            {
+                var shown = pullRequest;
+                pullRequest = await LatestAsync(PullRequests, pullRequest, ct);
+                if (pullRequest.HeadRefOid != shown.HeadRefOid || pullRequest.BaseRefOid != shown.BaseRefOid)
+                {
+                    // Rewritten: the commits may arrive in a fetch below. The
+                    // warm cat-file would find them too (git rescans its packs
+                    // on a miss), but a fresh one starts from the new state.
+                    Budiff.Git.GitRepositoryReader.ReleaseSharedGit();
+                }
+            }
+
+            var range = await PullRequests.ResolveAsync(pullRequest, ct);
             var root = _root;
-            var snapshot = await Task.Run(() => CodeAnalysisRepositoryReader.LoadPullRequest(root, range));
+            if (!IsCurrentLoad(gen))
+            {
+                return;
+            }
+
+            var snapshot = await Task.Run(() => CodeAnalysisRepositoryReader.LoadPullRequest(root, range, ct));
+            var local = await Task.Run(() => LocalCommitsOf(root, pullRequest, ct));
+            if (!IsCurrentLoad(gen))
+            {
+                return;
+            }
+
+            _localCommits = (pullRequest.Number, local);
             _appliedPullRequest = range;
             _appliedCommit = null;
             _scan = snapshot.Scan;
@@ -1415,7 +1533,13 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             _appliedDays = null;
             PullRequestLabel = $"#{pullRequest.Number} {pullRequest.Title}";
             ForgetCommitReturn();
-            LoadFilters(_scan, _history, preserveSelection: true);
+            GitAvailable = true;
+            LoadFilters(_scan, _history, preserveSelection: _ready || refresh);
+            _ready = true;
+        }
+        catch (Exception) when (!IsCurrentLoad(gen))
+        {
+            return;
         }
         catch (Exception ex)
         {
@@ -1431,11 +1555,25 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         }
         finally
         {
-            IsScanning = false;
+            EndLoad(gen);
         }
 
         Rebuild();
         HistoryApplied?.Invoke();
+    }
+
+    // GitHub's current view of the PR; the known one when GitHub cannot be
+    // asked (offline, signed out) - its commits are local, so it still loads.
+    private static async Task<PullRequestInfo> LatestAsync(IPullRequestSource source, PullRequestInfo pullRequest, CancellationToken ct)
+    {
+        try
+        {
+            return await source.RefreshAsync(pullRequest, ct);
+        }
+        catch (PullRequestSourceException)
+        {
+            return pullRequest;
+        }
     }
 
     public async Task ApplyCommitAsync(CommitDetails commit)
@@ -1445,12 +1583,17 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             return;
         }
 
-        IsScanning = true;
+        var (gen, ct) = StartLoad();
         ShowMessage($"Loading commit {commit.ShortSha}...");
         try
         {
             var root = _root;
-            var snapshot = await Task.Run(() => CodeAnalysisRepositoryReader.LoadCommit(root, commit));
+            var snapshot = await Task.Run(() => CodeAnalysisRepositoryReader.LoadCommit(root, commit, ct));
+            if (!IsCurrentLoad(gen))
+            {
+                return;
+            }
+
             _appliedPullRequest = null;
             PullRequestLabel = string.Empty;
             _appliedCommit = commit;
@@ -1464,6 +1607,10 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             LoadFilters(_scan, _history, preserveSelection: _ready);
             _ready = true;
         }
+        catch (Exception) when (!IsCurrentLoad(gen))
+        {
+            return;
+        }
         catch (Exception ex)
         {
             Rebuild();
@@ -1472,7 +1619,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         }
         finally
         {
-            IsScanning = false;
+            EndLoad(gen);
         }
 
         Rebuild();
@@ -1491,6 +1638,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     private void ClearPullRequest()
     {
         _appliedPullRequest = null;
+        _localCommits = null;
         _appliedCommit = null;
         PullRequestLabel = string.Empty;
         if (_folderScan is not null)
@@ -1515,6 +1663,14 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
     private async Task ReloadHistoryAsync()
     {
+        // Picked while the folder's load still runs (the first one, or a
+        // refresh): load it again for this period, superseding that load.
+        if (!_suspendRebuild && !_ready && IsScanning && !string.IsNullOrEmpty(_root))
+        {
+            await LoadAsync(_root);
+            return;
+        }
+
         if (_suspendRebuild || !_ready || !GitAvailable)
         {
             Rebuild();
@@ -1540,21 +1696,32 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             }
         }
 
-        IsScanning = true;
+        var (gen, ct) = StartLoad();
         try
         {
             var sw = Stopwatch.StartNew();
+            var root = _root;
             if (_folderScan is null)
             {
-                // Opened on a commit: the working tree was never scanned.
-                var root = _root;
-                var snapshot = await Task.Run(() => CodeAnalysisRepositoryReader.Load(root, days));
+                // Opened on a commit or a PR: the working tree was never scanned.
+                var snapshot = await Task.Run(() => CodeAnalysisRepositoryReader.Load(root, days, ct));
+                if (!IsCurrentLoad(gen))
+                {
+                    return;
+                }
+
                 _folderScan = snapshot.Scan;
                 _history = snapshot.History;
             }
             else
             {
-                _history = await Task.Run(() => GitHistory.Load(_root, days));
+                var history = await Task.Run(() => GitHistory.Load(root, days, ct));
+                if (!IsCurrentLoad(gen))
+                {
+                    return;
+                }
+
+                _history = history;
             }
 
             RecordTiming(sw.ElapsedMilliseconds, _history?.CommitCount ?? 0);
@@ -1564,6 +1731,10 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             _appliedDays = days;
             LoadFilters(_folderScan, _history, preserveSelection: true);
         }
+        catch (Exception) when (!IsCurrentLoad(gen))
+        {
+            return;
+        }
         catch (Exception ex)
         {
             ShowMessage("Reload failed: " + ex.Message);
@@ -1572,12 +1743,39 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         finally
         {
             // Never leave the spinner stuck when the reload throws.
-            IsScanning = false;
+            EndLoad(gen);
         }
 
         Rebuild();
         HistoryApplied?.Invoke();
     }
+
+    private (int Gen, CancellationToken Token) StartLoad()
+    {
+        _loadCts?.Cancel();
+        _loadCts = new CancellationTokenSource();
+        IsScanning = true;
+        OnPropertyChanged(nameof(CanPickPeriod));
+        return (++_loadGen, _loadCts.Token);
+    }
+
+    private bool IsCurrentLoad(int gen) => gen == _loadGen;
+
+    private void EndLoad(int gen)
+    {
+        if (gen == _loadGen)
+        {
+            IsScanning = false;
+            OnPropertyChanged(nameof(CanPickPeriod));
+        }
+    }
+
+    // The period list works once git is known to be there - and already while
+    // the first load runs in a repository (a PR source means one), so a
+    // period or pull request can be picked without waiting for the default.
+    public bool CanPickPeriod => GitAvailable || (!_ready && IsScanning && PullRequests is not null);
+
+    partial void OnGitAvailableChanged(bool value) => OnPropertyChanged(nameof(CanPickPeriod));
 
     private void RecordTiming(long elapsedMs, int commits)
     {

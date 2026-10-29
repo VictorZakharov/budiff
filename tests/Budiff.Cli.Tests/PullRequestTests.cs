@@ -131,6 +131,36 @@ public sealed class PullRequestTests : IDisposable
         Assert.Null(Assert.Single(bare).Email);
     }
 
+    // A big organisation's repository may refuse the mentionable users (gh
+    // exits non-zero, the data still comes): the recent commit authors make
+    // the list. With neither part there is no list.
+    [Fact]
+    public void ParsePeople_FallsBackToCommitAuthors_OnAPartialAnswer()
+    {
+        var partial = """
+            {"data":{"repository":{
+              "mentionableUsers":null,
+              "defaultBranchRef":{"target":{"history":{"nodes":[
+                {"author":{"name":"Grace H","email":"grace@example.com","user":{"login":"grace","name":"Grace Hopper","avatarUrl":"https://avatars.example/grace"}}},
+                {"author":{"name":"Ada","email":"ada@example.com","user":{"login":"ada","name":null}}},
+                {"author":{"name":"Grace H","email":"old@example.com","user":{"login":"grace"}}},
+                null
+              ]}}}
+            }},
+            "errors":[{"type":"FORBIDDEN","path":["repository","mentionableUsers"],"message":"Resource not accessible"}]}
+            """;
+        Assert.True(PullRequestSearch.HasData(partial));
+        var people = PullRequestSearch.ParsePeople(partial);
+        Assert.Equal(
+            new (string, string?, string?)[] { ("ada", "Ada", "ada@example.com"), ("grace", "Grace Hopper", "grace@example.com") },
+            people.Select(p => (p.Login, p.Name, p.Email)));
+        Assert.Equal("https://avatars.example/grace", people[1].AvatarUrl);
+
+        Assert.False(PullRequestSearch.HasData("""{"data":null,"errors":[{"message":"no"}]}"""));
+        Assert.False(PullRequestSearch.HasData("gh: not json"));
+        Assert.Throws<PullRequestSourceException>(() => PullRequestSearch.ParsePeople("""{"data":{"repository":{"mentionableUsers":null,"defaultBranchRef":null}}}"""));
+    }
+
     [Theory]
     [InlineData("https://github.com/Owner/Repo.git", true)]
     [InlineData("git@github.com:owner/repo.git", true)]
@@ -156,11 +186,11 @@ public sealed class PullRequestTests : IDisposable
     {
         var (pr, forkPoint) = BuildPullRequestRepo();
 
-        var range = PullRequestRanges.Resolve(_root, pr, () => throw new InvalidOperationException("no fetch expected"), 10_000);
+        var range = PullRequestRanges.Resolve(_root, pr, () => throw new InvalidOperationException("no fetch expected"), 10_000, TestContext.Current.CancellationToken);
         Assert.Equal(forkPoint, range.BaseSha);
         Assert.Equal(pr.HeadRefOid, range.HeadSha);
 
-        var snapshot = CodeAnalysisRepositoryReader.LoadPullRequest(_root, range);
+        var snapshot = CodeAnalysisRepositoryReader.LoadPullRequest(_root, range, TestContext.Current.CancellationToken);
         var files = snapshot.Scan.Files.ToDictionary(f => f.RelativePath);
         Assert.Equal(new[] { "a.txt", "gone.txt", "new.cs", "sub/feature.txt" }, files.Keys.Order(StringComparer.Ordinal));
         Assert.Equal(4, files["a.txt"].Lines.Total);
@@ -175,7 +205,7 @@ public sealed class PullRequestTests : IDisposable
         Assert.False(history.ByPath.ContainsKey("sub/keep.txt"));
 
         // A folder scope sees only its part of the PR, with scope-relative paths.
-        var scoped = CodeAnalysisRepositoryReader.LoadPullRequest(Path.Combine(_root, "sub"), range);
+        var scoped = CodeAnalysisRepositoryReader.LoadPullRequest(Path.Combine(_root, "sub"), range, TestContext.Current.CancellationToken);
         Assert.Equal("feature.txt", Assert.Single(scoped.Scan.Files).RelativePath);
     }
 
@@ -185,7 +215,7 @@ public sealed class PullRequestTests : IDisposable
         var (pr, _) = BuildPullRequestRepo();
         var missing = pr with { HeadRefOid = new string('1', 40) };
 
-        var ex = Assert.Throws<PullRequestSourceException>(() => PullRequestRanges.Resolve(_root, missing, () => null, 10_000));
+        var ex = Assert.Throws<PullRequestSourceException>(() => PullRequestRanges.Resolve(_root, missing, () => null, 10_000, TestContext.Current.CancellationToken));
         Assert.Contains("Could not fetch PR #7", ex.Message);
     }
 

@@ -16,6 +16,8 @@ public sealed class FileStat
     public LineCounts Lines { get; init; }
 
     public bool IsBinary { get; init; }
+
+    public CodeShape Shape { get; init; }
 }
 
 public sealed class ScanResult
@@ -136,7 +138,7 @@ public static class CodeScanner
 
         var text = TextBytes.DecodeUtf8(bytes);
         var counts = LineCounter.Count(text, CommentSyntax.For(relativePath));
-        return new FileStat { RelativePath = relativePath, Extension = Path.GetExtension(relativePath).ToLowerInvariant(), Lines = counts };
+        return new FileStat { RelativePath = relativePath, Extension = Path.GetExtension(relativePath).ToLowerInvariant(), Lines = counts, Shape = CodeShape.Measure(text) };
     }
 
     // Binary or too big to count: listed, without line columns.

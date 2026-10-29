@@ -317,7 +317,7 @@
                                 <app:RepickComboBox x:Name="PeriodBox"
                                                     Width="132"
                                                     ItemsSource="{Binding Analysis.Periods}"
-                                                    IsEnabled="{Binding Analysis.GitAvailable}"
+                                                    IsEnabled="{Binding Analysis.CanPickPeriod}"
                                                     SelectedItem="{Binding Analysis.SelectedPeriod, Mode=TwoWay}"
                                                     RepickCommand="{Binding Analysis.RepickPeriodCommand}">
                                     <app:RepickComboBox.ItemTemplate>
@@ -456,6 +456,11 @@
                                                                                        Foreground="{DynamicResource BudiffMutedTextBrush}" />
                                                                             <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsCommit}">
                                                                                 <TextBlock Text="{Binding ShortSha}" FontSize="11" FontFamily="Cascadia Code,Consolas,monospace" Foreground="#61AFEF" />
+                                                                                <Border IsVisible="{Binding IsLocal}"
+                                                                                        Background="#33E0B04F" CornerRadius="3" Padding="4,0"
+                                                                                        ToolTip.Tip="Made in this clone on top of the pull request - not pushed to it yet">
+                                                                                    <TextBlock Text="local" FontSize="10.5" Foreground="#E0B04F" VerticalAlignment="Center" />
+                                                                                </Border>
                                                                                 <TextBlock Text="{Binding Author}" FontSize="11" TextTrimming="CharacterEllipsis"
                                                                                            Foreground="{DynamicResource BudiffMutedTextBrush}" />
                                                                             </StackPanel>
@@ -489,7 +494,7 @@
                                           Foreground="{DynamicResource BudiffMutedTextBrush}"
                                           ToolTip.Tip="A performance panel in the city: FPS over the last 15 s; click it to copy a debug report" />
                                 <Border x:Name="CityModeSwitch"
-                                        IsVisible="{Binding Analysis.IsCityView}"
+                                        IsVisible="{Binding Analysis.IsHistoryCityView}"
                                         BorderBrush="{DynamicResource BudiffBorderBrush}"
                                         BorderThickness="1"
                                         CornerRadius="4"
@@ -520,11 +525,17 @@
                                                 Content="Tree"
                                                 Command="{Binding Analysis.ShowTreeCommand}" />
                                         <Button x:Name="CityButton"
-                                                Classes="segment right small"
-                                                Classes.active="{Binding Analysis.IsCityView}"
+                                                Classes="segment small"
+                                                Classes.active="{Binding Analysis.IsHistoryCityView}"
                                                 Content="City"
                                                 ToolTip.Tip="The code as a 3D city: folders are districts, files are buildings"
                                                 Command="{Binding Analysis.ShowCityCommand}" />
+                                        <Button x:Name="DebtButton"
+                                                Classes="segment right small"
+                                                Classes.active="{Binding Analysis.IsDebtView}"
+                                                Content="Debt"
+                                                ToolTip.Tip="Technical debt as a city: height = code lines; big, deeply nested, wide and busy files stand dark and dilapidated, clean ones bright and whole"
+                                                Command="{Binding Analysis.ShowDebtCommand}" />
                                     </StackPanel>
                                 </Border>
                             </StackPanel>
@@ -606,6 +617,7 @@
                                   IsVisible="{Binding Analysis.IsCityView}"
                                   Model="{Binding Analysis.City}"
                                   SearchText="{Binding Analysis.SearchText}"
+                                  SelectedPath="{Binding OpenedPath}"
                                   OpenCommand="{Binding Analysis.OpenCityFileCommand}"
                                   RevealCommand="{Binding Analysis.RevealCityBlockCommand}"
                                   ShowFps="{Binding Analysis.ShowCityFps}" />
