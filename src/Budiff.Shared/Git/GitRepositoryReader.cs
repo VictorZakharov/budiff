@@ -170,13 +170,28 @@ public static class GitRepositoryReader
     {
         return WithSharedGit(scope.RepositoryRoot, git =>
         {
-            var oldBlob = git.ReadBlob(git.ResolveCommit(target.BaseRef), RepoPath(file.OldPath ?? file.Path));
+            var baseCommit = git.ResolveCommit(target.BaseRef);
+            var headCommit = target.HeadIsWorkingTree ? null : git.ResolveCommit(target.HeadRef ?? "HEAD");
+            var oldBlob = git.ReadBlob(baseCommit, RepoPath(file.OldPath ?? file.Path));
             var newBlob = target.HeadIsWorkingTree
                 ? file.State == GitFileState.Deleted ? BlobInfo.Empty : DiffLoader.ReadWorkingFile(file.FullPath)
-                : git.ReadBlob(git.ResolveCommit(target.HeadRef ?? "HEAD"), RepoPath(file.Path));
+                : git.ReadBlob(headCommit, RepoPath(file.Path));
+
+            // Two revisions (a PR, a commit) and the file at neither - a file
+            // of the working branch kept open into a PR elsewhere: say so, not
+            // an empty "diff" of one blank line.
+            if (!target.HeadIsWorkingTree && oldBlob.Bytes == 0 && newBlob.Bytes == 0
+                && !IsFileAt(git, baseCommit, RepoPath(file.OldPath ?? file.Path)) && !IsFileAt(git, headCommit, RepoPath(file.Path)))
+            {
+                return DiffResult.Message("This file is at neither end of this comparison - it is not part of it.");
+            }
+
             return DiffLoader.Build(oldBlob, newBlob);
         }, DiffResult.Message("Could not load this diff."));
     }
+
+    private static bool IsFileAt(GitObjects git, string? commit, string path)
+        => commit is not null && git.Info($"{commit}:{path}") is { Type: "blob" };
 
     // A repository file's raw bytes as it is at a revision (for the markdown
     // preview's pictures); null when absent there or bigger than maxBytes.

@@ -131,6 +131,36 @@ public sealed class PullRequestTests : IDisposable
         Assert.Null(Assert.Single(bare).Email);
     }
 
+    // A big organisation's repository may refuse the mentionable users (gh
+    // exits non-zero, the data still comes): the recent commit authors make
+    // the list. With neither part there is no list.
+    [Fact]
+    public void ParsePeople_FallsBackToCommitAuthors_OnAPartialAnswer()
+    {
+        var partial = """
+            {"data":{"repository":{
+              "mentionableUsers":null,
+              "defaultBranchRef":{"target":{"history":{"nodes":[
+                {"author":{"name":"Grace H","email":"grace@example.com","user":{"login":"grace","name":"Grace Hopper","avatarUrl":"https://avatars.example/grace"}}},
+                {"author":{"name":"Ada","email":"ada@example.com","user":{"login":"ada","name":null}}},
+                {"author":{"name":"Grace H","email":"old@example.com","user":{"login":"grace"}}},
+                null
+              ]}}}
+            }},
+            "errors":[{"type":"FORBIDDEN","path":["repository","mentionableUsers"],"message":"Resource not accessible"}]}
+            """;
+        Assert.True(PullRequestSearch.HasData(partial));
+        var people = PullRequestSearch.ParsePeople(partial);
+        Assert.Equal(
+            new (string, string?, string?)[] { ("ada", "Ada", "ada@example.com"), ("grace", "Grace Hopper", "grace@example.com") },
+            people.Select(p => (p.Login, p.Name, p.Email)));
+        Assert.Equal("https://avatars.example/grace", people[1].AvatarUrl);
+
+        Assert.False(PullRequestSearch.HasData("""{"data":null,"errors":[{"message":"no"}]}"""));
+        Assert.False(PullRequestSearch.HasData("gh: not json"));
+        Assert.Throws<PullRequestSourceException>(() => PullRequestSearch.ParsePeople("""{"data":{"repository":{"mentionableUsers":null,"defaultBranchRef":null}}}"""));
+    }
+
     [Theory]
     [InlineData("https://github.com/Owner/Repo.git", true)]
     [InlineData("git@github.com:owner/repo.git", true)]

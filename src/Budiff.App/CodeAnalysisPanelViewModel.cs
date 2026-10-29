@@ -1036,6 +1036,16 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     // Just the counts: files, lines, and (with git) commits and authors.
     private void SetSummary(AnalysisNode root)
     {
+        // A PR or commit that changes nothing here (it works elsewhere in the
+        // repository): say so rather than show an unexplained empty tree.
+        if (_scan is { Files.Count: 0 } && (_appliedPullRequest is not null || _appliedCommit is not null))
+        {
+            ShowMessage(_appliedPullRequest is { } pr
+                ? $"PR #{pr.PullRequest.Number} changes no files in this folder - it works elsewhere in the repository (Use repo root to see them)."
+                : $"Commit {_appliedCommit!.ShortSha} changes no files in this folder - it works elsewhere in the repository (Use repo root to see them).");
+            return;
+        }
+
         var parts = new List<string> { Count(root.FileCount, "file"), Count(root.Lines.Total, "line") };
         var commits = -1;
         if (_history is not null)

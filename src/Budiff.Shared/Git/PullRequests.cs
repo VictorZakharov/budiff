@@ -381,43 +381,94 @@ public static class PullRequestSearch
     // email, user { login } } }]. GitHub shows a profile email only when it
     // is public, so a person without one gets the newest address they
     // committed with (not a noreply one).
+    // Whether a GraphQL response carries data (it may carry errors too).
+    public static bool HasData(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    // The repository's mentionable users, plus the default branch's recent
+    // commit authors (their emails fill in hidden ones). Either part may be
+    // missing from a partial answer; with neither there is no list.
     public static IReadOnlyList<RepoPerson> ParsePeople(string json)
     {
         using var doc = JsonDocument.Parse(json);
-        var repository = doc.RootElement.GetProperty("data").GetProperty("repository");
+        if (!doc.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object
+            || !data.TryGetProperty("repository", out var repository) || repository.ValueKind != JsonValueKind.Object)
+        {
+            throw new PullRequestSourceException("GitHub did not list this repository's people.");
+        }
+
         var commitEmails = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var authors = new Dictionary<string, RepoPerson>(StringComparer.OrdinalIgnoreCase);
         if (repository.TryGetProperty("defaultBranchRef", out var branch) && branch.ValueKind == JsonValueKind.Object
             && branch.TryGetProperty("target", out var target) && target.ValueKind == JsonValueKind.Object
-            && target.TryGetProperty("history", out var history) && history.ValueKind == JsonValueKind.Object)
+            && target.TryGetProperty("history", out var history) && history.ValueKind == JsonValueKind.Object
+            && history.TryGetProperty("nodes", out var commits) && commits.ValueKind == JsonValueKind.Array)
         {
-            foreach (var commit in history.GetProperty("nodes").EnumerateArray())
+            foreach (var commit in commits.EnumerateArray())
             {
-                if (commit.TryGetProperty("author", out var author) && author.ValueKind == JsonValueKind.Object
-                    && author.TryGetProperty("user", out var user) && user.ValueKind == JsonValueKind.Object
-                    && Email(String(author, "email")) is { } email)
+                if (commit.ValueKind != JsonValueKind.Object
+                    || !commit.TryGetProperty("author", out var author) || author.ValueKind != JsonValueKind.Object
+                    || !author.TryGetProperty("user", out var user) || user.ValueKind != JsonValueKind.Object
+                    || String(user, "login") is not { Length: > 0 } login)
                 {
-                    commitEmails.TryAdd(String(user, "login"), email);
+                    continue;
+                }
+
+                var email = Email(String(author, "email"));
+                if (email is not null)
+                {
+                    commitEmails.TryAdd(login, email);
+                }
+
+                var name = String(user, "name") is { Length: > 0 } profile ? profile : String(author, "name");
+                var avatar = String(user, "avatarUrl");
+                authors.TryAdd(login, new RepoPerson(login, name.Length > 0 ? name : null, email, avatar.Length > 0 ? avatar : null));
+            }
+        }
+
+        var people = new Dictionary<string, RepoPerson>(StringComparer.OrdinalIgnoreCase);
+        var listed = repository.TryGetProperty("mentionableUsers", out var mentionable) && mentionable.ValueKind == JsonValueKind.Object
+            && mentionable.TryGetProperty("nodes", out var nodes) && nodes.ValueKind == JsonValueKind.Array;
+        if (listed)
+        {
+            foreach (var node in mentionable.GetProperty("nodes").EnumerateArray())
+            {
+                var login = node.ValueKind == JsonValueKind.Object ? String(node, "login") : string.Empty;
+                if (login.Length > 0)
+                {
+                    var name = String(node, "name");
+                    var avatar = String(node, "avatarUrl");
+                    people[login] = new RepoPerson(
+                        login,
+                        name.Length > 0 ? name : null,
+                        Email(String(node, "email")) ?? commitEmails.GetValueOrDefault(login),
+                        avatar.Length > 0 ? avatar : null);
                 }
             }
         }
 
-        var people = new List<RepoPerson>();
-        foreach (var node in repository.GetProperty("mentionableUsers").GetProperty("nodes").EnumerateArray())
+        foreach (var (login, author) in authors)
         {
-            var login = String(node, "login");
-            if (login.Length > 0)
-            {
-                var name = String(node, "name");
-                var avatar = String(node, "avatarUrl");
-                people.Add(new RepoPerson(
-                    login,
-                    name.Length > 0 ? name : null,
-                    Email(String(node, "email")) ?? commitEmails.GetValueOrDefault(login),
-                    avatar.Length > 0 ? avatar : null));
-            }
+            people.TryAdd(login, author);
         }
 
-        return people.OrderBy(p => p.Name ?? p.Login, StringComparer.OrdinalIgnoreCase).ToList();
+        if (!listed && people.Count == 0)
+        {
+            throw new PullRequestSourceException("GitHub did not list this repository's people.");
+        }
+
+        return people.Values.OrderBy(p => p.Name ?? p.Login, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     // An address worth showing: not empty, not GitHub's noreply stand-in.
@@ -650,10 +701,13 @@ public sealed class GitHubCliPullRequestSource : IPullRequestSource, IPullReques
         => Task.Run(() =>
         {
             var (owner, name) = Split(Repo(ct));
-            return PullRequestSearch.ParsePeople(Gh(
+            // Partial answers count: a big organisation's repository may not
+            // give out its mentionable users (or their emails) - the recent
+            // commit authors still make a list.
+            return PullRequestSearch.ParsePeople(GhData(
                 ct,
                 "api", "graphql",
-                "-f", "query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){mentionableUsers(first:100){nodes{login name email avatarUrl(size:64)}} defaultBranchRef{target{...on Commit{history(first:100){nodes{author{email user{login}}}}}}}}}",
+                "-f", "query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){mentionableUsers(first:100){nodes{login name email avatarUrl(size:64)}} defaultBranchRef{target{...on Commit{history(first:100){nodes{author{name email user{login name avatarUrl(size:64)}}}}}}}}}",
                 "-f", "owner=" + owner,
                 "-f", "name=" + name));
         }, ct);
@@ -728,6 +782,18 @@ public sealed class GitHubCliPullRequestSource : IPullRequestSource, IPullReques
     {
         var slash = repo.IndexOf('/');
         return slash > 0 ? (repo[..slash], repo[(slash + 1)..]) : (repo, repo);
+    }
+
+    // A GraphQL call whose answer may be partial: gh exits non-zero when the
+    // response has errors, even with data beside them - that data is kept.
+    private string GhData(CancellationToken ct, params string[] args)
+    {
+        if (ToolProcess.Run("gh", _root, TimeoutMs, ct, args, out var stdout, out var stderr) == 0 || PullRequestSearch.HasData(stdout))
+        {
+            return stdout;
+        }
+
+        throw new PullRequestSourceException(Explain(stderr));
     }
 
     private string Gh(CancellationToken ct, params string[] args)
