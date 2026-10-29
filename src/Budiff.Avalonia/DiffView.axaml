@@ -351,6 +351,44 @@
                 </Grid>
             </ScrollViewer>
 
+            <!-- Find in the diff (Ctrl+F, DiffView.Find.cs): one side at a time. -->
+            <Border x:Name="FindBar"
+                    IsVisible="False"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Top"
+                    Margin="0,4,18,0"
+                    Padding="6,4"
+                    CornerRadius="4"
+                    BorderThickness="1"
+                    BorderBrush="#4A4D55"
+                    Background="{Binding ToolbarBrush, ElementName=Root}">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <TextBlock x:Name="FindSide"
+                               VerticalAlignment="Center"
+                               FontSize="11.5"
+                               FontWeight="SemiBold"
+                               ToolTip.Tip="The side searched: point at the other side's code and press Ctrl+F to search it"
+                               Foreground="{Binding MutedTextBrush, ElementName=Root}" />
+                    <TextBox x:Name="FindBox"
+                             Width="220"
+                             MinHeight="0"
+                             Padding="6,3"
+                             FontSize="12.5"
+                             Watermark="Find" />
+                    <TextBlock x:Name="FindCount"
+                               MinWidth="64"
+                               VerticalAlignment="Center"
+                               FontSize="11.5"
+                               Foreground="{Binding MutedTextBrush, ElementName=Root}" />
+                    <Button x:Name="FindPreviousButton" Content="↑" ToolTip.Tip="Previous (Shift+Enter)" Padding="7,1" MinHeight="0"
+                            Background="Transparent" Foreground="{Binding TextBrush, ElementName=Root}" />
+                    <Button x:Name="FindNextButton" Content="↓" ToolTip.Tip="Next (Enter)" Padding="7,1" MinHeight="0"
+                            Background="Transparent" Foreground="{Binding TextBrush, ElementName=Root}" />
+                    <Button x:Name="FindCloseButton" Content="✕" ToolTip.Tip="Close (Esc)" Padding="7,1" MinHeight="0"
+                            Background="Transparent" Foreground="{Binding MutedTextBrush, ElementName=Root}" />
+                </StackPanel>
+            </Border>
+
             <!-- Formatted preview (e.g. markdown), rendered by the model's
                  IDocumentPreviewer in place of the line diff. -->
             <ContentControl x:Name="PreviewHost"

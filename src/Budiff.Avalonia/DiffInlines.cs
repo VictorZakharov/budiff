@@ -22,6 +22,15 @@ public static class DiffInlines
     public static readonly AttachedProperty<(int From, int To)> SelectionProperty =
         AvaloniaProperty.RegisterAttached<TextBlock, (int From, int To)>("Selection", typeof(DiffInlines));
 
+    // Find matches on the line, in the line's own characters; the code cell
+    // (CodeClip) marks them behind the text.
+    public static readonly AttachedProperty<IReadOnlyList<(int From, int To)>?> MarksProperty =
+        AvaloniaProperty.RegisterAttached<TextBlock, IReadOnlyList<(int From, int To)>?>("Marks", typeof(DiffInlines));
+
+    public static void SetMarks(TextBlock element, IReadOnlyList<(int From, int To)>? value) => element.SetValue(MarksProperty, value);
+
+    public static IReadOnlyList<(int From, int To)>? GetMarks(TextBlock element) => element.GetValue(MarksProperty);
+
     static DiffInlines()
     {
         RunsProperty.Changed.AddClassHandler<TextBlock>(OnRunsChanged);

@@ -110,6 +110,18 @@ public sealed partial class MainWindow : Window
                 e.Handled = true;
             }
         }, RoutingStrategies.Tunnel);
+
+        // Ctrl+F the diff pane did not take (the pointer is not over it):
+        // the bird's-eye's file filter.
+        AddHandler(KeyDownEvent, (_, e) =>
+        {
+            if (e.Key == Key.F && e.KeyModifiers is KeyModifiers.Control or KeyModifiers.Meta)
+            {
+                FilterBox.Focus();
+                FilterBox.SelectAll();
+                e.Handled = true;
+            }
+        }, RoutingStrategies.Bubble);
     }
 
     // A developer benchmark of the code city (BUDIFF_CITY_BENCH=<report file>,

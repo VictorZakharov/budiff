@@ -105,6 +105,12 @@ public partial class DiffView
 
     private void OnSelectionKeyDown(object? sender, KeyEventArgs e)
     {
+        // The find box's own keys (copy, select all, Esc) are its own.
+        if (e.Source is Visual source && FindBar.IsVisualAncestorOf(source))
+        {
+            return;
+        }
+
         var command = e.KeyModifiers == KeyModifiers.Control || e.KeyModifiers == KeyModifiers.Meta;
         if (command && e.Key is Key.C or Key.Insert && Selection is not null)
         {

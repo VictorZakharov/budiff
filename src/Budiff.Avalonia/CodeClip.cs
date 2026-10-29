@@ -34,6 +34,10 @@ public sealed class CodeClip : Decorator, global::Avalonia.Rendering.ICustomHitT
     public static readonly StyledProperty<double> ScrollXProperty =
         AvaloniaProperty.Register<CodeClip, double>(nameof(ScrollX));
 
+    // Find matches (DiffInlines.Marks), behind the text.
+    public static readonly StyledProperty<IBrush?> MatchBrushProperty =
+        AvaloniaProperty.Register<CodeClip, IBrush?>(nameof(MatchBrush), new SolidColorBrush(Color.Parse("#66B8860B")));
+
     public static readonly StyledProperty<IBrush?> WrapMarkBrushProperty =
         AvaloniaProperty.Register<CodeClip, IBrush?>(nameof(WrapMarkBrush), new SolidColorBrush(Color.Parse("#9DA0A8")));
 
@@ -53,12 +57,19 @@ public sealed class CodeClip : Decorator, global::Avalonia.Rendering.ICustomHitT
         TextBlock.TextTrimmingProperty.Changed.AddClassHandler<TextBlock>((text, _) => (text.Parent as CodeClip)?.InvalidateMeasure());
         DiffInlines.IndentProperty.Changed.AddClassHandler<TextBlock>((text, _) => (text.Parent as CodeClip)?.InvalidateMeasure());
         DiffInlines.SelectionProperty.Changed.AddClassHandler<TextBlock>((text, _) => (text.Parent as CodeClip)?.InvalidateVisual());
+        DiffInlines.MarksProperty.Changed.AddClassHandler<TextBlock>((text, _) => (text.Parent as CodeClip)?.InvalidateVisual());
     }
 
     public double ScrollX
     {
         get => GetValue(ScrollXProperty);
         set => SetValue(ScrollXProperty, value);
+    }
+
+    public IBrush? MatchBrush
+    {
+        get => GetValue(MatchBrushProperty);
+        set => SetValue(MatchBrushProperty, value);
     }
 
     public IBrush? WrapMarkBrush
@@ -119,6 +130,7 @@ public sealed class CodeClip : Decorator, global::Avalonia.Rendering.ICustomHitT
     public override void Render(DrawingContext context)
     {
         base.Render(context);
+        RenderMarks(context);
         RenderIndentSelection(context);
         if (Child is not TextBlock text || text.TextWrapping == TextWrapping.NoWrap || WrapMarkBrush is not { } brush)
         {
@@ -142,6 +154,31 @@ public sealed class CodeClip : Decorator, global::Avalonia.Rendering.ICustomHitT
             }
 
             y += lines[i].Height;
+        }
+    }
+
+    private void RenderMarks(DrawingContext context)
+    {
+        if (Child is not TextBlock text || DiffInlines.GetMarks(text) is not { Count: > 0 } marks || MatchBrush is not { } brush)
+        {
+            return;
+        }
+
+        var indent = DiffInlines.GetIndent(text).Length;
+        var origin = new Vector(text.Bounds.X + text.Padding.Left, text.Bounds.Y + text.Padding.Top);
+        foreach (var (from, to) in marks)
+        {
+            var start = Math.Max(0, from - indent);
+            var length = (to - indent) - start;
+            if (length <= 0)
+            {
+                continue;
+            }
+
+            foreach (var rect in text.TextLayout.HitTestTextRange(start, length))
+            {
+                context.FillRectangle(brush, rect.Translate(origin));
+            }
         }
     }
 
