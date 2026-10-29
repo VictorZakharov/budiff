@@ -7,10 +7,14 @@ namespace Budiff.CodeAnalysis;
 // What the city's buildings show.
 // Hotspots: height = churn (+/-), colour = churn x size (big files that keep changing).
 // Age: height = commits, colour = recency (fresh bright, stale faded).
+// Debt: height = code lines, colour and wear = the file's technical-debt
+// score (CodeDebt): clean files stand bright and whole, the worst ones dark,
+// sagging and with broken windows.
 public enum CityMode
 {
     Hotspots,
     Age,
+    Debt,
 }
 
 // One box of the city: a folder's plinth (a district) or a file's building.
@@ -37,7 +41,8 @@ public sealed class CityBlock
 
     public double Top => Base + Height;
 
-    // 0..1 along the mode's colour ramp; -1 = no data (no change in the period).
+    // 0..1 along the mode's colour ramp; -1 = no data (no change in the period;
+    // in the Debt city: a binary file). In the Debt city it is the debt score.
     public double Heat { get; init; } = -1;
 
     // 1 = the hottest file by churn x size; 0 = not a hotspot (no churn).
@@ -138,7 +143,8 @@ public static class CityLayout
     public static double HotspotScore(AnalysisNode node) => (double)node.Churn * Math.Max(1, node.Lines.Total);
 
     private static Func<AnalysisNode, double> HeightMetric(CityMode mode, bool hasHistory)
-        => !hasHistory ? _ => 0
+        => mode == CityMode.Debt ? n => n.Lines.Code
+            : !hasHistory ? _ => 0
             : mode == CityMode.Hotspots ? n => n.Churn
             : n => n.CommitCount;
 
@@ -190,6 +196,19 @@ public static class CityLayout
     private static Dictionary<AnalysisNode, double> Heat(List<AnalysisNode> files, CityMode mode, long nowUnix, bool hasHistory)
     {
         var heat = new Dictionary<AnalysisNode, double>();
+        if (mode == CityMode.Debt)
+        {
+            foreach (var file in files)
+            {
+                if (CodeDebt.Score(file, hasHistory) is var score and >= 0)
+                {
+                    heat[file] = score;
+                }
+            }
+
+            return heat;
+        }
+
         if (!hasHistory)
         {
             return heat;

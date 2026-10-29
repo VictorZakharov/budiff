@@ -58,6 +58,9 @@ public sealed class AnalysisNode
 
     public bool IsBinary { get; set; }
 
+    // A file's nesting and line widths (CodeShape); default for a folder.
+    public CodeShape Shape { get; set; }
+
     public long Added { get; set; }
 
     public long Removed { get; set; }

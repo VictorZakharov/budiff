@@ -256,6 +256,7 @@ public static class AnalysisTreeBuilder
             Lines = file.Lines,
             FileCount = 1,
             IsBinary = file.IsBinary,
+            Shape = file.Shape,
         };
 
         if (history is not null && history.ByPath.TryGetValue(file.RelativePath, out var h))
