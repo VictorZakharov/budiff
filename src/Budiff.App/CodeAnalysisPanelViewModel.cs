@@ -292,6 +292,11 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     private ScanResult? _folderScan;
     private PullRequestRange? _appliedPullRequest;
 
+    // Commits made here on top of the applied PR, not pushed to it yet (the
+    // commit picker lists them, marked local); kept while a commit picked
+    // from that PR is shown.
+    private (int Number, IReadOnlyList<HistoryCommit> Commits)? _localCommits;
+
     // Commit mode (a window opened on one commit): the commit, kept to apply
     // again when its period entry is picked again, and whether it is applied.
     private CommitDetails? _commit;
@@ -1051,7 +1056,9 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         if (_history is not null)
         {
             commits = parts.Count;
-            parts.Add(Count(root.CommitCount, "commit"));
+            // A PR's local commits (picker entries too) come with its count.
+            var local = _appliedPullRequest is { } applied && _localCommits is { } mine && mine.Number == applied.PullRequest.Number ? mine.Commits.Count : 0;
+            parts.Add(Count(root.CommitCount, "commit") + (local > 0 ? $"\u00A0+{N(local)}\u00A0local" : string.Empty));
             parts.Add(Count(root.AuthorCount, "author"));
         }
         else if (!GitAvailable)
@@ -1140,6 +1147,19 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         return _history.Commits.Where((_, i) => ids is null || ids.Contains(i)).ToList();
     }
 
+    // A failure to read them only leaves them out.
+    private static IReadOnlyList<HistoryCommit> LocalCommitsOf(string root, PullRequestInfo pullRequest, CancellationToken ct)
+    {
+        try
+        {
+            return PullRequestRanges.LocalCommits(root, pullRequest, ct);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return Array.Empty<HistoryCommit>();
+        }
+    }
+
     internal void LoadCommitChoices()
     {
         var picked = _appliedCommit is not null ? _pickedFrom : null;
@@ -1156,6 +1176,13 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
                 Subject = commits.Count == 1 ? "All (1 commit)" : $"All ({N(commits.Count)} commits)",
                 IsCurrent = _appliedCommit is null,
             });
+        }
+
+        // A PR's local commits first: they come after its head.
+        var pullRequest = _appliedPullRequest?.PullRequest ?? (picked is not null ? _returnPullRequest : null);
+        if (pullRequest is not null && _localCommits is { } local && local.Number == pullRequest.Number)
+        {
+            choices.AddRange(local.Commits.Select(c => CommitChoice.From(c, now, c.Sha == _appliedCommit?.Sha, isLocal: true)));
         }
 
         choices.AddRange(commits.Select(c => CommitChoice.From(c, now, c.Sha == _appliedCommit?.Sha)));
@@ -1490,11 +1517,13 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             }
 
             var snapshot = await Task.Run(() => CodeAnalysisRepositoryReader.LoadPullRequest(root, range, ct));
+            var local = await Task.Run(() => LocalCommitsOf(root, pullRequest, ct));
             if (!IsCurrentLoad(gen))
             {
                 return;
             }
 
+            _localCommits = (pullRequest.Number, local);
             _appliedPullRequest = range;
             _appliedCommit = null;
             _scan = snapshot.Scan;
@@ -1609,6 +1638,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     private void ClearPullRequest()
     {
         _appliedPullRequest = null;
+        _localCommits = null;
         _appliedCommit = null;
         PullRequestLabel = string.Empty;
         if (_folderScan is not null)

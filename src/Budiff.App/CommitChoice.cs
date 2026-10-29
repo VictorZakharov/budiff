@@ -34,8 +34,12 @@ public sealed class CommitChoice
 
     public bool IsCommit => !IsAll;
 
-    internal static CommitChoice From(HistoryCommit commit, DateTimeOffset now, bool current) => new()
+    // Made in this clone on top of the pull request, not pushed to it yet.
+    public bool IsLocal { get; init; }
+
+    internal static CommitChoice From(HistoryCommit commit, DateTimeOffset now, bool current, bool isLocal = false) => new()
     {
+        IsLocal = isLocal,
         Sha = commit.Sha,
         Subject = commit.Subject.Length > 0 ? commit.Subject : "(no message)",
         Author = commit.Author,

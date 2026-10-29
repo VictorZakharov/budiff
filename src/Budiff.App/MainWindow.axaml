@@ -456,6 +456,11 @@
                                                                                        Foreground="{DynamicResource BudiffMutedTextBrush}" />
                                                                             <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsCommit}">
                                                                                 <TextBlock Text="{Binding ShortSha}" FontSize="11" FontFamily="Cascadia Code,Consolas,monospace" Foreground="#61AFEF" />
+                                                                                <Border IsVisible="{Binding IsLocal}"
+                                                                                        Background="#33E0B04F" CornerRadius="3" Padding="4,0"
+                                                                                        ToolTip.Tip="Made in this clone on top of the pull request - not pushed to it yet">
+                                                                                    <TextBlock Text="local" FontSize="10.5" Foreground="#E0B04F" VerticalAlignment="Center" />
+                                                                                </Border>
                                                                                 <TextBlock Text="{Binding Author}" FontSize="11" TextTrimming="CharacterEllipsis"
                                                                                            Foreground="{DynamicResource BudiffMutedTextBrush}" />
                                                                             </StackPanel>

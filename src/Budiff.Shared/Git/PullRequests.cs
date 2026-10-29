@@ -901,6 +901,82 @@ public static class PullRequestRanges
             || trimmed.EndsWith(":" + repo, StringComparison.OrdinalIgnoreCase);
     }
 
+    // Commits made here on top of the PR and not pushed to it yet: those on
+    // HEAD (the PR checked out) or on the local branch named like the PR's
+    // head, after its head commit; newest first. None when neither builds
+    // on the PR's head.
+    public static IReadOnlyList<Budiff.CodeAnalysis.HistoryCommit> LocalCommits(string root, PullRequestInfo pr, CancellationToken ct = default)
+    {
+        if (pr.HeadRefOid.Length == 0)
+        {
+            return Array.Empty<Budiff.CodeAnalysis.HistoryCommit>();
+        }
+
+        var tips = new List<string> { "HEAD" };
+        if (pr.HeadRefName.Length > 0)
+        {
+            tips.Add("refs/heads/" + pr.HeadRefName);
+        }
+
+        foreach (var tip in tips)
+        {
+            if (!GitCli.TryRun(root, out var resolved, ct, "rev-parse", "--verify", "--quiet", tip + "^{commit}")
+                || resolved.Trim() == pr.HeadRefOid
+                || !GitCli.TryRun(root, out _, ct, "merge-base", "--is-ancestor", pr.HeadRefOid, resolved.Trim())
+                || !GitCli.TryRun(root, out var log, ct, "log", "--no-merges", "--numstat", "--format=%x1e%H%x1f%an%x1f%at%x1f%s", pr.HeadRefOid + ".." + resolved.Trim()))
+            {
+                continue;
+            }
+
+            var commits = ParseLocalLog(log);
+            if (commits.Count > 0)
+            {
+                return commits;
+            }
+        }
+
+        return Array.Empty<Budiff.CodeAnalysis.HistoryCommit>();
+    }
+
+    // git log --numstat with a "\x1e sha \x1f author \x1f time \x1f subject"
+    // header per commit; binary files ("-") count no lines.
+    internal static List<Budiff.CodeAnalysis.HistoryCommit> ParseLocalLog(string log)
+    {
+        var commits = new List<Budiff.CodeAnalysis.HistoryCommit>();
+        foreach (var entry in log.Split('\x1e', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var lines = entry.Split('\n');
+            var head = lines[0].Split('\x1f');
+            if (head.Length < 4 || head[0].Trim().Length < 40)
+            {
+                continue;
+            }
+
+            long added = 0, removed = 0;
+            foreach (var line in lines.Skip(1))
+            {
+                var parts = line.Split('\t');
+                if (parts.Length >= 3)
+                {
+                    added += long.TryParse(parts[0], out var a) ? a : 0;
+                    removed += long.TryParse(parts[1], out var r) ? r : 0;
+                }
+            }
+
+            commits.Add(new Budiff.CodeAnalysis.HistoryCommit
+            {
+                Sha = head[0].Trim(),
+                Author = head[1],
+                When = long.TryParse(head[2], out var when) ? when : 0,
+                Subject = head[3].TrimEnd('\r'),
+                Added = added,
+                Removed = removed,
+            });
+        }
+
+        return commits;
+    }
+
     private static bool HasCommit(string root, string sha, CancellationToken ct)
         => sha.Length > 0 && GitCli.TryRun(root, out _, ct, "cat-file", "-e", sha + "^{commit}");
 
