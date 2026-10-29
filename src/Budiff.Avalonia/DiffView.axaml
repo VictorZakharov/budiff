@@ -374,7 +374,7 @@
                              MinHeight="0"
                              Padding="6,3"
                              FontSize="12.5"
-                             Watermark="Find" />
+                             PlaceholderText="Find" />
                     <TextBlock x:Name="FindCount"
                                MinWidth="64"
                                VerticalAlignment="Center"

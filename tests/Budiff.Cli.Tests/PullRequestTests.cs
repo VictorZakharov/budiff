@@ -186,11 +186,11 @@ public sealed class PullRequestTests : IDisposable
     {
         var (pr, forkPoint) = BuildPullRequestRepo();
 
-        var range = PullRequestRanges.Resolve(_root, pr, () => throw new InvalidOperationException("no fetch expected"), 10_000);
+        var range = PullRequestRanges.Resolve(_root, pr, () => throw new InvalidOperationException("no fetch expected"), 10_000, TestContext.Current.CancellationToken);
         Assert.Equal(forkPoint, range.BaseSha);
         Assert.Equal(pr.HeadRefOid, range.HeadSha);
 
-        var snapshot = CodeAnalysisRepositoryReader.LoadPullRequest(_root, range);
+        var snapshot = CodeAnalysisRepositoryReader.LoadPullRequest(_root, range, TestContext.Current.CancellationToken);
         var files = snapshot.Scan.Files.ToDictionary(f => f.RelativePath);
         Assert.Equal(new[] { "a.txt", "gone.txt", "new.cs", "sub/feature.txt" }, files.Keys.Order(StringComparer.Ordinal));
         Assert.Equal(4, files["a.txt"].Lines.Total);
@@ -205,7 +205,7 @@ public sealed class PullRequestTests : IDisposable
         Assert.False(history.ByPath.ContainsKey("sub/keep.txt"));
 
         // A folder scope sees only its part of the PR, with scope-relative paths.
-        var scoped = CodeAnalysisRepositoryReader.LoadPullRequest(Path.Combine(_root, "sub"), range);
+        var scoped = CodeAnalysisRepositoryReader.LoadPullRequest(Path.Combine(_root, "sub"), range, TestContext.Current.CancellationToken);
         Assert.Equal("feature.txt", Assert.Single(scoped.Scan.Files).RelativePath);
     }
 
@@ -215,7 +215,7 @@ public sealed class PullRequestTests : IDisposable
         var (pr, _) = BuildPullRequestRepo();
         var missing = pr with { HeadRefOid = new string('1', 40) };
 
-        var ex = Assert.Throws<PullRequestSourceException>(() => PullRequestRanges.Resolve(_root, missing, () => null, 10_000));
+        var ex = Assert.Throws<PullRequestSourceException>(() => PullRequestRanges.Resolve(_root, missing, () => null, 10_000, TestContext.Current.CancellationToken));
         Assert.Contains("Could not fetch PR #7", ex.Message);
     }
 

@@ -129,7 +129,7 @@ public sealed class ReadmeGridScreenshotTests
             dc.DrawRectangle(null, new Pen(new SolidColorBrush(Color.Parse("#4A4D55")), 1), new Rect(x - 0.5, y - 0.5, w + 1, h + 1));
         }
 
-        target.Save(Path.Combine(UiSnapshot.OutputDir, name + ".png"));
+        target.Save(Path.Combine(UiSnapshot.OutputDir, name + ".png"), PngBitmapEncoderOptions.Default);
     }
 
     private static bool PicturesSettled(MainWindow window)

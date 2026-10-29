@@ -1537,7 +1537,7 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
         edges.Sort((p, q) => (q.A.Y + q.B.Y).CompareTo(p.A.Y + p.B.Y));
         foreach (var (a, b) in edges)
         {
-            if (Clip(a, b, view) is not var (t0, t1))
+            if (ClipSegment(a, b, view) is not var (t0, t1))
             {
                 continue;
             }
@@ -1558,7 +1558,7 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
 
     // The part of segment a-b inside the view, as parameters 0..1
     // (Liang-Barsky); null when none of it is.
-    private static (double, double)? Clip(Point a, Point b, Rect view)
+    private static (double, double)? ClipSegment(Point a, Point b, Rect view)
     {
         double t0 = 0, t1 = 1;
         var d = b - a;

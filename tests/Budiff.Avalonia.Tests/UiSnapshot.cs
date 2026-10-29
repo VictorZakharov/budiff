@@ -32,7 +32,7 @@ internal static class UiSnapshot
 
         Directory.CreateDirectory(OutputDir);
         var path = Path.Combine(OutputDir, name + ".png");
-        frame.Save(path);
+        frame.Save(path, PngBitmapEncoderOptions.Default);
         return new Snapshot(path, frame.PixelSize.Width, frame.PixelSize.Height);
     }
 
