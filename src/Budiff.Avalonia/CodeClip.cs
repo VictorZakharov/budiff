@@ -176,12 +176,12 @@ public sealed class CodeClip : Decorator, global::Avalonia.Rendering.ICustomHitT
     private static double MeasureIndent(TextBlock? text)
     {
         var indent = text is null ? string.Empty : DiffInlines.GetIndent(text);
-        return indent.Length == 0 ? 0 : Width(indent, text!);
+        return indent.Length == 0 ? 0 : WhitespaceWidth(indent, text!);
     }
 
-    private static double CharWidth(TextBlock? text) => text is null ? 0 : Width(" ", text);
+    private static double CharWidth(TextBlock? text) => text is null ? 0 : WhitespaceWidth(" ", text);
 
-    private static double Width(string whitespace, TextBlock text)
+    private static double WhitespaceWidth(string whitespace, TextBlock text)
     {
         var key = (whitespace, text.FontSize, text.FontFamily);
         if (!IndentWidths.TryGetValue(key, out var width))

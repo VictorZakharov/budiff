@@ -67,14 +67,22 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
     private static readonly Typeface UiFont = new(FontFamily.Default);
     private static readonly Typeface UiBold = new(FontFamily.Default, FontStyle.Normal, FontWeight.SemiBold);
 
-    // Ramps: Hotspots calm blue -> amber -> red; Age faded slate -> bright cyan.
+    // Ramps: Hotspots calm blue -> amber -> red; Age faded slate -> bright cyan;
+    // Debt fresh mint -> sand -> worn brown -> weathered grey (duller = worse;
+    // light enough that its dark, broken windows still show).
     private static readonly Color[] HotspotRamp = { Color.Parse("#4F6E91"), Color.Parse("#E0B04F"), Color.Parse("#E5484D") };
     private static readonly Color[] AgeRamp = { Color.Parse("#4D5766"), Color.Parse("#3E8FB0"), Color.Parse("#62D8F5") };
+    private static readonly Color[] DebtRamp = { Color.Parse("#9AD6BE"), Color.Parse("#CFC08C"), Color.Parse("#96826D"), Color.Parse("#6E655D") };
     private static readonly Color HotspotNone = Color.Parse("#596171");
     private static readonly Color AgeNone = Color.Parse("#3A3E45");
+    private static readonly Color DebtNone = Color.Parse("#4A4E55");
 
     private readonly Dictionary<uint, IBrush> _brushes = new();
     private readonly Dictionary<CityBlock, Color> _colors = new();
+
+    // The Debt city's roofs, windows and cracks, per building (empty in the
+    // other modes).
+    private Dictionary<CityBlock, DebtWear> _wear = new();
 
     // The model as a tree: top-level blocks, and each district's contents.
     private readonly List<CityBlock> _topLevel = new();
@@ -207,7 +215,7 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
     private void PushGpuGeometry(CityModel model)
     {
         var blocks = model.Districts.Concat(model.Buildings).ToList();
-        var faces = blocks.Count * 5 + 1;
+        var faces = blocks.Count * 5 + 1 + _wear.Values.Sum(w => w.Pieces.Count);
         var vertices = new float[faces * 6 * CityGlView.Stride];
         var count = 0;
         void Face(Vector3 a, Vector3 b, Vector3 c, Vector3 d, float shade, float edge)
@@ -230,11 +238,17 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
             var (x0, x1, z0, z1) = ((float)f.X, (float)(f.X + f.Width), (float)f.Y, (float)(f.Y + f.Height));
             var (y0, y1) = ((float)block.Base, (float)block.Top);
             var edge = block.IsFile ? 1f : 0.6f;
-            Face(new(x0, y1, z0), new(x1, y1, z0), new(x1, y1, z1), new(x0, y1, z1), 1f, edge);
-            Face(new(x0, y0, z0), new(x0, y1, z0), new(x0, y1, z1), new(x0, y0, z1), 0.70f, edge);
-            Face(new(x1, y0, z0), new(x1, y1, z0), new(x1, y1, z1), new(x1, y0, z1), 0.70f, edge);
-            Face(new(x0, y0, z0), new(x1, y0, z0), new(x1, y1, z0), new(x0, y1, z0), 0.52f, edge);
-            Face(new(x0, y0, z1), new(x1, y0, z1), new(x1, y1, z1), new(x0, y1, z1), 0.52f, edge);
+            var wear = _wear.GetValueOrDefault(block);
+            var (r00, r10, r11, r01) = wear is null ? (y1, y1, y1, y1) : (wear.Y00, wear.Y10, wear.Y11, wear.Y01);
+            Face(new(x0, r00, z0), new(x1, r10, z0), new(x1, r11, z1), new(x0, r01, z1), 1f, edge);
+            Face(new(x0, y0, z0), new(x0, r00, z0), new(x0, r01, z1), new(x0, y0, z1), 0.70f, edge);
+            Face(new(x1, y0, z0), new(x1, r10, z0), new(x1, r11, z1), new(x1, y0, z1), 0.70f, edge);
+            Face(new(x0, y0, z0), new(x1, y0, z0), new(x1, r10, z0), new(x0, r00, z0), 0.52f, edge);
+            Face(new(x0, y0, z1), new(x1, y0, z1), new(x1, r11, z1), new(x0, r01, z1), 0.52f, edge);
+            foreach (var piece in wear?.Pieces ?? Array.Empty<DebtWear.Piece>())
+            {
+                Face(piece.A, piece.B, piece.C, piece.D, 1f, 0);
+            }
         }
 
         _gpuBlocks = blocks;
@@ -249,7 +263,7 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
     // RGBA per vertex, in the order PushGpuGeometry wrote the faces.
     private byte[] GpuColors(CityModel model)
     {
-        var colors = new byte[(_gpuBlocks.Count * 5 + 1) * 6 * 4];
+        var colors = new byte[(_gpuBlocks.Count * 5 + 1 + _wear.Values.Sum(w => w.Pieces.Count)) * 6 * 4];
         var at = 0;
         void Put(Color color, int vertices)
         {
@@ -264,12 +278,17 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
         foreach (var block in _gpuBlocks)
         {
             var color = _colors[block];
-            if (_matches is not null && (!block.IsFile || !_matches.Contains(block)))
+            var ghost = _matches is not null && (!block.IsFile || !_matches.Contains(block));
+            if (ghost)
             {
                 color = Blend(color, Background, block.IsFile ? 0.78 : 0.55);
             }
 
             Put(color, 30);
+            foreach (var piece in _wear.GetValueOrDefault(block)?.Pieces ?? Array.Empty<DebtWear.Piece>())
+            {
+                Put(ghost ? Blend(piece.Color, Background, 0.78) : piece.Color, 6);
+            }
         }
 
         return colors;
@@ -283,6 +302,9 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
     internal CityBlock? Highlighted => _menuBlock ?? _hover;
 
     internal IReadOnlyCollection<CityBlock>? Matches => _matches;
+
+    // A Debt city building's roof and windows (null in the other modes).
+    internal DebtWear? WearOf(CityBlock block) => _wear.GetValueOrDefault(block);
 
     internal Vector3 CameraTarget => _target;
 
@@ -336,6 +358,7 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
             ? labelled.Districts.Where(d => d.Level <= 2).OrderBy(d => d.Level).ThenByDescending(d => d.Footprint.Area).ToList()
             : new List<CityBlock>();
         _colors.Clear();
+        _wear = new Dictionary<CityBlock, DebtWear>();
         _topLevel.Clear();
         _contents.Clear();
         _hover = null;
@@ -359,6 +382,8 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
             {
                 _colors[building] = BuildingColor(model.Mode, building.Heat);
             }
+
+            _wear = DebtWear.For(model);
 
             foreach (var district in model.Districts)
             {
@@ -1216,28 +1241,52 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
         var y0 = (float)block.Base;
         var y1 = (float)block.Top;
 
-        // Only the faces turned toward the eye.
+        // The roof's corner heights: level, unless debt has bent it.
+        var wear = _wear.GetValueOrDefault(block);
+        var (r00, r10, r11, r01) = wear is null ? (y1, y1, y1, y1) : (wear.Y00, wear.Y10, wear.Y11, wear.Y01);
+
+        // Only the faces turned toward the eye, each wall with its windows.
         if (_eye.X < x0)
         {
-            AddQuad(batch, ShadeColor(color, 0.70), 0, new(x0, y0, z0), new(x0, y1, z0), new(x0, y1, z1), new(x0, y0, z1));
+            AddQuad(batch, ShadeColor(color, 0.70), 0, new(x0, y0, z0), new(x0, r00, z0), new(x0, r01, z1), new(x0, y0, z1));
+            AddWear(batch, wear, DebtWear.Wall.Left, ghost);
         }
         else if (_eye.X > x1)
         {
-            AddQuad(batch, ShadeColor(color, 0.70), 0, new(x1, y0, z0), new(x1, y1, z0), new(x1, y1, z1), new(x1, y0, z1));
+            AddQuad(batch, ShadeColor(color, 0.70), 0, new(x1, y0, z0), new(x1, r10, z0), new(x1, r11, z1), new(x1, y0, z1));
+            AddWear(batch, wear, DebtWear.Wall.Right, ghost);
         }
 
         if (_eye.Z < z0)
         {
-            AddQuad(batch, ShadeColor(color, 0.52), 0, new(x0, y0, z0), new(x1, y0, z0), new(x1, y1, z0), new(x0, y1, z0));
+            AddQuad(batch, ShadeColor(color, 0.52), 0, new(x0, y0, z0), new(x1, y0, z0), new(x1, r10, z0), new(x0, r00, z0));
+            AddWear(batch, wear, DebtWear.Wall.Front, ghost);
         }
         else if (_eye.Z > z1)
         {
-            AddQuad(batch, ShadeColor(color, 0.52), 0, new(x0, y0, z1), new(x1, y0, z1), new(x1, y1, z1), new(x0, y1, z1));
+            AddQuad(batch, ShadeColor(color, 0.52), 0, new(x0, y0, z1), new(x1, y0, z1), new(x1, r11, z1), new(x0, r01, z1));
+            AddWear(batch, wear, DebtWear.Wall.Back, ghost);
         }
 
-        if (_eye.Y > y1)
+        if (_eye.Y > Math.Min(Math.Min(r00, r10), Math.Min(r11, r01)))
         {
-            AddQuad(batch, color, match ? FaceBatch.Match : FaceBatch.Edge, new(x0, y1, z0), new(x1, y1, z0), new(x1, y1, z1), new(x0, y1, z1));
+            AddQuad(batch, color, match ? FaceBatch.Match : FaceBatch.Edge, new(x0, r00, z0), new(x1, r10, z0), new(x1, r11, z1), new(x0, r01, z1));
+        }
+    }
+
+    private void AddWear(FaceBatch batch, DebtWear? wear, DebtWear.Wall wall, bool ghost)
+    {
+        if (wear is null)
+        {
+            return;
+        }
+
+        foreach (var piece in wear.Pieces)
+        {
+            if (piece.Wall == wall)
+            {
+                AddQuad(batch, ghost ? Blend(piece.Color, Background, 0.78) : piece.Color, 0, piece.A, piece.B, piece.C, piece.D);
+            }
         }
     }
 
@@ -1494,7 +1543,9 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
 
     private static void DrawLegend(DrawingContext context, CityModel model, Rect bounds)
     {
-        var (title, low, high, ramp, none) = !model.HasHistory
+        var (title, low, high, ramp, none) = model.Mode == CityMode.Debt
+            ? ("Height = code lines · colour, roof, windows = debt (size, nesting, width" + (model.HasHistory ? ", churn)" : ")"), "clean", "dilapidated", DebtRamp, DebtNone)
+            : !model.HasHistory
             ? ("Height = lines (no git history)", string.Empty, string.Empty, (Color[]?)null, HotspotNone)
             : model.Mode == CityMode.Hotspots
                 ? ("Height = churn · colour = churn × size", "calm", "hotspot", HotspotRamp, HotspotNone)
@@ -1528,7 +1579,7 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
 
             var swatch = new Rect(bar.Right + 18, bar.Y, 10, 10);
             context.DrawRectangle(new ImmutableSolidColorBrush(none), null, swatch, 2, 2);
-            context.DrawText(Text("no change", 10.5, MutedBrush), new Point(swatch.Right + 5, swatch.Y - 2));
+            context.DrawText(Text(model.Mode == CityMode.Debt ? "binary" : "no change", 10.5, MutedBrush), new Point(swatch.Right + 5, swatch.Y - 2));
         }
 
         var hint = Text("Drag: orbit · Right-drag: pan · Wheel: zoom · WASD: move · Space/Ctrl: up/down · Click: open · Home: reset", 11, MutedBrush);
@@ -1642,6 +1693,16 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
             yield break;
         }
 
+        if (model.Mode == CityMode.Debt)
+        {
+            foreach (var line in DebtShape(block, model))
+            {
+                yield return line;
+            }
+
+            yield break;
+        }
+
         // The same measures CityLayout builds from.
         Func<AnalysisNode, double> heightOf = !model.HasHistory ? n => n.Lines.Total
             : model.Mode == CityMode.Hotspots ? n => n.Churn
@@ -1689,6 +1750,47 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
                 new CardRun("changed " + age + " ago", CardTone.Heat),
                 new CardRun(" (brighter = newer)", CardTone.Muted),
             };
+        }
+    }
+
+    // The Debt city's card: the score and what it is made of.
+    private static IEnumerable<CardRun[]> DebtShape(CityBlock block, CityModel model)
+    {
+        var node = block.Node;
+        yield return new[]
+        {
+            new CardRun("Height ", CardTone.Muted),
+            new CardRun(Count(node.Lines.Code, "code line"), CardTone.Text),
+            new CardRun(Rank(model, block, n => n.Lines.Code, "taller", "tallest", "shortest"), CardTone.Muted),
+        };
+        if (block.Heat < 0)
+        {
+            yield return new[] { new CardRun("Debt ", CardTone.Muted), new CardRun("none: a binary file", CardTone.Muted) };
+            yield break;
+        }
+
+        var heatOf = model.Buildings.ToDictionary(b => b.Node, b => b.Heat);
+        yield return new[]
+        {
+            new CardRun("Debt ", CardTone.Muted),
+            new CardRun($"{block.Heat * 100:0}% - {CodeDebt.Describe(block.Heat)}", CardTone.Text),
+            new CardRun(Rank(model, block, n => heatOf.GetValueOrDefault(n, -1), "worse", "worst", "best"), CardTone.Muted),
+        };
+        var shape = node.Shape;
+        var nesting = new List<CardRun>
+        {
+            new("Nesting ", CardTone.Muted),
+            new($"{shape.MaxDepth} level{(shape.MaxDepth == 1 ? string.Empty : "s")} deep", CardTone.Text),
+        };
+        if (shape.DeepLines > 0)
+        {
+            nesting.Add(new CardRun($" · {Count(shape.DeepLines, "line")} at {CodeShape.DeepFrom}+", CardTone.Muted));
+        }
+
+        yield return nesting.ToArray();
+        if (shape.LongLines > 0)
+        {
+            yield return new[] { new CardRun("Width ", CardTone.Muted), new CardRun($"{Count(shape.LongLines, "line")} over {CodeShape.LongFrom} characters", CardTone.Text) };
         }
     }
 
@@ -1772,10 +1874,10 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
     {
         if (heat < 0)
         {
-            return mode == CityMode.Hotspots ? HotspotNone : AgeNone;
+            return mode switch { CityMode.Hotspots => HotspotNone, CityMode.Debt => DebtNone, _ => AgeNone };
         }
 
-        var ramp = mode == CityMode.Hotspots ? HotspotRamp : AgeRamp;
+        var ramp = mode switch { CityMode.Hotspots => HotspotRamp, CityMode.Debt => DebtRamp, _ => AgeRamp };
         var scaled = Math.Clamp(heat, 0, 1) * (ramp.Length - 1);
         var i = Math.Min((int)scaled, ramp.Length - 2);
         return Blend(ramp[i], ramp[i + 1], scaled - i);
