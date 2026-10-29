@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
 
 namespace Budiff.CodeAnalysis;
 
@@ -99,9 +101,28 @@ public readonly record struct CodeShape(int MaxDepth, int DeepLines, int LongLin
 //   churn    (weight 0.15) - commits in the period: none at 0, full at 20 or
 //                            more (log scale); without history the other three
 //                            share its weight.
-// Binary files have no score (-1).
+// Binary files, data, config and prose (JSON, YAML, CSV, Markdown, lock
+// files, minified bundles...) have no score (-1): they hold no code to owe
+// debt on, and the Debt city leaves them out.
 public static class CodeDebt
 {
+    private static readonly HashSet<string> NotCode = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".json", ".jsonc", ".json5", ".jsonl", ".ndjson", ".geojson", ".har",
+        ".csv", ".tsv", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".env", ".properties",
+        ".xml", ".svg", ".resx", ".plist", ".xsd", ".lock", ".sum", ".map", ".snap",
+        ".md", ".markdown", ".mdx", ".txt", ".rst", ".adoc", ".log",
+    };
+
+    // Whether a file holds code the score applies to.
+    public static bool IsCode(AnalysisNode file)
+        => file.IsFile && !file.IsBinary && IsCodeName(file.Name);
+
+    public static bool IsCodeName(string name)
+        => !NotCode.Contains(Path.GetExtension(name))
+            && !name.EndsWith(".min.js", StringComparison.OrdinalIgnoreCase)
+            && !name.EndsWith(".min.css", StringComparison.OrdinalIgnoreCase);
+
     public const double SizeWeight = 0.35;
     public const double NestingWeight = 0.40;
     public const double WidthWeight = 0.10;
@@ -109,7 +130,7 @@ public static class CodeDebt
 
     public static double Score(AnalysisNode file, bool hasHistory)
     {
-        if (file.IsBinary || !file.IsFile)
+        if (!IsCode(file))
         {
             return -1;
         }

@@ -78,6 +78,37 @@ public sealed class CodeDebtTests
         Assert.True(bigBlock.Heat > smallBlock.Heat);
     }
 
+    [Fact]
+    public void Debt_city_leaves_out_data_prose_and_binary_files()
+    {
+        var root = new AnalysisNode(string.Empty, string.Empty, AnalysisNodeKind.Root);
+        var src = new AnalysisNode("src", "src", AnalysisNodeKind.Folder);
+        var data = new AnalysisNode("data", "data", AnalysisNodeKind.Folder);
+        root.Children.Add(src);
+        root.Children.Add(data);
+        var code = File("src/App.cs", code: 200, new CodeShape(3, 0, 0), commits: 2);
+        var readme = File("src/README.md", code: 40, default, commits: 1);
+        var logo = File("src/logo.png", code: 0, default, commits: 1);
+        logo.IsBinary = true;
+        var bundle = File("src/vendor.min.js", code: 900, default, commits: 1);
+        var json = File("data/portfolio.json", code: 100_000, new CodeShape(7, 50_000, 0), commits: 13);
+        var yaml = File("data/config.yml", code: 30, default, commits: 1);
+        src.Children.AddRange(new[] { code, readme, logo, bundle });
+        data.Children.AddRange(new[] { json, yaml });
+
+        foreach (var file in new[] { readme, logo, bundle, json, yaml })
+        {
+            Assert.Equal(-1, CodeDebt.Score(file, hasHistory: true));
+        }
+
+        var city = CityLayout.Build(root, CityMode.Debt, 1_800_000_000, hasHistory: true);
+        Assert.Equal(new[] { code }, city.Buildings.Select(b => b.Node));
+        Assert.DoesNotContain(city.Districts, d => d.Node == data);
+
+        // The other cities still show every file.
+        Assert.Equal(6, CityLayout.Build(root, CityMode.Age, 1_800_000_000, hasHistory: true).Buildings.Count);
+    }
+
     private static AnalysisNode File(string path, int code, CodeShape shape, int commits)
     {
         var node = new AnalysisNode(path.Split('/')[^1], path, AnalysisNodeKind.File)
