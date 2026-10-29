@@ -39,8 +39,8 @@ public sealed class DebtCityTests
 
         Assert.True(vm.Analysis.IsDebtView);
         Assert.False(vm.Analysis.IsHistoryCityView);
-        Assert.True(debt.Classes.Contains("active"));
-        Assert.False(window.FindControl<Button>("CityButton")!.Classes.Contains("active"));
+        Assert.Contains("active", debt.Classes);
+        Assert.DoesNotContain("active", window.FindControl<Button>("CityButton")!.Classes);
         Assert.False(window.FindControl<Border>("CityModeSwitch")!.IsVisible, "Hotspots / Age belong to the City");
 
         var city = window.FindControl<CodeCityView>("CodeCity")!;
@@ -60,6 +60,9 @@ public sealed class DebtCityTests
         Assert.True(clean.Pieces.Count > 0);
         Assert.True(DarkShare(worn) > 0.45, $"dark windows {DarkShare(worn):P0}");
         Assert.True(DarkShare(clean) < 0.15, $"dark windows {DarkShare(clean):P0}");
+        Assert.Contains(worn.Pieces, p => p.Wall == DebtWear.Wall.Roof);
+        Assert.DoesNotContain(clean.Pieces, p => p.Wall == DebtWear.Wall.Roof);
+        Assert.Equal(4, worn.Pieces.Where(p => p.Color == Color.Parse("#0E0C0A")).Select(p => p.Wall).Distinct().Count());
 
         UiSnapshot.Capture(window, "city-debt");
 

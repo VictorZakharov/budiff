@@ -72,7 +72,7 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
     // light enough that its dark, broken windows still show).
     private static readonly Color[] HotspotRamp = { Color.Parse("#4F6E91"), Color.Parse("#E0B04F"), Color.Parse("#E5484D") };
     private static readonly Color[] AgeRamp = { Color.Parse("#4D5766"), Color.Parse("#3E8FB0"), Color.Parse("#62D8F5") };
-    private static readonly Color[] DebtRamp = { Color.Parse("#9AD6BE"), Color.Parse("#CFC08C"), Color.Parse("#96826D"), Color.Parse("#6E655D") };
+    private static readonly Color[] DebtRamp = { Color.Parse("#9AD6BE"), Color.Parse("#CFC08C"), Color.Parse("#9A7E62"), Color.Parse("#77685A") };
     private static readonly Color HotspotNone = Color.Parse("#596171");
     private static readonly Color AgeNone = Color.Parse("#3A3E45");
     private static readonly Color DebtNone = Color.Parse("#4A4E55");
@@ -1271,6 +1271,7 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
         if (_eye.Y > Math.Min(Math.Min(r00, r10), Math.Min(r11, r01)))
         {
             AddQuad(batch, color, match ? FaceBatch.Match : FaceBatch.Edge, new(x0, r00, z0), new(x1, r10, z0), new(x1, r11, z1), new(x0, r01, z1));
+            AddWear(batch, wear, DebtWear.Wall.Roof, ghost);
         }
     }
 
@@ -1544,7 +1545,7 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
     private static void DrawLegend(DrawingContext context, CityModel model, Rect bounds)
     {
         var (title, low, high, ramp, none) = model.Mode == CityMode.Debt
-            ? ("Height = code lines · colour, roof, windows = debt (size, nesting, width" + (model.HasHistory ? ", churn)" : ")"), "clean", "dilapidated", DebtRamp, DebtNone)
+            ? ("Height = code lines · colour and wear = debt (size, nesting, width" + (model.HasHistory ? ", churn)" : ")"), "clean", "dilapidated", DebtRamp, DebtNone)
             : !model.HasHistory
             ? ("Height = lines (no git history)", string.Empty, string.Empty, (Color[]?)null, HotspotNone)
             : model.Mode == CityMode.Hotspots
@@ -1577,9 +1578,13 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
             var highText = Text(high, 10.5, MutedBrush);
             context.DrawText(highText, new Point(bar.Right - highText.Width, bar.Bottom + 2));
 
-            var swatch = new Rect(bar.Right + 18, bar.Y, 10, 10);
-            context.DrawRectangle(new ImmutableSolidColorBrush(none), null, swatch, 2, 2);
-            context.DrawText(Text(model.Mode == CityMode.Debt ? "binary" : "no change", 10.5, MutedBrush), new Point(swatch.Right + 5, swatch.Y - 2));
+            // The Debt city has no unscored buildings to explain.
+            if (model.Mode != CityMode.Debt)
+            {
+                var swatch = new Rect(bar.Right + 18, bar.Y, 10, 10);
+                context.DrawRectangle(new ImmutableSolidColorBrush(none), null, swatch, 2, 2);
+                context.DrawText(Text("no change", 10.5, MutedBrush), new Point(swatch.Right + 5, swatch.Y - 2));
+            }
         }
 
         var hint = Text("Drag: orbit · Right-drag: pan · Wheel: zoom · WASD: move · Space/Ctrl: up/down · Click: open · Home: reset", 11, MutedBrush);
