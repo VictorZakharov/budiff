@@ -105,6 +105,6 @@ public sealed class DiffSelectionTests
         var text = WrapIndentTests.Code(host, row, window, side);
         var indent = DiffInlines.GetIndent(text).Length;
         var rect = text.TextLayout.HitTestTextPosition(System.Math.Max(0, index - indent));
-        return text.TranslatePoint(new Point(text.Padding.Left + rect.X + 2, rect.Y + (rect.Height / 2)), window)!.Value;
+        return text.TranslatePoint(new Point(text.Padding.Left + rect.X + Math.Min(2, rect.Width / 4), rect.Y + (rect.Height / 2)), window)!.Value;
     }
 }
