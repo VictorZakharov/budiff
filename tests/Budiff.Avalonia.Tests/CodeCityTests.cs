@@ -102,6 +102,46 @@ public sealed class CodeCityTests
         UiSnapshot.Capture(window, "city-docked-diff");
     }
 
+    // The file open in the diff pane is marked in the city (in blue, apart
+    // from the hover's white), and a file opened from the city is the
+    // tree's selection when the tree comes back.
+    [AvaloniaFact]
+    public void OpenFile_IsMarkedInTheCity_AndSelectedInTheTree()
+    {
+        var (window, vm) = Open("budiff-city-selection");
+        var renderer = vm.Analysis.Roots.SelectMany(r => r.SelfAndDescendants()).Single(r => r.IsFile && r.Name == "Renderer.cs");
+        _ = vm.Analysis.OpenAsync(renderer);
+        WaitUntil(() => vm.IsDiffOpen && vm.Diff.FileName == "Renderer.cs", "Renderer.cs open");
+        Assert.Equal(renderer.RelativePath.Replace('\\', '/'), vm.OpenedPath);
+
+        ShowCity(window, vm);
+        var city = window.FindControl<CodeCityView>("CodeCity")!;
+        Assert.Equal("Renderer.cs", city.Selected?.Name);
+        UiSnapshot.Capture(window, "city-selected");
+
+        // Open another file from the city: the mark moves with it.
+        var other = vm.Analysis.City.Buildings.Where(b => b.Name != "Renderer.cs").OrderByDescending(b => b.Top).First();
+        var at = TopCenter(city, window, other);
+        window.MouseMove(at);
+        window.MouseDown(at, MouseButton.Left);
+        window.MouseUp(at, MouseButton.Left);
+        WaitUntil(() => vm.Diff.FileName == other.Name, "the city's file open");
+        Assert.Same(other, city.Selected);
+
+        var tree = window.FindControl<TreeView>("AnalysisTree")!;
+        vm.Analysis.ShowTreeCommand.Execute(null);
+        UiSnapshot.Pump();
+        var selected = Assert.IsType<CodeAnalysisRow>(tree.SelectedItem);
+        Assert.Equal(other.RelativePath, selected.RelativePath.Replace('\\', '/'));
+        Assert.Equal(other.Name, vm.Diff.FileName);
+
+        // Closing the diff clears the mark.
+        vm.CloseDiffCommand.Execute(null);
+        UiSnapshot.Pump();
+        Assert.Null(vm.OpenedPath);
+        window.Close();
+    }
+
     // Right-click a building (without dragging): Show in Explorer, on that
     // file. Right-drag still pans, with no menu.
     [AvaloniaFact]

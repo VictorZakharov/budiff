@@ -39,6 +39,10 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
     public static readonly StyledProperty<ICommand?> RevealCommandProperty =
         AvaloniaProperty.Register<CodeCityView, ICommand?>(nameof(RevealCommand));
 
+    // The file open in the diff pane: its building stays marked.
+    public static readonly StyledProperty<string?> SelectedPathProperty =
+        AvaloniaProperty.Register<CodeCityView, string?>(nameof(SelectedPath));
+
     public static readonly StyledProperty<bool> ShowFpsProperty =
         AvaloniaProperty.Register<CodeCityView, bool>(nameof(ShowFps));
 
@@ -63,6 +67,9 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
     private static readonly IPen HoverPen = new ImmutablePen(new ImmutableSolidColorBrush(Colors.White), 2);
     private static readonly IPen HighlightPen = new ImmutablePen(new ImmutableSolidColorBrush(Color.Parse("#D0FFFFFF")), 1.5);
     private static readonly IBrush HighlightBrush = new ImmutableSolidColorBrush(Color.Parse("#40FFFFFF"));
+    private static readonly IPen SelectedPen = new ImmutablePen(new ImmutableSolidColorBrush(Color.Parse("#FF5CB2FF")), 2);
+    private static readonly IPen SelectedEdgePen = new ImmutablePen(new ImmutableSolidColorBrush(Color.Parse("#D05CB2FF")), 1.5);
+    private static readonly IBrush SelectedBrush = new ImmutableSolidColorBrush(Color.Parse("#504A9EFF"));
     private static readonly IPen MatchPen = new ImmutablePen(new ImmutableSolidColorBrush(Color.Parse("#FFE082")), 1.5);
     private static readonly Typeface UiFont = new(FontFamily.Default);
     private static readonly Typeface UiBold = new(FontFamily.Default, FontStyle.Normal, FontWeight.SemiBold);
@@ -114,6 +121,7 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
     private bool _panning;
     private Point? _pointer;
     private CityBlock? _hover;
+    private (CityModel? Model, string? Path, CityBlock? Block) _selectedFor;
     private CityBlock? _menuBlock;
 
     private bool _flying;
@@ -301,6 +309,31 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
     // open (the pointer has left for the menu), else the hovered one.
     internal CityBlock? Highlighted => _menuBlock ?? _hover;
 
+    public string? SelectedPath
+    {
+        get => GetValue(SelectedPathProperty);
+        set => SetValue(SelectedPathProperty, value);
+    }
+
+    // The open file's building in this city (null when it has none).
+    internal CityBlock? Selected
+    {
+        get
+        {
+            if (SelectedPath is not { Length: > 0 } path || Model is not { } model)
+            {
+                return null;
+            }
+
+            if (!ReferenceEquals(_selectedFor.Model, model) || _selectedFor.Path != path)
+            {
+                _selectedFor = (model, path, model.Buildings.FirstOrDefault(b => string.Equals(b.RelativePath, path, StringComparison.OrdinalIgnoreCase)));
+            }
+
+            return _selectedFor.Block;
+        }
+    }
+
     internal IReadOnlyCollection<CityBlock>? Matches => _matches;
 
     // A Debt city building's roof and windows (null in the other modes).
@@ -332,6 +365,10 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
         {
             var old = change.GetOldValue<CityModel?>();
             OnModelChanged(resetCamera: old is null || old.Buildings.Count == 0 || old.Size != Model?.Size);
+        }
+        else if (change.Property == SelectedPathProperty)
+        {
+            InvalidateVisual();
         }
         else if (change.Property == SearchTextProperty)
         {
@@ -1051,6 +1088,11 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
         _hud.Labels = 0;
         DrawLabels(context, model);
         DrawLegend(context, model, bounds);
+        if (Selected is { } selected && !ReferenceEquals(selected, _menuBlock ?? _hover))
+        {
+            DrawHighlight(context, selected, SelectedBrush, SelectedEdgePen, SelectedPen);
+        }
+
         if (_menuBlock is { } menuBlock)
         {
             DrawHighlight(context, menuBlock);
@@ -1317,12 +1359,16 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
         => Color.FromRgb((byte)(color.R * factor), (byte)(color.G * factor), (byte)(color.B * factor));
 
     // The hovered block lit up: every face turned to the eye of a building
-    // (so pointing at a side shows it), the roof outline of a district.
+    // (so pointing at a side shows it), the roof outline of a district. The
+    // open file's building the same way in blue.
     private void DrawHighlight(DrawingContext context, CityBlock block)
+        => DrawHighlight(context, block, HighlightBrush, HighlightPen, HoverPen);
+
+    private void DrawHighlight(DrawingContext context, CityBlock block, IBrush fill, IPen edge, IPen roof)
     {
         if (!block.IsFile)
         {
-            DrawTopOutline(context, block, HoverPen);
+            DrawTopOutline(context, block, roof);
             return;
         }
 
@@ -1331,23 +1377,23 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
         var (y0, y1) = ((float)block.Base, (float)block.Top);
         if (_eye.X < x0)
         {
-            DrawQuad(context, HighlightBrush, HighlightPen, new(x0, y0, z0), new(x0, y1, z0), new(x0, y1, z1), new(x0, y0, z1));
+            DrawQuad(context, fill, edge, new(x0, y0, z0), new(x0, y1, z0), new(x0, y1, z1), new(x0, y0, z1));
         }
         else if (_eye.X > x1)
         {
-            DrawQuad(context, HighlightBrush, HighlightPen, new(x1, y0, z0), new(x1, y1, z0), new(x1, y1, z1), new(x1, y0, z1));
+            DrawQuad(context, fill, edge, new(x1, y0, z0), new(x1, y1, z0), new(x1, y1, z1), new(x1, y0, z1));
         }
 
         if (_eye.Z < z0)
         {
-            DrawQuad(context, HighlightBrush, HighlightPen, new(x0, y0, z0), new(x1, y0, z0), new(x1, y1, z0), new(x0, y1, z0));
+            DrawQuad(context, fill, edge, new(x0, y0, z0), new(x1, y0, z0), new(x1, y1, z0), new(x0, y1, z0));
         }
         else if (_eye.Z > z1)
         {
-            DrawQuad(context, HighlightBrush, HighlightPen, new(x0, y0, z1), new(x1, y0, z1), new(x1, y1, z1), new(x0, y1, z1));
+            DrawQuad(context, fill, edge, new(x0, y0, z1), new(x1, y0, z1), new(x1, y1, z1), new(x0, y1, z1));
         }
 
-        DrawQuad(context, HighlightBrush, HoverPen, new(x0, y1, z0), new(x1, y1, z0), new(x1, y1, z1), new(x0, y1, z1));
+        DrawQuad(context, fill, roof, new(x0, y1, z0), new(x1, y1, z0), new(x1, y1, z1), new(x0, y1, z1));
     }
 
     private void DrawTopOutline(DrawingContext context, CityBlock block, IPen pen)
@@ -1370,7 +1416,7 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
 
         // Edges only where the face is big enough for them to help.
         var extent = Math.Max(Math.Max(Math.Abs(pa.X - pc.X), Math.Abs(pb.X - pd.X)), Math.Max(Math.Abs(pa.Y - pc.Y), Math.Abs(pb.Y - pd.Y)));
-        if (extent < 0.6 && pen != HoverPen && pen != MatchPen && pen != HighlightPen)
+        if (extent < 0.6 && pen != HoverPen && pen != MatchPen && pen != HighlightPen && pen != SelectedPen && pen != SelectedEdgePen)
         {
             return;
         }
@@ -1385,7 +1431,7 @@ internal sealed class CodeCityView : Control, global::Avalonia.Rendering.ICustom
             g.EndFigure(true);
         }
 
-        context.DrawGeometry(fill, fill is null || extent >= 8 || pen == HoverPen || pen == HighlightPen ? pen : null, geometry);
+        context.DrawGeometry(fill, fill is null || extent >= 8 || pen == HoverPen || pen == HighlightPen || pen == SelectedPen || pen == SelectedEdgePen ? pen : null, geometry);
     }
 
     // District names on their plinths, the top level always, deeper ones when

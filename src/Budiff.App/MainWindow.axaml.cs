@@ -381,6 +381,11 @@ public sealed partial class MainWindow : Window
             ApplyDiffLayout();
         }
 
+        if (e.PropertyName is nameof(MainWindowViewModel.OpenedPath))
+        {
+            SelectOpenedRow();
+        }
+
         if (e.PropertyName is nameof(MainWindowViewModel.ShowWideColumns))
         {
             FitColumns();
@@ -722,9 +727,30 @@ public sealed partial class MainWindow : Window
     private int _followGen;
     private long _lastFollow = long.MinValue / 2;
 
+    // A file opened elsewhere (the city, a link, Back) is the tree's
+    // selection too: its folders open and its row is selected and shown.
+    private void SelectOpenedRow()
+    {
+        if (_viewModel.OpenedPath is not { } path || IsOpenedRow(AnalysisTree.SelectedItem as CodeAnalysisRow))
+        {
+            return;
+        }
+
+        if (_viewModel.Analysis.Reveal(path) is { IsFile: true } row)
+        {
+            AnalysisTree.SelectedItem = row;
+            global::Avalonia.Threading.Dispatcher.UIThread.Post(() => AnalysisTree.TreeContainerFromItem(row)?.BringIntoView(), global::Avalonia.Threading.DispatcherPriority.Loaded);
+        }
+    }
+
+    private bool IsOpenedRow(CodeAnalysisRow? row)
+        => row is { IsFile: true } && _viewModel.OpenedPath is { } path
+            && string.Equals(row.RelativePath.Replace('\\', '/'), path, StringComparison.OrdinalIgnoreCase);
+
     private void OnAnalysisSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
-        if (!_viewModel.IsDiffOpen || AnalysisTree.SelectedItem is not CodeAnalysisRow row)
+        // The open file's own row: nothing to follow.
+        if (!_viewModel.IsDiffOpen || AnalysisTree.SelectedItem is not CodeAnalysisRow row || IsOpenedRow(row))
         {
             CancelFollow();
             return;

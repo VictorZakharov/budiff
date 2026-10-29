@@ -185,6 +185,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsFolderSummary))]
     [NotifyPropertyChangedFor(nameof(ShowCompareOptions))]
     [NotifyPropertyChangedFor(nameof(ShowWrapToggle))]
+    [NotifyPropertyChangedFor(nameof(OpenedPath))]
     private FolderSummary? _folderSummary;
 
     public bool IsFolderSummary => FolderSummary is not null;
@@ -221,7 +222,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         RememberScroll();
         ClearLinkTrail();
-        _openFile = null;
+        SetOpenFile(null);
         _openDiffFile = null;
         _openTarget = null;
         var summary = Analysis.SummarizeFolder(row);
@@ -278,6 +279,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowDiffPane))]
     [NotifyPropertyChangedFor(nameof(ShowWideColumns))]
+    [NotifyPropertyChangedFor(nameof(OpenedPath))]
     private bool _isDiffOpen;
 
     [ObservableProperty]
@@ -292,6 +294,16 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     // The docked diff pane: open and not torn off into its own window.
     public bool ShowDiffPane => IsDiffOpen && !IsDiffFloating;
+
+    // The file the diff pane shows (relative, '/'-separated), for the city
+    // and the tree to mark; null while no file is open.
+    public string? OpenedPath => IsDiffOpen && FolderSummary is null ? _openFile?.RelativePath.Replace('\\', '/') : null;
+
+    private void SetOpenFile((string FullPath, string RelativePath)? file)
+    {
+        _openFile = file;
+        OnPropertyChanged(nameof(OpenedPath));
+    }
 
     // Full bird's-eye (all columns + filter panes) whenever the docked diff is away.
     public bool ShowWideColumns => !ShowDiffPane;
@@ -503,7 +515,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _openDiffFile = null;
         _openTarget = null;
         RememberScroll();
-        _openFile = null;
+        SetOpenFile(null);
         ClearLinkTrail();
     }
 
@@ -910,7 +922,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         var reopened = _openFile?.FullPath == fullPath;
         RememberScroll();
-        _openFile = (fullPath, relativePath);
+        SetOpenFile((fullPath, relativePath));
         FolderSummary = null;
         Diff.RestoreScroll = restore ?? (reopened ? null : _scrollByFile.GetValueOrDefault(fullPath) ?? DiffScrollSpot.Start);
         if (_scope is null)

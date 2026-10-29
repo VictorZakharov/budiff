@@ -612,6 +612,7 @@
                                   IsVisible="{Binding Analysis.IsCityView}"
                                   Model="{Binding Analysis.City}"
                                   SearchText="{Binding Analysis.SearchText}"
+                                  SelectedPath="{Binding OpenedPath}"
                                   OpenCommand="{Binding Analysis.OpenCityFileCommand}"
                                   RevealCommand="{Binding Analysis.RevealCityBlockCommand}"
                                   ShowFps="{Binding Analysis.ShowCityFps}" />
