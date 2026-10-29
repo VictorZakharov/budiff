@@ -90,9 +90,11 @@
                             Foreground="{Binding TextBrush, ElementName=Root}"
                             VerticalAlignment="Center" />
                     <TextBlock Text="Diff"
+                               IsVisible="{Binding !CanView}"
                                FontWeight="SemiBold"
                                Foreground="{Binding MutedTextBrush, ElementName=Root}"
                                VerticalAlignment="Center" />
+                    <local:ViewModeSwitch IsVisible="{Binding CanView}" />
                 </StackPanel>
                 <TextBlock Grid.Column="1"
                            Text="{Binding Title}"
@@ -121,7 +123,7 @@
                           FontSize="12.5"
                           Foreground="{Binding TextBrush, ElementName=Root}" />
                 <CheckBox Grid.Column="5"
-                          IsVisible="{Binding ShowDiffOptions}"
+                          IsVisible="{Binding ShowCollapseOption}"
                           IsChecked="{Binding CollapseUnchanged}"
                           VerticalAlignment="Center"
                           Content="Collapse unchanged"

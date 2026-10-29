@@ -512,6 +512,10 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         }
 
         var reapplyCommit = SelectedPeriod.IsCommit ? _commit : null;
+        if (reapplyCommit is null)
+        {
+            ForgetCommitReturn();
+        }
 
         // A refresh of the same folder keeps what the reader set up: the tree
         // stays on screen while it scans, then only rows whose numbers changed
@@ -1007,8 +1011,10 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     private void SetSummary(AnalysisNode root)
     {
         var parts = new List<string> { Count(root.FileCount, "file"), Count(root.Lines.Total, "line") };
+        var commits = -1;
         if (_history is not null)
         {
+            commits = parts.Count;
             parts.Add(Count(root.CommitCount, "commit"));
             parts.Add(Count(root.AuthorCount, "author"));
         }
@@ -1023,13 +1029,176 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
         }
 
         SummaryText = string.Join(" - ", parts);
+
+        // "N commits" is a link to the commit picker (when there are any).
+        if (commits >= 0 && root.CommitCount > 0)
+        {
+            SummaryLead = string.Join(" - ", parts.Take(commits)) + " - ";
+            SummaryCommits = parts[commits];
+            SummaryTail = string.Concat(parts.Skip(commits + 1).Select(p => " - " + p));
+        }
+        else
+        {
+            SetSummaryParts(SummaryText);
+        }
     }
 
     // A no-break space keeps a number and its word on one line when the
     // summary wraps.
     private static string Count(long value, string noun) => $"{N(value)}\u00A0{noun}{(value == 1 ? string.Empty : "s")}";
 
-    private void ShowMessage(string message) => SummaryText = message;
+    private void ShowMessage(string message)
+    {
+        SummaryText = message;
+        SetSummaryParts(message);
+    }
+
+    private void SetSummaryParts(string text)
+    {
+        SummaryLead = text;
+        SummaryCommits = string.Empty;
+        SummaryTail = string.Empty;
+    }
+
+    // The summary line as the window shows it: the text around the commit
+    // count, which is a link (empty: no link).
+    [ObservableProperty]
+    private string _summaryLead = "Scanning...";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasCommitsLink))]
+    private string _summaryCommits = string.Empty;
+
+    [ObservableProperty]
+    private string _summaryTail = string.Empty;
+
+    public bool HasCommitsLink => SummaryCommits.Length > 0;
+
+    // The commit picker the commit count opens: the period's commits, newest
+    // first, after an "All" entry that stands for the whole period. Picking a
+    // commit scopes the view to it (the commit period); picking it again, or
+    // All, goes back. Filled as it opens (LoadCommitChoices).
+    public Budiff.Avalonia.BulkObservableCollection<CommitChoice> CommitChoices { get; } = new();
+
+    // What the picker lists: the period, in words.
+    [ObservableProperty]
+    private string _commitChoicesTitle = string.Empty;
+
+    // While a commit picked from the list is applied: the list it was picked
+    // from, and the period (or pull request) to go back to.
+    private List<HistoryCommit>? _pickedFrom;
+    private PeriodOption? _returnPeriod;
+    private PullRequestInfo? _returnPullRequest;
+    private string _returnLabel = string.Empty;
+
+    // The commits the summary counts: the history's, less those of files the
+    // filters hide.
+    private List<HistoryCommit> CountedCommits()
+    {
+        if (_history is null)
+        {
+            return new List<HistoryCommit>();
+        }
+
+        var ids = _lastRoot?.CommitIds;
+        return _history.Commits.Where((_, i) => ids is null || ids.Contains(i)).ToList();
+    }
+
+    internal void LoadCommitChoices()
+    {
+        var picked = _appliedCommit is not null ? _pickedFrom : null;
+        var commits = picked ?? CountedCommits();
+        var now = DateTimeOffset.Now;
+        var choices = new List<CommitChoice>(commits.Count + 1);
+
+        // A window opened on a commit has no period of its own to go back to.
+        if (_appliedCommit is null || picked is not null)
+        {
+            choices.Add(new CommitChoice
+            {
+                IsAll = true,
+                Subject = commits.Count == 1 ? "All (1 commit)" : $"All ({N(commits.Count)} commits)",
+                IsCurrent = _appliedCommit is null,
+            });
+        }
+
+        choices.AddRange(commits.Select(c => CommitChoice.From(c, now, c.Sha == _appliedCommit?.Sha)));
+        CommitChoices.ReplaceAll(choices);
+        CommitChoicesTitle = "Commits - " + (picked is not null ? _returnLabel : DescribeAppliedPeriod());
+    }
+
+    [RelayCommand]
+    private async Task PickCommitAsync(CommitChoice? choice)
+    {
+        if (choice is null || string.IsNullOrEmpty(_root))
+        {
+            return;
+        }
+
+        if (choice.IsAll || choice.Sha == _appliedCommit?.Sha)
+        {
+            await ReturnFromCommitAsync();
+            return;
+        }
+
+        var root = _root;
+        var commit = await Task.Run(() => GitRepositoryReader.ReadCommit(root, choice.Sha));
+        if (commit is null)
+        {
+            ShowMessage("Commit not found: " + choice.ShortSha);
+            return;
+        }
+
+        // Leaving the period (not another picked commit): remember the way back.
+        if (_appliedCommit is null)
+        {
+            _pickedFrom = CountedCommits();
+            _returnPeriod = _appliedPeriod;
+            _returnPullRequest = _appliedPullRequest?.PullRequest;
+            _returnLabel = DescribeAppliedPeriod();
+        }
+
+        _commit = commit;
+        if (!Periods.Contains(CommitPeriod))
+        {
+            Periods.Add(CommitPeriod);
+        }
+
+        OnPropertyChanged(nameof(CommitButtonText));
+        OnPropertyChanged(nameof(CommitTip));
+        await ApplyCommitAsync(commit);
+    }
+
+    // Back to the period (or pull request) the picked commit came from.
+    private async Task ReturnFromCommitAsync()
+    {
+        if (_appliedCommit is null || _pickedFrom is null)
+        {
+            return;
+        }
+
+        var pullRequest = _returnPullRequest;
+        var period = _returnPeriod is { IsCommit: false, IsPullRequest: false } p ? p : DefaultPeriod;
+
+        // (Forgotten once the period is back: a declined expensive reload
+        // stays on the commit, with its way back.)
+        if (pullRequest is not null)
+        {
+            await ApplyPullRequestAsync(pullRequest);
+        }
+        else
+        {
+            SelectedPeriod = period;
+        }
+    }
+
+    private void ForgetCommitReturn()
+    {
+        _pickedFrom = null;
+        _returnPeriod = null;
+        _returnPullRequest = null;
+        _returnLabel = string.Empty;
+    }
 
     private void SetAllExtensions(bool included) => SetAllFilterItems(Extensions, included, UpdateExtensionToggleState);
 
@@ -1245,6 +1414,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
             _appliedPeriod = SelectedPeriod;
             _appliedDays = null;
             PullRequestLabel = $"#{pullRequest.Number} {pullRequest.Title}";
+            ForgetCommitReturn();
             LoadFilters(_scan, _history, preserveSelection: true);
         }
         catch (Exception ex)
@@ -1389,6 +1559,7 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
             RecordTiming(sw.ElapsedMilliseconds, _history?.CommitCount ?? 0);
             ClearPullRequest();
+            ForgetCommitReturn();
             _appliedPeriod = SelectedPeriod;
             _appliedDays = days;
             LoadFilters(_folderScan, _history, preserveSelection: true);

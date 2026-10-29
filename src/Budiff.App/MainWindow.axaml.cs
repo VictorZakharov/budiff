@@ -8,6 +8,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
+using Budiff.Avalonia;
 using Budiff.Git;
 
 namespace Budiff.App;
@@ -70,6 +71,7 @@ public sealed partial class MainWindow : Window
                 PullRequestPickerViewModel.SearchAhead(source);
             }
         };
+        CommitsFlyout.Opening += (_, _) => _viewModel.Analysis.LoadCommitChoices();
         BodyGrid.SizeChanged += (_, _) => ClampDockedDiff();
         TreeArea.SizeChanged += (_, _) => FitColumns();
         BirdsEyePanel.SizeChanged += (_, _) => UpdateToolbarWrap();
@@ -94,6 +96,17 @@ public sealed partial class MainWindow : Window
             if (e.Key == Key.Enter && _viewModel.Analysis.IsCityView)
             {
                 CodeCity.FlyToBestMatch();
+                e.Handled = true;
+            }
+        }, RoutingStrategies.Tunnel);
+
+        // Ctrl+D flips the open diff between View and Diff, wherever the focus
+        // is (it usually stays in the tree). A closed pane leaves the mode be.
+        AddHandler(KeyDownEvent, (_, e) =>
+        {
+            if (ViewModeSwitch.IsToggleGesture(e) && _viewModel.IsDiffOpen && !_viewModel.IsFolderSummary && _viewModel.Diff.CanView)
+            {
+                _viewModel.Diff.ToggleViewModeCommand.Execute(null);
                 e.Handled = true;
             }
         }, RoutingStrategies.Tunnel);
@@ -319,6 +332,31 @@ public sealed partial class MainWindow : Window
 
         var picker = new PullRequestPickerWindow(new PullRequestPickerViewModel(source));
         return await picker.ShowDialog<PullRequestInfo?>(this);
+    }
+
+    // The summary line's commit list: filled from the loaded history as it
+    // drops down (no git runs for it).
+    internal Flyout CommitsFlyout => (Flyout)CommitsLink.Flyout!;
+
+    // A commit picked from the list: the view scopes to it (or back to the
+    // period, for All or the commit already shown).
+    // async void: a throw here is an unhandled process crash, so guard.
+    private async void OnCommitChoiceClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Control { DataContext: CommitChoice choice })
+        {
+            return;
+        }
+
+        CommitsFlyout.Hide();
+        try
+        {
+            await _viewModel.Analysis.PickCommitCommand.ExecuteAsync(choice);
+        }
+        catch (Exception ex)
+        {
+            _viewModel.StatusText = "Open commit failed: " + ex.Message;
+        }
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)

@@ -35,6 +35,8 @@ public sealed partial class DiffViewModel : ObservableObject
     private IBrush _defaultSyntaxBrush = Brush("#D4D4D4");
     private bool _collapseUnchanged = true;
     private bool _hasChanges;
+    private bool _hasNewSide;
+    private bool _diffSinglePane;
     private DocumentPreviewMode _previewMode = DocumentPreviewMode.NewOnly;
     private IDocumentPreviewer? _previewer;
     private double _splitRatio = 0.5;
@@ -84,8 +86,62 @@ public sealed partial class DiffViewModel : ObservableObject
 
     public bool IsPreviewActive => ShowPreview && CanPreview && !IsPlaceholder;
 
+    // View / Diff: View shows the file as it is now - only the new side, with
+    // no change colours, bars, removed lines, gaps or funnel - like the file
+    // opened in an editor (still read-only, highlighted, numbered, blamed).
+    // Sticky across files, like Preview; a window starts in Diff.
+    [ObservableProperty]
+    private bool _isViewMode;
+
+    // There is a change to hide and a file left to show: not for a placeholder,
+    // a plain file view, an unchanged file (already shown as it is) or a
+    // deleted one (no new side).
+    public bool CanView => !IsPlaceholder && !IsFileView && _hasChanges && _hasNewSide;
+
+    public bool IsViewActive => IsViewMode && CanView;
+
+    public bool IsDiffActive => !IsViewActive;
+
+    [RelayCommand]
+    private void ToggleViewMode()
+    {
+        if (CanView)
+        {
+            IsViewMode = !IsViewMode;
+        }
+    }
+
+    [RelayCommand]
+    private void ShowView() => IsViewMode = true;
+
+    [RelayCommand]
+    private void ShowDiff() => IsViewMode = false;
+
+    // The rows, the layout and the preview follow the mode in effect.
+    partial void OnIsViewModeChanged(bool value)
+    {
+        NotifyViewState();
+        if (_all.Count > 0)
+        {
+            Rebuild();
+            PreviewVersion++;
+        }
+    }
+
+    private void NotifyViewState()
+    {
+        OnPropertyChanged(nameof(CanView));
+        OnPropertyChanged(nameof(IsViewActive));
+        OnPropertyChanged(nameof(IsDiffActive));
+        OnPropertyChanged(nameof(IsSinglePane));
+        OnPropertyChanged(nameof(ShowCollapseOption));
+    }
+
     // Blame and wrap belong to the line diff; the preview has neither.
     public bool ShowBlameOption => ShowDiffOptions && !IsPreviewActive;
+
+    // Nothing is folded away in View mode: the file shows whole.
+    public bool ShowCollapseOption => ShowDiffOptions && !IsViewActive;
 
     public bool ShowWrapOption => !IsPreviewActive;
 
@@ -182,7 +238,7 @@ public sealed partial class DiffViewModel : ObservableObject
             string.Join("\n", oldLines),
             string.Join("\n", newLines),
             _all,
-            _previewMode,
+            IsViewActive ? DocumentPreviewMode.NewOnly : _previewMode,
             _collapseUnchanged,
             PreviewContext,
             FileName.Length > 0 ? FileName : null);
@@ -202,7 +258,11 @@ public sealed partial class DiffViewModel : ObservableObject
 
     partial void OnIsPlaceholderChanged(bool value) => NotifyPreviewState();
 
-    partial void OnIsFileViewChanged(bool value) => NotifyPreviewState();
+    partial void OnIsFileViewChanged(bool value)
+    {
+        NotifyPreviewState();
+        NotifyViewState();
+    }
 
     [ObservableProperty]
     private string _title = "Diff";
@@ -251,6 +311,7 @@ public sealed partial class DiffViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsBlameVisible))]
     [NotifyPropertyChangedFor(nameof(BlameGutterWidth))]
     [NotifyPropertyChangedFor(nameof(ShowDiffOptions))]
+    [NotifyPropertyChangedFor(nameof(ShowCollapseOption))]
     private bool _isFileView;
 
     // The Blame / Collapse unchanged toggles mean nothing in a file view.
@@ -299,8 +360,8 @@ public sealed partial class DiffViewModel : ObservableObject
 
     // A wholly added (new file) or wholly deleted diff has one empty side -
     // render just the populated side at full width instead of a dead half.
-    [ObservableProperty]
-    private bool _isSinglePane;
+    // View mode shows one side too.
+    public bool IsSinglePane => _diffSinglePane || IsViewActive;
 
     [ObservableProperty]
     private string _placeholder = string.Empty;
@@ -535,7 +596,10 @@ public sealed partial class DiffViewModel : ObservableObject
         _maxLineLength = 0;
         MaxScroll = 0;
         HorizontalScroll = 0;
-        IsSinglePane = false;
+        _diffSinglePane = false;
+        _hasChanges = false;
+        _hasNewSide = false;
+        NotifyViewState();
         Rows.Clear();
         Placeholder = text;
         IsPlaceholder = true;
@@ -569,17 +633,21 @@ public sealed partial class DiffViewModel : ObservableObject
         var anyChange = false;
         var allAdded = true;
         var allRemoved = true;
+        var newSide = false;
         foreach (var row in rows)
         {
             anyChange |= row.Kind != DiffKind.Unchanged;
             allAdded &= row.Kind == DiffKind.Added;
             allRemoved &= row.Kind == DiffKind.Removed;
+            newSide |= row.NewNo is not null;
         }
 
         // Identical sides (no change at all) show the file itself: one pane,
         // nothing folded away - collapsing would hide the whole file in a gap.
         _hasChanges = anyChange;
-        IsSinglePane = !anyChange || allAdded || allRemoved;
+        _hasNewSide = newSide;
+        _diffSinglePane = !anyChange || allAdded || allRemoved;
+        NotifyViewState();
         _previewMode = !anyChange || allAdded ? DocumentPreviewMode.NewOnly
             : allRemoved ? DocumentPreviewMode.OldOnly
             : DocumentPreviewMode.Diff;
@@ -833,8 +901,56 @@ public sealed partial class DiffViewModel : ObservableObject
         }
     }
 
+    // Where a view scrolls so the same place stays on screen after the rows
+    // were rebuilt (View / Diff flipped): the index in Rows of the first row
+    // at or after row (one shown before) in the file.
+    public int RowIndexNear(DiffRowVm? row)
+    {
+        if (row is null || Rows.Count == 0)
+        {
+            return 0;
+        }
+
+        var index = new Dictionary<DiffRow, int>(ReferenceEqualityComparer.Instance);
+        for (var i = 0; i < _all.Count; i++)
+        {
+            index[_all[i]] = i;
+        }
+
+        int Start(DiffRowVm vm) => vm.Source is { } source && index.TryGetValue(source, out var at) ? at : vm.GapRunStart;
+
+        var anchor = Start(row);
+        for (var k = 0; k < Rows.Count; k++)
+        {
+            // A gap folds the anchor away: stop at the gap itself.
+            var next = k + 1 < Rows.Count ? Start(Rows[k + 1]) : int.MaxValue;
+            if (Start(Rows[k]) >= anchor || (Rows[k].IsGap && next > anchor))
+            {
+                return k;
+            }
+        }
+
+        return Rows.Count - 1;
+    }
+
     private void Rebuild()
     {
+        if (IsViewActive)
+        {
+            // The file as it is now: its lines, plain - no tint, no bar.
+            var lines = new List<DiffRowVm>(_all.Count);
+            foreach (var row in _all)
+            {
+                if (row.NewNo is not null)
+                {
+                    lines.Add(Content(row, compact: false, plain: true));
+                }
+            }
+
+            Rows.ReplaceAll(lines);
+            return;
+        }
+
         // Built as a list and swapped in with ONE reset: per-row Add events made
         // the items host (and the gutter) process thousands of changes per toggle.
         // The collapse/gap shape itself lives in DiffRowCollapser.
@@ -856,9 +972,10 @@ public sealed partial class DiffViewModel : ObservableObject
         Rows.ReplaceAll(rows);
     }
 
-    private DiffRowVm Content(DiffRow row, bool compact)
+    // plain: View mode - the line untinted, whatever its change.
+    private DiffRowVm Content(DiffRow row, bool compact, bool plain = false)
     {
-        var (oldBg, newBg) = row.Kind switch
+        var (oldBg, newBg) = plain ? ((IBrush)Brushes.Transparent, (IBrush)Brushes.Transparent) : row.Kind switch
         {
             DiffKind.Added => (Brushes.Transparent, _addedBackground),
             DiffKind.Removed => (_removedBackground, (IBrush)Brushes.Transparent),
@@ -876,7 +993,7 @@ public sealed partial class DiffViewModel : ObservableObject
             OldRuns = RunsFor(_oldRuns, row.OldNo),
             NewRuns = RunsFor(_newRuns, row.NewNo),
             Blame = BlameFor(row),
-            Kind = row.Kind,
+            Kind = plain ? DiffKind.Unchanged : row.Kind,
             IsCompact = compact,
             OldBackground = oldBg,
             NewBackground = newBg,
