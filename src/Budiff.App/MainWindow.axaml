@@ -317,7 +317,7 @@
                                 <app:RepickComboBox x:Name="PeriodBox"
                                                     Width="132"
                                                     ItemsSource="{Binding Analysis.Periods}"
-                                                    IsEnabled="{Binding Analysis.GitAvailable}"
+                                                    IsEnabled="{Binding Analysis.CanPickPeriod}"
                                                     SelectedItem="{Binding Analysis.SelectedPeriod, Mode=TwoWay}"
                                                     RepickCommand="{Binding Analysis.RepickPeriodCommand}">
                                     <app:RepickComboBox.ItemTemplate>

@@ -20,7 +20,7 @@ using Xunit;
 
 namespace Budiff.Avalonia.Tests;
 
-public sealed class PullRequestModeTests
+public sealed partial class PullRequestModeTests
 {
     [Fact]
     public async Task Picker_DefaultsToMine_TenAtATime_AndPagesUntilExhausted()
