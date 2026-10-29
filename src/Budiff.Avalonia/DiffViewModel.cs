@@ -605,6 +605,9 @@ public sealed partial class DiffViewModel : ObservableObject
         IsPlaceholder = true;
     }
 
+    // Every row of the diff, collapsed or not (the text a selection copies).
+    public IReadOnlyList<DiffRow> AllRows => _all;
+
     public void SetDiff(IReadOnlyList<DiffRow> rows)
     {
         _loadingTimer?.Stop();

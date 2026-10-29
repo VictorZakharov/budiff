@@ -8,15 +8,21 @@
         <!-- Line wrap (the root's "wrap" class): code wraps inside its pane and
              rows grow taller; otherwise each code cell (CodeClip) shifts
              sideways with the shared horizontal scrollbar. -->
-        <Style Selector="TextBlock.code">
+        <Style Selector=":is(TextBlock).code">
             <Setter Property="TextWrapping" Value="NoWrap" />
         </Style>
-        <Style Selector="DockPanel.wrap TextBlock.code">
+        <Style Selector="local|CodeClip">
+            <Setter Property="Cursor" Value="Ibeam" />
+        </Style>
+        <Style Selector="SelectableTextBlock.code">
+            <Setter Property="SelectionBrush" Value="#664A88C7" />
+        </Style>
+        <Style Selector="DockPanel.wrap :is(TextBlock).code">
             <Setter Property="TextWrapping" Value="Wrap" />
         </Style>
         <!-- Unchanged context rows stay one line (trimmed) while collapsing;
              declared after the wrap style so it wins. -->
-        <Style Selector="DockPanel.wrap Panel.compact TextBlock.code">
+        <Style Selector="DockPanel.wrap Panel.compact :is(TextBlock).code">
             <Setter Property="TextWrapping" Value="NoWrap" />
             <Setter Property="TextTrimming" Value="CharacterEllipsis" />
         </Style>
@@ -239,9 +245,10 @@
                                                            FontSize="12.5"
                                                            Foreground="{Binding MutedTextBrush, ElementName=Root}" />
                                                 <local:CodeClip Grid.Column="1"
+                                                                Classes="single"
                                                                 WrapMarkBrush="{Binding MutedTextBrush, ElementName=Root}"
                                                                 ScrollX="{Binding $parent[ItemsControl].DataContext.HorizontalScroll}">
-                                                    <TextBlock local:DiffInlines.Runs="{Binding SingleRuns}"
+                                                    <SelectableTextBlock local:DiffInlines.Runs="{Binding SingleRuns}"
                                                                Classes="code"
                                                                Padding="2,0,4,0"
                                                                FontFamily="Cascadia Code,Consolas,monospace"
@@ -290,9 +297,10 @@
                                                            FontSize="12.5"
                                                            Foreground="{Binding MutedTextBrush, ElementName=Root}" />
                                                 <local:CodeClip Grid.Column="1"
+                                                                Classes="old"
                                                                 WrapMarkBrush="{Binding MutedTextBrush, ElementName=Root}"
                                                                 ScrollX="{Binding $parent[ItemsControl].DataContext.HorizontalScroll}">
-                                                    <TextBlock local:DiffInlines.Runs="{Binding OldRuns}"
+                                                    <SelectableTextBlock local:DiffInlines.Runs="{Binding OldRuns}"
                                                                Classes="code"
                                                                Padding="2,0,4,0"
                                                                FontFamily="Cascadia Code,Consolas,monospace"
@@ -312,9 +320,10 @@
                                                            FontSize="12.5"
                                                            Foreground="{Binding MutedTextBrush, ElementName=Root}" />
                                                 <local:CodeClip Grid.Column="1"
+                                                                Classes="new"
                                                                 WrapMarkBrush="{Binding MutedTextBrush, ElementName=Root}"
                                                                 ScrollX="{Binding $parent[ItemsControl].DataContext.HorizontalScroll}">
-                                                    <TextBlock local:DiffInlines.Runs="{Binding NewRuns}"
+                                                    <SelectableTextBlock local:DiffInlines.Runs="{Binding NewRuns}"
                                                                Classes="code"
                                                                Padding="2,0,4,0"
                                                                FontFamily="Cascadia Code,Consolas,monospace"

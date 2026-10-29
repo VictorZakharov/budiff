@@ -17,7 +17,7 @@ namespace Budiff.Avalonia;
 // text starts that far in and every wrapped line continues there. A fitting
 // cell caps it so a deep indent in a narrow pane still leaves room for code.
 // Each wrapped (continuation) line gets a wrap mark in the line-number gutter.
-public sealed class CodeClip : Decorator
+public sealed class CodeClip : Decorator, global::Avalonia.Rendering.ICustomHitTest
 {
     // The wrap mark: drawn right-aligned where a line number would be.
     public const string WrapMark = "↪";
@@ -52,6 +52,7 @@ public sealed class CodeClip : Decorator
         TextBlock.TextWrappingProperty.Changed.AddClassHandler<TextBlock>((text, _) => (text.Parent as CodeClip)?.InvalidateMeasure());
         TextBlock.TextTrimmingProperty.Changed.AddClassHandler<TextBlock>((text, _) => (text.Parent as CodeClip)?.InvalidateMeasure());
         DiffInlines.IndentProperty.Changed.AddClassHandler<TextBlock>((text, _) => (text.Parent as CodeClip)?.InvalidateMeasure());
+        DiffInlines.SelectionProperty.Changed.AddClassHandler<TextBlock>((text, _) => (text.Parent as CodeClip)?.InvalidateVisual());
     }
 
     public double ScrollX
@@ -65,6 +66,10 @@ public sealed class CodeClip : Decorator
         get => GetValue(WrapMarkBrushProperty);
         set => SetValue(WrapMarkBrushProperty, value);
     }
+
+    // The whole cell takes the pointer - its indent and the space after a
+    // short line too - so a drag can start (or a click land) anywhere in it.
+    public bool HitTest(Point point) => new Rect(Bounds.Size).Contains(point);
 
     // The hanging indent in use, in pixels (after any cap).
     public double IndentWidth => _indent;
@@ -114,6 +119,7 @@ public sealed class CodeClip : Decorator
     public override void Render(DrawingContext context)
     {
         base.Render(context);
+        RenderIndentSelection(context);
         if (Child is not TextBlock text || text.TextWrapping == TextWrapping.NoWrap || WrapMarkBrush is not { } brush)
         {
             return;
@@ -137,6 +143,29 @@ public sealed class CodeClip : Decorator
 
             y += lines[i].Height;
         }
+    }
+
+    // The text draws its own selection; a selection that takes in the
+    // indent (which is not text here) is drawn over it as well.
+    private void RenderIndentSelection(DrawingContext context)
+    {
+        if (Child is not SelectableTextBlock { SelectionBrush: { } brush } text || _indent <= 0)
+        {
+            return;
+        }
+
+        var (from, to) = DiffInlines.GetSelection(text);
+        var length = DiffInlines.GetIndent(text).Length;
+        if (to <= from || from >= length || length == 0)
+        {
+            return;
+        }
+
+        var left = _indent * Math.Max(0, from) / length;
+        var right = to >= length ? _indent + text.Padding.Left : _indent * to / length;
+        var height = text.TextLayout.TextLines.Count > 0 ? text.TextLayout.TextLines[0].Height : Bounds.Height;
+        var shift = Wraps ? 0 : ScrollX;
+        context.FillRectangle(brush, new Rect(left - shift, text.Padding.Top, right - left, height));
     }
 
     // How many visual lines the code wraps to (1 when it does not).
