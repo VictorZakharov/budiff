@@ -188,7 +188,7 @@ public sealed class DiffViewSnapshotTests
         var shifts = global::Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(window)
             .OfType<CodeClip>()
             .Where(c => c.IsEffectivelyVisible && c.Child is { } child && child.Bounds.Width > 0)
-            .Select(c => c.Child!.Bounds.X)
+            .Select(c => Math.Round(c.Child!.Bounds.X - c.IndentWidth))
             .Distinct()
             .ToList();
         Assert.Equal(new[] { -model.HorizontalScroll }, shifts);

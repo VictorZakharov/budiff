@@ -239,6 +239,7 @@
                                                            FontSize="12.5"
                                                            Foreground="{Binding MutedTextBrush, ElementName=Root}" />
                                                 <local:CodeClip Grid.Column="1"
+                                                                WrapMarkBrush="{Binding MutedTextBrush, ElementName=Root}"
                                                                 ScrollX="{Binding $parent[ItemsControl].DataContext.HorizontalScroll}">
                                                     <TextBlock local:DiffInlines.Runs="{Binding SingleRuns}"
                                                                Classes="code"
@@ -289,6 +290,7 @@
                                                            FontSize="12.5"
                                                            Foreground="{Binding MutedTextBrush, ElementName=Root}" />
                                                 <local:CodeClip Grid.Column="1"
+                                                                WrapMarkBrush="{Binding MutedTextBrush, ElementName=Root}"
                                                                 ScrollX="{Binding $parent[ItemsControl].DataContext.HorizontalScroll}">
                                                     <TextBlock local:DiffInlines.Runs="{Binding OldRuns}"
                                                                Classes="code"
@@ -310,6 +312,7 @@
                                                            FontSize="12.5"
                                                            Foreground="{Binding MutedTextBrush, ElementName=Root}" />
                                                 <local:CodeClip Grid.Column="1"
+                                                                WrapMarkBrush="{Binding MutedTextBrush, ElementName=Root}"
                                                                 ScrollX="{Binding $parent[ItemsControl].DataContext.HorizontalScroll}">
                                                     <TextBlock local:DiffInlines.Runs="{Binding NewRuns}"
                                                                Classes="code"
