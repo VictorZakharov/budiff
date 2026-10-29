@@ -116,6 +116,11 @@ public partial class DiffView : UserControl
                 model.GoBackCommand.Execute(null);
                 e.Handled = true;
             }
+            else if (ViewModeSwitch.IsToggleGesture(e) && _model is { CanView: true } viewable)
+            {
+                viewable.ToggleViewModeCommand.Execute(null);
+                e.Handled = true;
+            }
         }, RoutingStrategies.Tunnel);
 
         // LayoutUpdated (not just SizeChanged): a fixed-width docked pane gets
@@ -277,20 +282,73 @@ public partial class DiffView : UserControl
         if (_model is not null)
         {
             _model.PropertyChanged -= OnModelPropertyChanged;
+            _model.PropertyChanging -= OnModelPropertyChanging;
         }
 
         _model = model;
         if (_model is not null)
         {
             _model.PropertyChanged += OnModelPropertyChanged;
+            _model.PropertyChanging += OnModelPropertyChanging;
             _model.MeasureBlameLabel = MeasureBlameLabel;
         }
 
         RefreshPreview();
     }
 
+    // The row at the top of the line diff when View / Diff flips: the rebuilt
+    // rows scroll back to it (or the next line still shown).
+    private DiffRowVm? _flipAnchor;
+
+    private void OnModelPropertyChanging(object? sender, PropertyChangingEventArgs e)
+    {
+        if (e.PropertyName == nameof(DiffViewModel.IsViewMode) && IsEffectivelyVisible && _model is { IsPreviewActive: false })
+        {
+            _flipAnchor = TopRow();
+        }
+    }
+
+    // The first row whose container reaches into the viewport.
+    private DiffRowVm? TopRow()
+    {
+        if (RowsHost.ItemsPanelRoot is not { } panel)
+        {
+            return null;
+        }
+
+        DiffRowVm? top = null;
+        var best = double.MaxValue;
+        foreach (var child in panel.Children)
+        {
+            if (child is Control { IsVisible: true, DataContext: DiffRowVm row } container
+                && container.TranslatePoint(default, RowsScroller) is { } at
+                && at.Y + container.Bounds.Height > 0.5 && at.Y < best)
+            {
+                best = at.Y;
+                top = row;
+            }
+        }
+
+        return top;
+    }
+
     private void OnModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(DiffViewModel.IsViewMode) && _flipAnchor is { } anchor && _model is { } flipped)
+        {
+            _flipAnchor = null;
+            var row = flipped.RowIndexNear(anchor);
+            if (row > 0)
+            {
+                ScrollRestore.Start(RowsScroller, row * RowHeight, () => RowTop(row));
+            }
+            else
+            {
+                ScrollRestore.Cancel(RowsScroller);
+                RowsScroller.Offset = new Vector(RowsScroller.Offset.X, 0);
+            }
+        }
+
         // Wrap toggled: re-measure the rows from their panel down, in one pass.
         // Otherwise the panel measures first and skips the rows (they still
         // read as valid - only the text deep inside changed), the text then

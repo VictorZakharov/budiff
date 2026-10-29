@@ -97,6 +97,39 @@
         <Style Selector="Button.segment.right">
             <Setter Property="CornerRadius" Value="0,3,3,0" />
         </Style>
+        <!-- The summary line's commit count: a link that drops down the commits. -->
+        <Style Selector="Button.link">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="#61AFEF" />
+        </Style>
+        <Style Selector="Button.link:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="#8CC6F7" />
+        </Style>
+        <Style Selector="Button.link:pressed /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="FlyoutPresenter.commits">
+            <Setter Property="MaxWidth" Value="520" />
+            <Setter Property="Padding" Value="4" />
+            <Setter Property="Background" Value="#2B2D30" />
+        </Style>
+        <Style Selector="Button.commitChoice">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="3" />
+            <Setter Property="Padding" Value="10,5" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        </Style>
+        <Style Selector="Button.commitChoice.current">
+            <Setter Property="Background" Value="#2D5A9E" />
+        </Style>
         <Style Selector="TextBlock.num">
             <Setter Property="HorizontalAlignment" Value="Right" />
             <Setter Property="VerticalAlignment" Value="Center" />
@@ -380,9 +413,70 @@
                         <!-- The summary wraps in a narrow pane instead of running off its
                              edge; the Tree/City switch (and the city's colouring) sit at its end. -->
                         <Grid ColumnDefinitions="*,Auto">
-                            <TextBlock x:Name="SummaryLine" Text="{Binding Analysis.SummaryText}" FontSize="12" TextWrapping="Wrap"
+                            <!-- "N commits" is a link: it drops down the period's commits
+                                 (MainWindow.OnCommitChoiceClick picks one). -->
+                            <TextBlock x:Name="SummaryLine" FontSize="12" TextWrapping="Wrap"
                                        VerticalAlignment="Center"
-                                       Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                                       Foreground="{DynamicResource BudiffMutedTextBrush}">
+                                <Run Text="{Binding Analysis.SummaryLead}" />
+                                <InlineUIContainer BaselineAlignment="TextBottom">
+                                    <Button x:Name="CommitsLink"
+                                            Classes="link"
+                                            DataContext="{Binding Analysis}"
+                                            IsVisible="{Binding HasCommitsLink}"
+                                            ToolTip.Tip="The commits in this period - pick one to see only what it changed">
+                                        <TextBlock Text="{Binding SummaryCommits}" TextDecorations="Underline" />
+                                        <Button.Flyout>
+                                            <Flyout Placement="BottomEdgeAlignedLeft" FlyoutPresenterClasses="commits">
+                                                <DockPanel Width="470">
+                                                    <TextBlock DockPanel.Dock="Top"
+                                                               Text="{Binding CommitChoicesTitle}"
+                                                               FontSize="11" FontWeight="SemiBold"
+                                                               Margin="10,6,10,6"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                                                    <ScrollViewer MaxHeight="420" HorizontalScrollBarVisibility="Disabled">
+                                                        <ItemsControl x:Name="CommitChoicesList" ItemsSource="{Binding CommitChoices}">
+                                                            <ItemsControl.ItemsPanel>
+                                                                <ItemsPanelTemplate>
+                                                                    <VirtualizingStackPanel />
+                                                                </ItemsPanelTemplate>
+                                                            </ItemsControl.ItemsPanel>
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <Button Classes="commitChoice"
+                                                                            Classes.current="{Binding IsCurrent}"
+                                                                            Click="OnCommitChoiceClick"
+                                                                            ToolTip.Tip="{Binding WhenText}">
+                                                                        <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="12" RowSpacing="1">
+                                                                            <TextBlock Text="{Binding Subject}" FontSize="12.5" TextTrimming="CharacterEllipsis"
+                                                                                       Foreground="{DynamicResource BudiffTextBrush}" />
+                                                                            <TextBlock Grid.Column="1" Text="{Binding AgeText}" FontSize="11.5" HorizontalAlignment="Right"
+                                                                                       FontFamily="Cascadia Code,Consolas,monospace"
+                                                                                       Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                                                                            <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsCommit}">
+                                                                                <TextBlock Text="{Binding ShortSha}" FontSize="11" FontFamily="Cascadia Code,Consolas,monospace" Foreground="#61AFEF" />
+                                                                                <TextBlock Text="{Binding Author}" FontSize="11" TextTrimming="CharacterEllipsis"
+                                                                                           Foreground="{DynamicResource BudiffMutedTextBrush}" />
+                                                                            </StackPanel>
+                                                                            <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right"
+                                                                                        IsVisible="{Binding IsCommit}">
+                                                                                <TextBlock Text="{Binding AddedText}" FontSize="11" FontFamily="Cascadia Code,Consolas,monospace" Foreground="#6BB36B" />
+                                                                                <TextBlock Text="{Binding RemovedText}" FontSize="11" FontFamily="Cascadia Code,Consolas,monospace" Foreground="#D16969" />
+                                                                            </StackPanel>
+                                                                        </Grid>
+                                                                    </Button>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </ScrollViewer>
+                                                </DockPanel>
+                                            </Flyout>
+                                        </Button.Flyout>
+                                    </Button>
+                                </InlineUIContainer>
+                                <Run Text="{Binding Analysis.SummaryTail}" />
+                            </TextBlock>
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" Margin="10,0,0,0" VerticalAlignment="Center">
                                 <CheckBox x:Name="ShowFpsBox"
                                           IsVisible="{Binding Analysis.IsCityView}"
@@ -760,7 +854,7 @@
                                               IsVisible="{Binding Diff.ShowBlameOption}"
                                               IsChecked="{Binding Diff.ShowBlame, Mode=TwoWay}" />
                                     <MenuItem Header="Collapse unchanged" ToggleType="CheckBox"
-                                              IsVisible="{Binding Diff.ShowDiffOptions}"
+                                              IsVisible="{Binding Diff.ShowCollapseOption}"
                                               IsChecked="{Binding Diff.CollapseUnchanged, Mode=TwoWay}" />
                                     <MenuItem Header="Wrap lines" ToggleType="CheckBox"
                                               IsVisible="{Binding ShowWrapToggle}"
@@ -814,7 +908,10 @@
                                              Foreground="{DynamicResource BudiffTextBrush}" />
                             </Button>
                             <TextBlock Text="Diff" FontWeight="SemiBold" FontSize="12"
+                                       IsVisible="{Binding !Diff.CanView}"
                                        Foreground="{DynamicResource BudiffMutedTextBrush}" VerticalAlignment="Center" />
+                            <!-- View (the file as it is now) / Diff; Ctrl+D flips. -->
+                            <budiff:ViewModeSwitch x:Name="DiffModeSwitch" DataContext="{Binding Diff}" IsVisible="{Binding CanView}" />
                         </StackPanel>
                         <TextBlock Grid.Column="2" Text="{Binding Diff.Title}" FontWeight="SemiBold" FontSize="12"
                                    HorizontalAlignment="Left" TextTrimming="CharacterEllipsis"
@@ -851,7 +948,7 @@
                                   Foreground="{DynamicResource BudiffTextBrush}"
                                   ToolTip.Tip="Show who last touched each line. Auto-hides when the pane drops under half the window (the checkmark tracks it); re-check to force it on." />
                         <CheckBox Grid.Column="7"
-                                  IsVisible="{Binding Diff.ShowDiffOptions}"
+                                  IsVisible="{Binding Diff.ShowCollapseOption}"
                                   IsChecked="{Binding Diff.CollapseUnchanged, Mode=TwoWay}"
                                   Content="Collapse unchanged"
                                   FontSize="12"

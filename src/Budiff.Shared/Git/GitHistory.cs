@@ -60,7 +60,7 @@ public static class GitHistory
             "--no-renames",
             "--numstat",
             "--no-color",
-            "--format=%x1f%H%x1f%aN%x1f%ct",
+            "--format=%x1f%H%x1f%aN%x1f%ct%x1f%s",
         };
         if (sinceDays is { } days and > 0)
         {
@@ -97,7 +97,7 @@ public static class GitHistory
                 "--no-renames",
                 "--numstat",
                 "--no-color",
-                "--format=%x1f%H%x1f%aN%x1f%ct",
+                "--format=%x1f%H%x1f%aN%x1f%ct%x1f%s",
                 // A root commit's base is the empty tree, which log cannot range from.
                 baseRev == EmptyTreeSha ? headRev : baseRev + ".." + headRev,
                 "--",
@@ -133,6 +133,7 @@ public static class GitHistory
         var commitIndex = -1;
         var author = string.Empty;
         long when = 0;
+        HistoryCommit? commit = null;
 
         foreach (var line in LineCounter.SplitLines(log))
         {
@@ -143,10 +144,19 @@ public static class GitHistory
 
             if (line[0] == Sep)
             {
-                var parts = line.Split(Sep);
+                // <sep>sha<sep>author<sep>unix time<sep>subject
+                var parts = line.Split(Sep, 5);
                 commitIndex++;
                 author = parts.Length > 2 ? parts[2] : string.Empty;
                 when = parts.Length > 3 && long.TryParse(parts[3], out var seconds) ? seconds : 0;
+                commit = new HistoryCommit
+                {
+                    Sha = parts.Length > 1 ? parts[1] : string.Empty,
+                    Author = author,
+                    When = when,
+                    Subject = parts.Length > 4 ? parts[4] : string.Empty,
+                };
+                result.Commits.Add(commit);
                 result.CommitCount = commitIndex + 1;
                 if (author.Length > 0)
                 {
@@ -166,6 +176,8 @@ public static class GitHistory
                 continue;
             }
 
+            commit!.Added += added;
+            commit.Removed += removed;
             var entry = result.ForPath(path);
             entry.Added += added;
             entry.Removed += removed;

@@ -26,9 +26,31 @@ public sealed class AnalysisPathHistory
     public long LastChanged { get; set; }
 }
 
+// One commit of a history, with the lines it added and removed in the scanned
+// folder (summed per commit, not the net diff).
+public sealed class HistoryCommit
+{
+    public string Sha { get; init; } = string.Empty;
+
+    public string Author { get; init; } = string.Empty;
+
+    // Unix seconds.
+    public long When { get; init; }
+
+    public string Subject { get; init; } = string.Empty;
+
+    public long Added { get; set; }
+
+    public long Removed { get; set; }
+}
+
 public sealed class HistoryResult
 {
     public Dictionary<string, AnalysisPathHistory> ByPath { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    // In log order (newest first); a commit's index here is the id the
+    // per-path Commits sets (and AnalysisNode.CommitIds) hold.
+    public List<HistoryCommit> Commits { get; } = new();
 
     public int CommitCount { get; set; }
 

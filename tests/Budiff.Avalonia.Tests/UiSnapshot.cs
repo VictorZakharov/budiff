@@ -20,6 +20,12 @@ internal static class UiSnapshot
             window.Show();
         }
 
+        return CaptureTopLevel(window, name);
+    }
+
+    // Any top level: a window, or a popup (a flyout renders in its own).
+    public static Snapshot CaptureTopLevel(TopLevel window, string name)
+    {
         Pump();
         using WriteableBitmap frame = window.CaptureRenderedFrame()
             ?? throw new InvalidOperationException("CaptureRenderedFrame returned null.");

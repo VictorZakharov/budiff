@@ -45,5 +45,16 @@ public sealed class DiffWindow : Window
         dockButton.Click += (_, _) => dockBack();
 
         Content = new DiffView { DataContext = diff, HeaderExtra = dockButton };
+
+        // Ctrl+D (View / Diff) with the focus anywhere in this window; inside
+        // the diff view, the view takes it first.
+        KeyDown += (_, e) =>
+        {
+            if (ViewModeSwitch.IsToggleGesture(e) && diff.CanView)
+            {
+                diff.ToggleViewModeCommand.Execute(null);
+                e.Handled = true;
+            }
+        };
     }
 }

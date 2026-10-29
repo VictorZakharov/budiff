@@ -32,6 +32,29 @@ public sealed class GitHistoryTests
         Assert.Equal(0, result.ByPath["assets/logo.png"].Added);
     }
 
+    // Each commit, newest first, with its subject and the lines it changed -
+    // what the summary line's commit picker lists.
+    [Fact]
+    public void Parse_lists_each_commit_with_its_subject_and_lines()
+    {
+        var log = string.Join("\n", new[]
+        {
+            $"{Sep}c0{Sep}Alice{Sep}1700000000{Sep}Fix the parser{Sep}(a separator in the subject)",
+            "10\t0\tsrc/App/Main.cs",
+            "5\t1\tsrc/App/Util.cs",
+            $"{Sep}c1{Sep}Bob{Sep}1690000000{Sep}",
+            "-\t-\tassets/logo.png",
+        });
+
+        var result = GitHistory.Parse(log);
+
+        Assert.Equal(new[] { "c0", "c1" }, result.Commits.Select(c => c.Sha));
+        Assert.Equal($"Fix the parser{Sep}(a separator in the subject)", result.Commits[0].Subject);
+        Assert.Equal(("Alice", 1700000000L, 15L, 1L), (result.Commits[0].Author, result.Commits[0].When, result.Commits[0].Added, result.Commits[0].Removed));
+        Assert.Equal((string.Empty, 0L, 0L), (result.Commits[1].Subject, result.Commits[1].Added, result.Commits[1].Removed));
+        Assert.Contains(1, result.ByPath["assets/logo.png"].Commits);
+    }
+
     [Theory]
     [InlineData("old.cs => new.cs", "new.cs")]
     [InlineData("src/{old => new}/file.cs", "src/new/file.cs")]
