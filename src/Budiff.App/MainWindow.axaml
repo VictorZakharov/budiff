@@ -494,7 +494,7 @@
                                           Foreground="{DynamicResource BudiffMutedTextBrush}"
                                           ToolTip.Tip="A performance panel in the city: FPS over the last 15 s; click it to copy a debug report" />
                                 <Border x:Name="CityModeSwitch"
-                                        IsVisible="{Binding Analysis.IsHistoryCityView}"
+                                        IsVisible="{Binding Analysis.IsCityView}"
                                         BorderBrush="{DynamicResource BudiffBorderBrush}"
                                         BorderThickness="1"
                                         CornerRadius="4"
@@ -506,11 +506,17 @@
                                                 Content="Hotspots"
                                                 ToolTip.Tip="Height = churn, colour = churn &#215; size: big files that keep changing glow red"
                                                 Command="{Binding Analysis.ShowHotspotsCommand}" />
-                                        <Button Classes="segment right small"
+                                        <Button Classes="segment small"
                                                 Classes.active="{Binding Analysis.IsCityAge}"
                                                 Content="Age"
                                                 ToolTip.Tip="Height = commits, colour = how recently it changed"
                                                 Command="{Binding Analysis.ShowAgeCommand}" />
+                                        <Button x:Name="DebtButton"
+                                                Classes="segment right small"
+                                                Classes.active="{Binding Analysis.IsCityDebt}"
+                                                Content="Debt"
+                                                ToolTip.Tip="Technical debt: height = code lines; big, deeply nested, wide and busy files stand dark and dilapidated, clean ones bright and whole"
+                                                Command="{Binding Analysis.ShowDebtCommand}" />
                                     </StackPanel>
                                 </Border>
                                 <Border x:Name="ViewSwitch"
@@ -520,22 +526,17 @@
                                         ClipToBounds="True"
                                         VerticalAlignment="Center">
                                     <StackPanel Orientation="Horizontal">
-                                        <Button Classes="segment left small"
+                                        <Button x:Name="TreeButton"
+                                                Classes="segment left small"
                                                 Classes.active="{Binding Analysis.IsTreeView}"
                                                 Content="Tree"
                                                 Command="{Binding Analysis.ShowTreeCommand}" />
                                         <Button x:Name="CityButton"
-                                                Classes="segment small"
-                                                Classes.active="{Binding Analysis.IsHistoryCityView}"
+                                                Classes="segment right small"
+                                                Classes.active="{Binding Analysis.IsCityView}"
                                                 Content="City"
                                                 ToolTip.Tip="The code as a 3D city: folders are districts, files are buildings"
                                                 Command="{Binding Analysis.ShowCityCommand}" />
-                                        <Button x:Name="DebtButton"
-                                                Classes="segment right small"
-                                                Classes.active="{Binding Analysis.IsDebtView}"
-                                                Content="Debt"
-                                                ToolTip.Tip="Technical debt as a city: height = code lines; big, deeply nested, wide and busy files stand dark and dilapidated, clean ones bright and whole"
-                                                Command="{Binding Analysis.ShowDebtCommand}" />
                                     </StackPanel>
                                 </Border>
                             </StackPanel>
