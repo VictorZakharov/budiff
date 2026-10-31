@@ -30,18 +30,21 @@ public sealed class DebtCityTests
         var vm = window.ViewModel;
         WaitUntil(() => !vm.Analysis.IsScanning && vm.Analysis.Roots.Count > 0 && vm.Analysis.GitAvailable, "bird's-eye scan");
 
+        // Debt is a city mode beside Hotspots and Age, shown with the City.
         var debt = window.FindControl<Button>("DebtButton")!;
+        Assert.False(debt.IsEffectivelyVisible);
+        window.FindControl<Button>("CityButton")!.Command!.Execute(null);
+        UiSnapshot.Pump();
         Assert.True(debt.IsEffectivelyVisible);
         debt.Command!.Execute(null);
         WaitUntil(() => vm.Analysis.City.Buildings.Count > 0 && vm.Analysis.City.Mode == CityMode.Debt, "debt city");
         UiSnapshot.Pump();
         UiSnapshot.Pump();
 
-        Assert.True(vm.Analysis.IsDebtView);
-        Assert.False(vm.Analysis.IsHistoryCityView);
+        Assert.True(vm.Analysis.IsCityDebt);
+        Assert.False(vm.Analysis.IsCityHotspots);
         Assert.Contains("active", debt.Classes);
-        Assert.DoesNotContain("active", window.FindControl<Button>("CityButton")!.Classes);
-        Assert.False(window.FindControl<Border>("CityModeSwitch")!.IsVisible, "Hotspots / Age belong to the City");
+        Assert.Contains("active", window.FindControl<Button>("CityButton")!.Classes);
 
         var city = window.FindControl<CodeCityView>("CodeCity")!;
         var monolith = vm.Analysis.City.Buildings.Single(b => b.Name == "Monolith.cs");
@@ -80,10 +83,12 @@ public sealed class DebtCityTests
         Assert.Same(monolith, city.Hovered);
         UiSnapshot.Capture(window, "city-debt-card");
 
-        // City goes back to the history colouring it had.
+        // Tree and back keeps the Debt mode; Hotspots drops the wear.
+        window.FindControl<Button>("TreeButton")!.Command!.Execute(null);
         window.FindControl<Button>("CityButton")!.Command!.Execute(null);
-        WaitUntil(() => vm.Analysis.City.Mode == CityMode.Hotspots, "history city");
-        Assert.True(vm.Analysis.IsHistoryCityView);
+        Assert.True(vm.Analysis.IsCityDebt);
+        vm.Analysis.ShowHotspotsCommand.Execute(null);
+        WaitUntil(() => vm.Analysis.City.Mode == CityMode.Hotspots, "hotspots city");
         Assert.Null(city.WearOf(vm.Analysis.City.Buildings.First()));
         window.Close();
     }

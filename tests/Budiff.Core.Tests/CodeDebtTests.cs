@@ -79,7 +79,7 @@ public sealed class CodeDebtTests
     }
 
     [Fact]
-    public void Debt_city_leaves_out_data_prose_and_binary_files()
+    public void Every_city_leaves_out_data_prose_and_binary_files()
     {
         var root = new AnalysisNode(string.Empty, string.Empty, AnalysisNodeKind.Root);
         var src = new AnalysisNode("src", "src", AnalysisNodeKind.Folder);
@@ -101,12 +101,14 @@ public sealed class CodeDebtTests
             Assert.Equal(-1, CodeDebt.Score(file, hasHistory: true));
         }
 
-        var city = CityLayout.Build(root, CityMode.Debt, 1_800_000_000, hasHistory: true);
-        Assert.Equal(new[] { code }, city.Buildings.Select(b => b.Node));
-        Assert.DoesNotContain(city.Districts, d => d.Node == data);
-
-        // The other cities still show every file.
-        Assert.Equal(6, CityLayout.Build(root, CityMode.Age, 1_800_000_000, hasHistory: true).Buildings.Count);
+        // Every city stands only on code: a 100k-line JSON file no longer
+        // towers over the Hotspots city.
+        foreach (var mode in new[] { CityMode.Debt, CityMode.Hotspots, CityMode.Age })
+        {
+            var city = CityLayout.Build(root, mode, 1_800_000_000, hasHistory: true);
+            Assert.Equal(new[] { code }, city.Buildings.Select(b => b.Node));
+            Assert.DoesNotContain(city.Districts, d => d.Node == data);
+        }
     }
 
     private static AnalysisNode File(string path, int code, CodeShape shape, int commits)

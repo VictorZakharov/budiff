@@ -90,12 +90,10 @@ public static class CityLayout
     {
         var districts = new List<CityBlock>();
         var files = new List<(AnalysisNode Node, int Level, TreemapRect Footprint, double Base)>();
-        // The Debt city stands only on code: data and prose files get no lot,
-        // and a folder of nothing else no district.
+        // The city stands only on code: data and prose files get no lot, and a
+        // folder of nothing else no district.
         var weights = new Dictionary<AnalysisNode, double>();
-        Func<AnalysisNode, double> weightOf = mode == CityMode.Debt
-            ? n => DebtWeight(n, weights)
-            : n => Math.Max(1, n.Lines.Total);
+        Func<AnalysisNode, double> weightOf = n => CodeWeight(n, weights);
         Lay(root.Children, new TreemapRect(0, 0, size, size), level: 0, ground: 0, size, weightOf, districts, files);
 
         var leaves = files.Select(f => f.Node).ToList();
@@ -155,7 +153,7 @@ public static class CityLayout
             : n => n.CommitCount;
 
     // Lines of code files under a node (each at least 1); 0 = nothing to show.
-    private static double DebtWeight(AnalysisNode node, Dictionary<AnalysisNode, double> memo)
+    private static double CodeWeight(AnalysisNode node, Dictionary<AnalysisNode, double> memo)
     {
         if (memo.TryGetValue(node, out var known))
         {
@@ -164,7 +162,7 @@ public static class CityLayout
 
         var weight = node.IsFile
             ? CodeDebt.IsCode(node) ? Math.Max(1, node.Lines.Total) : 0
-            : node.Children.Sum(c => DebtWeight(c, memo));
+            : node.Children.Sum(c => CodeWeight(c, memo));
         memo[node] = weight;
         return weight;
     }
@@ -179,7 +177,6 @@ public static class CityLayout
         List<CityBlock> districts,
         List<(AnalysisNode, int, TreemapRect, double)> files)
     {
-        // Binary and empty files still get a small lot (outside the Debt city).
         var nodes = all.Where(n => weightOf(n) > 0).ToList();
         var weights = nodes.Select(weightOf).ToArray();
         var tiles = Treemap.Squarify(weights, bounds);

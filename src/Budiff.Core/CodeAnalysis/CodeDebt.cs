@@ -103,7 +103,7 @@ public readonly record struct CodeShape(int MaxDepth, int DeepLines, int LongLin
 //                            share its weight.
 // Binary files, data, config and prose (JSON, YAML, CSV, Markdown, lock
 // files, minified bundles...) have no score (-1): they hold no code to owe
-// debt on, and the Debt city leaves them out.
+// debt on, and no city gives them a lot.
 public static class CodeDebt
 {
     private static readonly HashSet<string> NotCode = new(StringComparer.OrdinalIgnoreCase)

@@ -32,7 +32,9 @@ public sealed class CodeCityTests
         Assert.False(tree.IsVisible);
         Assert.Equal(CityMode.Hotspots, vm.Analysis.City.Mode);
         Assert.True(vm.Analysis.City.HasHistory);
-        Assert.Equal(vm.Analysis.Roots.SelectMany(r => r.SelfAndDescendants()).Count(r => r.IsFile), vm.Analysis.City.Buildings.Count);
+        // Every code file is a building; the Markdown docs get no lot.
+        Assert.Equal(vm.Analysis.Roots.SelectMany(r => r.SelfAndDescendants()).Count(r => r.IsFile && !r.Name.EndsWith(".md", StringComparison.Ordinal)), vm.Analysis.City.Buildings.Count);
+        Assert.DoesNotContain(vm.Analysis.City.Buildings, b => b.Name.EndsWith(".md", StringComparison.Ordinal));
 
         // The big busy engine file is the top hotspot.
         var hottest = vm.Analysis.City.Buildings.Single(b => b.HotspotRank == 1);
@@ -425,7 +427,7 @@ public sealed class CodeCityTests
         Assert.False(vm.IsDiffOpen);
         Assert.NotNull(city.LastReport);
         Assert.Contains("FPS", city.LastReport, StringComparison.Ordinal);
-        Assert.Contains("23 buildings", city.LastReport, StringComparison.Ordinal);
+        Assert.Contains("20 buildings", city.LastReport, StringComparison.Ordinal);
         Assert.Contains("faces", city.LastReport, StringComparison.Ordinal);
         UiSnapshot.Capture(window, "city-fps-copied");
     }

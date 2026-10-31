@@ -61,7 +61,7 @@ public sealed class CodeCityTests
             Assert.Equal(core.Top, building.Base, 6);
         }
 
-        Assert.Equal(5, model.Buildings.Count);
+        Assert.Equal(4, model.Buildings.Count); // README.md is prose: no lot
     }
 
     [Fact]
@@ -82,7 +82,7 @@ public sealed class CodeCityTests
         Assert.Equal(0, quiet.HotspotRank);
         Assert.Equal(-1, quiet.Heat);
         Assert.Equal(model.Buildings.Min(b => b.Height), quiet.Height, 6);
-        Assert.Equal(4, model.HotspotCount);
+        Assert.Equal(3, model.HotspotCount);
     }
 
     [Fact]

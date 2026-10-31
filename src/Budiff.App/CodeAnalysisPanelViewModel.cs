@@ -1315,34 +1315,25 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
 
     // The code city: the same tree (filters, period, grouping) as a 3D city
     // instead of rows. Laid out only while it shows.
-    // The Debt view is the city in CityMode.Debt: the same 3D city, its
-    // buildings worn by each file's technical-debt score (CodeDebt).
+    // Its modes: Hotspots, Age, or Debt (buildings worn by each file's
+    // technical-debt score, CodeDebt).
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsTreeView))]
-    [NotifyPropertyChangedFor(nameof(IsHistoryCityView))]
-    [NotifyPropertyChangedFor(nameof(IsDebtView))]
     private bool _isCityView;
 
     public bool IsTreeView => !IsCityView;
 
-    // The City segment: the city coloured by history (Hotspots or Age).
-    public bool IsHistoryCityView => IsCityView && CityMode != CityMode.Debt;
-
-    public bool IsDebtView => IsCityView && CityMode == CityMode.Debt;
-
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsCityHotspots))]
     [NotifyPropertyChangedFor(nameof(IsCityAge))]
-    [NotifyPropertyChangedFor(nameof(IsHistoryCityView))]
-    [NotifyPropertyChangedFor(nameof(IsDebtView))]
+    [NotifyPropertyChangedFor(nameof(IsCityDebt))]
     private CityMode _cityMode = CityMode.Hotspots;
-
-    // What the City segment returns to from Debt.
-    private CityMode _historyCityMode = CityMode.Hotspots;
 
     public bool IsCityHotspots => CityMode == CityMode.Hotspots;
 
     public bool IsCityAge => CityMode == CityMode.Age;
+
+    public bool IsCityDebt => CityMode == CityMode.Debt;
 
     [ObservableProperty]
     private CityModel _city = CityModel.Empty(CityMode.Hotspots);
@@ -1360,24 +1351,16 @@ public sealed partial class CodeAnalysisPanelViewModel : ObservableObject
     private void ShowTree() => IsCityView = false;
 
     [RelayCommand]
-    private void ShowCity()
-    {
-        CityMode = _historyCityMode;
-        IsCityView = true;
-    }
+    private void ShowCity() => IsCityView = true;
 
     [RelayCommand]
-    private void ShowDebt()
-    {
-        CityMode = CityMode.Debt;
-        IsCityView = true;
-    }
+    private void ShowHotspots() => CityMode = CityMode.Hotspots;
 
     [RelayCommand]
-    private void ShowHotspots() => CityMode = _historyCityMode = CityMode.Hotspots;
+    private void ShowAge() => CityMode = CityMode.Age;
 
     [RelayCommand]
-    private void ShowAge() => CityMode = _historyCityMode = CityMode.Age;
+    private void ShowDebt() => CityMode = CityMode.Debt;
 
     [RelayCommand]
     private Task OpenCityFile(CityBlock? block)
