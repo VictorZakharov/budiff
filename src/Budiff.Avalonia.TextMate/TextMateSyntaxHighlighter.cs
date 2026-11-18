@@ -140,7 +140,7 @@ internal sealed partial class TextMateSyntaxHighlightSession(IGrammar grammar) :
 internal static class TextMatePalette
 {
     private static readonly RegistryOptions Options = new(ThemeName.DarkPlus);
-    private static readonly TmRegistry Registry = new(Options);
+    private static readonly TmRegistry Registry = new(new AngularRegistryOptions(Options));
     private static readonly Theme SyntaxTheme = Registry.GetTheme();
     private static readonly Dictionary<string, IGrammar?> Grammars = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<int, IBrush> BrushCache = new();

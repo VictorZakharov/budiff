@@ -1,0 +1,100 @@
+{
+  "comment": "budiff: Angular attribute bindings inside an inline template's tags - [prop], (event), [(two-way)], *structural and #ref - with a bound value read as an expression. Injected into source.ts, active only under text.html.ng (see angular-inline).",
+  "name": "Angular template bindings (budiff)",
+  "scopeName": "bindings.ng.budiff",
+  "injectionSelector": "L:text.html.ng meta.tag -comment -meta.attribute",
+  "patterns": [
+    { "include": "#two-way" },
+    { "include": "#property" },
+    { "include": "#event" },
+    { "include": "#structural" },
+    { "include": "#reference" }
+  ],
+  "repository": {
+    "two-way": {
+      "begin": "(\\[\\()([^\\s=\"'<>/()\\[\\]]+)(\\)\\])",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.ng-binding-name.begin.html" },
+        "2": { "name": "entity.other.attribute-name.html entity.other.ng-binding-name.two-way.html" },
+        "3": { "name": "punctuation.definition.ng-binding-name.end.html" }
+      },
+      "end": "(?=\\s*+[^=\\s])",
+      "name": "meta.attribute.ng-binding.two-way.html",
+      "patterns": [ { "include": "#value" } ]
+    },
+    "property": {
+      "begin": "(\\[)([^\\s=\"'<>/()\\[\\]]+)(\\])",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.ng-binding-name.begin.html" },
+        "2": { "name": "entity.other.attribute-name.html entity.other.ng-binding-name.property.html" },
+        "3": { "name": "punctuation.definition.ng-binding-name.end.html" }
+      },
+      "end": "(?=\\s*+[^=\\s])",
+      "name": "meta.attribute.ng-binding.property.html",
+      "patterns": [ { "include": "#value" } ]
+    },
+    "event": {
+      "begin": "(\\()([^\\s=\"'<>/()\\[\\]]+)(\\))",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.ng-binding-name.begin.html" },
+        "2": { "name": "entity.other.attribute-name.html entity.other.ng-binding-name.event.html" },
+        "3": { "name": "punctuation.definition.ng-binding-name.end.html" }
+      },
+      "end": "(?=\\s*+[^=\\s])",
+      "name": "meta.attribute.ng-binding.event.html",
+      "patterns": [ { "include": "#value" } ]
+    },
+    "structural": {
+      "begin": "(\\*)([_$[:alpha:]][\\w$-]*)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.ng-binding-name.begin.html" },
+        "2": { "name": "entity.other.attribute-name.html entity.other.ng-binding-name.template.html" }
+      },
+      "end": "(?=\\s*+[^=\\s])",
+      "name": "meta.attribute.ng-binding.template.html",
+      "patterns": [ { "include": "#value" } ]
+    },
+    "reference": {
+      "begin": "(#)([_$[:alpha:]][\\w$-]*)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.ng-binding-name.begin.html" },
+        "2": { "name": "entity.other.attribute-name.html entity.other.ng-binding-name.reference.html" }
+      },
+      "end": "(?=\\s*+[^=\\s])",
+      "name": "meta.attribute.ng-binding.reference.html",
+      "patterns": [ { "include": "text.html.basic#attribute-interior" } ]
+    },
+    "value": {
+      "patterns": [
+        {
+          "begin": "(=)\\s*(\")",
+          "beginCaptures": {
+            "1": { "name": "punctuation.separator.key-value.html" },
+            "2": { "name": "string.quoted.double.html punctuation.definition.string.begin.html" }
+          },
+          "end": "\"",
+          "endCaptures": { "0": { "name": "string.quoted.double.html punctuation.definition.string.end.html" } },
+          "contentName": "expression.ng",
+          "patterns": [
+            { "include": "inline.ng.budiff#pipe" },
+            { "include": "source.ts#expression" }
+          ]
+        },
+        {
+          "begin": "(=)\\s*(')",
+          "beginCaptures": {
+            "1": { "name": "punctuation.separator.key-value.html" },
+            "2": { "name": "string.quoted.single.html punctuation.definition.string.begin.html" }
+          },
+          "end": "'",
+          "endCaptures": { "0": { "name": "string.quoted.single.html punctuation.definition.string.end.html" } },
+          "contentName": "expression.ng",
+          "patterns": [
+            { "include": "inline.ng.budiff#pipe" },
+            { "include": "source.ts#expression" }
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -10,6 +10,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Angular inline templates / styles, injected into the TypeScript grammar. -->
+    <EmbeddedResource Include="Grammars\*.tmLanguage.json" LogicalName="Budiff.Grammars.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Budiff.Avalonia\Budiff.Avalonia.csproj" />
   </ItemGroup>
 </Project>
