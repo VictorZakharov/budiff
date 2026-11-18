@@ -26,8 +26,8 @@ Tagline: *"ls, but for your diffs."*
 ## 3. Stack
 
 - .NET 10; `Nullable` enabled.
-- Avalonia 12.1.4; Avalonia.AvaloniaEdit 12.0.0 + AvaloniaEdit.TextMate 12.0.0; TextMateSharp.Grammars 2.0.4.
-- Markdig 1.5.0 (the markdown preview).
+- Avalonia 12.1.6; Avalonia.AvaloniaEdit 12.0.0 + AvaloniaEdit.TextMate 12.0.0; TextMateSharp.Grammars 2.0.5.
+- Markdig 1.6.0 (the markdown preview).
 - CommunityToolkit.Mvvm 8.4.2.
 - The `git` command (2.11 or later, on PATH) is the git reader: status, diffs, file contents through one long-running `git cat-file --batch`, history, blame. No git library ships.
 - Icons: the Material Design icons the app uses, inlined as path data (`AppIcon` in `Budiff.App`; the markdown preview keeps its own few). No icon package ships.
