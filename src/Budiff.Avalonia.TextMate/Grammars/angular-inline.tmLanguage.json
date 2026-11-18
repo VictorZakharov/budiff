@@ -1,0 +1,146 @@
+{
+  "comment": "budiff: Angular inline templates and styles. Injected into source.ts; only a template: / styles: value inside a decorator (@Component({...})) is read as HTML / CSS. Other backtick strings stay strings.",
+  "name": "Angular inline template (budiff)",
+  "scopeName": "inline.ng.budiff",
+  "injectionSelector": "L:meta.decorator.ts -comment -string -text.html -source.css",
+  "patterns": [
+    { "include": "#template" },
+    { "include": "#styles" }
+  ],
+  "repository": {
+    "template": {
+      "begin": "(?<![_$[:alnum:].])(template)\\s*(:)",
+      "beginCaptures": {
+        "1": { "name": "meta.object-literal.key.ts" },
+        "2": { "name": "meta.object-literal.key.ts punctuation.separator.key-value.ts" }
+      },
+      "end": "(?=,|\\})",
+      "patterns": [
+        { "include": "#template-string" },
+        { "include": "source.ts#expression" }
+      ]
+    },
+    "template-string": {
+      "begin": "([`'\"])",
+      "beginCaptures": {
+        "1": { "name": "string.template.ts punctuation.definition.string.template.begin.ts" }
+      },
+      "end": "\\1",
+      "endCaptures": {
+        "0": { "name": "string.template.ts punctuation.definition.string.template.end.ts" }
+      },
+      "contentName": "text.html.ng",
+      "patterns": [
+        { "include": "source.ts#string-character-escape" },
+        { "include": "source.ts#template-substitution-element" },
+        { "include": "#interpolation" },
+        { "include": "#let" },
+        { "include": "#block-with-params" },
+        { "include": "#block" },
+        { "include": "text.html.derivative" }
+      ]
+    },
+    "interpolation": {
+      "begin": "\\{\\{",
+      "beginCaptures": { "0": { "name": "punctuation.definition.block.ts" } },
+      "end": "\\}\\}",
+      "endCaptures": { "0": { "name": "punctuation.definition.block.ts" } },
+      "contentName": "meta.interpolation.ng expression.ng",
+      "patterns": [
+        { "include": "#pipe" },
+        { "include": "source.ts#expression" }
+      ]
+    },
+    "let": {
+      "begin": "(@)(let)\\s+([_$[:alpha:]][_$[:alnum:]]*)\\s*(=)",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.block.transition.ng" },
+        "2": { "name": "keyword.control.block.kind.ng storage.type.ng" },
+        "3": { "name": "variable.other.constant.ng" },
+        "4": { "name": "keyword.operator.assignment.ng" }
+      },
+      "end": ";",
+      "endCaptures": { "0": { "name": "punctuation.terminator.statement.ng" } },
+      "contentName": "expression.ng",
+      "patterns": [
+        { "include": "#pipe" },
+        { "include": "source.ts#expression" }
+      ]
+    },
+    "block-with-params": {
+      "begin": "(@)(else\\s+if|if|for|switch|case|defer|placeholder|loading|error)\\s*(\\()",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.block.transition.ng" },
+        "2": { "name": "keyword.control.block.kind.ng" },
+        "3": { "name": "meta.brace.round.ts" }
+      },
+      "end": "\\)",
+      "endCaptures": { "0": { "name": "meta.brace.round.ts" } },
+      "contentName": "control.block.parameters.ng expression.ng",
+      "patterns": [
+        { "include": "#block-keywords" },
+        { "match": ";", "name": "punctuation.separator.ng" },
+        { "include": "#pipe" },
+        { "include": "source.ts#expression" }
+      ]
+    },
+    "block": {
+      "match": "(@)(else|default|empty|if|for|switch|case|defer|placeholder|loading|error)\\b",
+      "captures": {
+        "1": { "name": "keyword.control.block.transition.ng" },
+        "2": { "name": "keyword.control.block.kind.ng" }
+      }
+    },
+    "block-keywords": {
+      "match": "(?<![_$[:alnum:].])(as|of|track|let|on|when|prefetch|hydrate|never|minimum|after)(?![_$[:alnum:]])",
+      "name": "keyword.control.block.ng"
+    },
+    "pipe": {
+      "match": "(?<!\\|)(\\|)(?![|=])\\s*([_$[:alpha:]][_$[:alnum:]]*)",
+      "captures": {
+        "1": { "name": "keyword.operator.logical.ts" },
+        "2": { "name": "entity.name.function.pipe.ng" }
+      }
+    },
+    "styles": {
+      "begin": "(?<![_$[:alnum:].])(styles)\\s*(:)",
+      "beginCaptures": {
+        "1": { "name": "meta.object-literal.key.ts" },
+        "2": { "name": "meta.object-literal.key.ts punctuation.separator.key-value.ts" }
+      },
+      "end": "(?=,|\\})",
+      "patterns": [
+        { "include": "#styles-array" },
+        { "include": "#style-string" },
+        { "include": "source.ts#expression" }
+      ]
+    },
+    "styles-array": {
+      "begin": "\\[",
+      "beginCaptures": { "0": { "name": "meta.brace.square.ts" } },
+      "end": "\\]",
+      "endCaptures": { "0": { "name": "meta.brace.square.ts" } },
+      "patterns": [
+        { "include": "#style-string" },
+        { "match": ",", "name": "punctuation.separator.comma.ts" },
+        { "include": "source.ts#expression" }
+      ]
+    },
+    "style-string": {
+      "begin": "([`'\"])",
+      "beginCaptures": {
+        "1": { "name": "string.template.ts punctuation.definition.string.template.begin.ts" }
+      },
+      "end": "\\1",
+      "endCaptures": {
+        "0": { "name": "string.template.ts punctuation.definition.string.template.end.ts" }
+      },
+      "contentName": "source.css.ng",
+      "patterns": [
+        { "include": "source.ts#string-character-escape" },
+        { "include": "source.ts#template-substitution-element" },
+        { "include": "source.css" }
+      ]
+    }
+  }
+}

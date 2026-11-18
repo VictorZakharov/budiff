@@ -75,6 +75,7 @@ Out of v1 (later, see section 9): deeper agent-specific repo summaries beyond th
 
 ### `Budiff.Avalonia.TextMate`
 - `TextMateSyntaxHighlighter.cs` - the `ISyntaxHighlighter` implementation: the DarkPlus theme, the grammar + brush caches, the off-thread tokenization serialized on a single lock ("gate"), and the ~6000-line highlight cap.
+- `AngularRegistryOptions.cs` + `Grammars/*.tmLanguage.json` - budiff's own two grammars, injected into TypeScript: an Angular component's inline `template:` (inside a decorator such as `@Component({...})`) reads as HTML - tags and attributes from the bundled HTML grammar, `[prop]` / `(event)` / `[(two-way)]` / `*structural` / `#ref` bindings with their bound values as TypeScript expressions, `{{ interpolation }}` (with `| pipe` names), the `@if` / `@else` / `@for` / `@empty` / `@switch` / `@case` / `@defer` / `@let` control flow, entities - and its inline `styles:` (a string or an array of them) as CSS. The grammar state threads through the template's lines like any multi-line string. Every other string - a backtick string holding markup, a `template:` key outside a decorator - stays a string.
 
 ### The Code Analysis bird's-eye
 - `Budiff.Core/CodeAnalysis/` - `AnalysisTreeBuilder.cs`, `AnalysisNode.cs`, `CodeScanner.cs`, `LineCounter.cs`, and `CommentSyntax.cs`: the folder/project tree, LOC scanner, extension stats, filters, and per-node aggregates.
